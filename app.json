@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "Memora",
+    "slug": "memora",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "memora",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      [
+        "expo-web-browser",
+        {
+          "experimentalLauncherActivity": false
+        }
+      ],
+      "expo-secure-store"
+    ],
+    "android": {
+      "package": "com.memora.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#F4EDE1"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.memora.app"
+    }
+  }
+}
