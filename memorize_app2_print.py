@@ -133,4 +133,36 @@
 - 릴리스 리디렉션 URI: `memoria://auth/callback`
 - 참고: `.env`가 아직 없기 때문에 현재는 로컬 저장 모드이며,
   Supabase URL / Anon Key를 넣어야 Google 로그인이 실제로 활성화된다.
+
+
+2026-04-20 GitHub 재연결 점검 요약
+
+1. 현재 로컬 폴더 상태를 먼저 확인했다.
+   - 작업 경로는 `D:/github/APP/memorize_app2`였다.
+   - 이 폴더는 비어 있었고 `.git`도 없어서,
+     GitHub 저장소와 다시 연결해야 하는 상태였다.
+
+2. 연결 대상 원격 저장소를 확인했다.
+   - `https://github.com/youwon35/memorize_app2.git`에 대해
+     원격 조회를 실행해 `main`, `develop` 브랜치가 실제로 존재함을 확인했다.
+   - 따라서 현재 폴더는 같은 이름의 GitHub 프로젝트
+     `youwon35/memorize_app2`에 연결하는 것으로 진행했다.
+
+3. 현재 폴더를 Git 저장소로 초기화하고 원격을 연결했다.
+   - `git init -b main`으로 저장소를 만들었다.
+   - `origin`을 `https://github.com/youwon35/memorize_app2.git`로 추가했다.
+   - 이어서 `git fetch origin`으로 원격 데이터를 받아왔다.
+
+4. 개발 기준 브랜치를 `develop`으로 맞췄다.
+   - 처음 체크아웃 시 Git이 `dubious ownership` 오류를 내서
+     `safe.directory D:/github/APP/memorize_app2`를 전역 설정에 추가했다.
+   - 그 다음 `git checkout -b develop --track origin/develop`로
+     로컬 `develop` 브랜치를 만들고 원격 `origin/develop`을 추적하도록 설정했다.
+
+5. 동기화와 연결 상태를 최종 확인했다.
+   - `git pull origin develop` 결과는 `Already up to date.`였다.
+   - 최종 상태는 현재 브랜치 `develop`,
+     원격 `origin = https://github.com/youwon35/memorize_app2.git`,
+     추적 브랜치 `origin/develop`이다.
+   - 즉, 이제 이 폴더에서 그대로 `pull`, `commit`, `push`를 진행할 수 있다.
 """
