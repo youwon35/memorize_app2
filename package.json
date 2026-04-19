@@ -23,6 +23,6 @@
     "react-native-url-polyfill": "^3.0.0"
   },
   "devDependencies": {
-    "babel-preset-expo": "^55.0.15"
+    "babel-preset-expo": "~54.0.10"
   }
 }

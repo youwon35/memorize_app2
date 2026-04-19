@@ -8,4 +8,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .DS_Store
+.npm-cache/
+expo-start.log
+expo-start.err
+expo-lan.log
+expo-lan.err
+expo-live.log
+expo-live.err
 

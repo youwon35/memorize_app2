@@ -1,11 +1,16 @@
 {
   "expo": {
-    "name": "Memora",
-    "slug": "memora",
+    "name": "MEMORIA",
+    "slug": "memoria",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "memora",
+    "scheme": "memoria",
     "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/memoria-splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#050814"
+    },
     "plugins": [
       [
         "expo-web-browser",
@@ -16,13 +21,13 @@
       "expo-secure-store"
     ],
     "android": {
-      "package": "com.memora.app",
+      "package": "com.memoria.app",
       "adaptiveIcon": {
-        "backgroundColor": "#F4EDE1"
+        "backgroundColor": "#050814"
       }
     },
     "ios": {
-      "bundleIdentifier": "com.memora.app"
+      "bundleIdentifier": "com.memoria.app"
     }
   }
 }

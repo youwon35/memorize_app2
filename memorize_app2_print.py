@@ -1,0 +1,136 @@
+"""
+2026-04-19 작업 요약
+
+1. 현재 폴더가 Git 저장소인지 먼저 확인했다.
+   - `git status`, `git remote -v`, `git branch --all` 확인 결과 `.git`이 없어서
+     아직 GitHub와 연결되지 않은 새 상태임을 확인했다.
+
+2. 현재 폴더 상태와 원격 저장소 존재 여부를 점검했다.
+   - 로컬 폴더는 비어 있었다.
+   - 기본 HTTPS Git 설정은 Windows 인증서 문제로 실패했지만,
+     `http.sslBackend=openssl` 옵션으로 `youwon35/memorize_app2` 저장소의
+     `main`, `develop` 브랜치가 실제로 존재함을 확인했다.
+
+3. 로컬 폴더를 GitHub 저장소와 직접 연결했다.
+   - 현재 폴더에서 `git clone https://github.com/youwon35/memorize_app2.git .`
+     방식으로 저장소를 받아와 원격 `origin`이 연결되도록 만들었다.
+
+4. 이후 작업 기준 브랜치를 `develop`으로 맞췄다.
+   - 기본 체크아웃은 `main`이었기 때문에
+     `git checkout -b develop origin/develop`으로 로컬 `develop` 브랜치를 만들고
+     원격 `origin/develop`을 추적하게 설정했다.
+
+5. `develop` 브랜치에서 최신 상태까지 pull 했다.
+   - `git pull --ff-only origin develop` 결과 `Already up to date.` 상태를 확인했다.
+
+현재 결과
+- 로컬 폴더: `D:/github/APP/memorize_app2`
+- 원격 저장소: `https://github.com/youwon35/memorize_app2.git`
+- 현재 브랜치: `develop`
+- 추적 브랜치: `origin/develop`
+- 앞으로 이 폴더에서 `develop` 기준으로 pull / commit / push 진행 가능
+
+
+2026-04-19 Expo Go 실행 준비 요약
+
+1. 현재 Expo 설정과 의존성 상태를 확인했다.
+   - `package.json`, `app.json`, `App.js`를 읽어보니 프로젝트는 이미 Expo SDK 54 기반으로
+     구성되어 있었고, 앱 이름은 `Memora`, 스킴은 `memora`로 설정되어 있었다.
+   - 다만 `node_modules`가 없어서 즉시 실행은 불가능한 상태였다.
+
+2. 앱 실행에 필요한 패키지를 설치했다.
+   - 프로젝트 경로에서 `npm install --no-fund --no-audit`를 실행해 의존성을 설치했다.
+
+3. Expo 진단으로 실제 실행 호환성을 확인했다.
+   - `expo-doctor` 결과 대부분 정상이었지만
+     `babel-preset-expo`가 SDK 54가 아니라 `55.0.15`로 잡혀 있었다.
+   - Expo Go SDK 54와 맞추기 위해 `package.json`의 `babel-preset-expo`를
+     `~54.0.10`으로 수정하고 다시 설치했다.
+   - 수정 후 `expo-doctor` 재실행 결과 `17/17 checks passed`로 모두 통과했다.
+
+4. Expo 개발 서버를 실제로 실행해 접근 가능 여부를 확인했다.
+   - 처음 `8084` 포트로 실행했지만 이미 다른 프로세스가 사용 중이라 건너뛰어졌다.
+   - 이후 `8085`, `8086` 포트로 Metro Bundler를 실행했고,
+     둘 다 HTTP 응답이 정상적으로 돌아오는 것을 확인했다.
+
+5. Expo Go에서 열 수 있는 실제 LAN 주소를 확인했다.
+   - 서버 메타데이터를 조회한 결과 `sdkVersion: 54.0.0`과
+     `hostUri: 192.168.45.167:8086`이 확인되었다.
+   - 따라서 같은 와이파이에 연결된 휴대폰의 Expo Go에서
+     `exp://192.168.45.167:8086` 형태로 접근 가능한 상태까지 준비되었다.
+
+6. 작업 흔적이 Git에 섞이지 않도록 정리했다.
+   - `.gitignore`에 `.npm-cache/`, `expo-start.log`, `expo-start.err`,
+     `expo-lan.log`, `expo-lan.err`를 추가해서 캐시와 실행 로그가
+     추적되지 않도록 했다.
+
+현재 실행 확인 결과
+- Expo SDK 진단: 통과
+- Metro Bundler 실행 포트: `8086` (LAN 확인 완료)
+- 로컬 IP: `192.168.45.167`
+- Expo Go 접속 주소: `exp://192.168.45.167:8086`
+- 참고: `.env`가 없어도 앱은 로컬 저장 모드로 실행되며,
+  Google/Supabase 동기화 기능만 비활성화된 상태다.
+
+
+2026-04-19 MEMORIA 리디자인 및 스플래시/로그인 정리 요약
+
+1. 디자인 방향을 전체적으로 다시 잡았다.
+   - 기존의 밝은 베이지 카드형 화면 대신,
+     첫 번째 레퍼런스 이미지처럼 차분한 나이트 무드 기반으로 재구성했다.
+   - 강한 그라디에이션은 제거하고,
+     어두운 네이비 배경 + 보랏빛 포인트 + 별/달 장식 정도만 남겨서
+     분위기는 살리고 과한 장식은 줄였다.
+
+2. 메인 저장 화면 구조를 다시 설계했다.
+   - 상단의 큰 슬로건 문장과 `MEMORA` 텍스트는 제거했다.
+   - `A와 B를 한 쌍으로 저장` 같은 설명 카드와 `+` 버튼 중심 구조도 없앴다.
+   - 대신 중앙에 카드 1장을 바로 입력하는 저장 패널을 두고,
+     `앞면 / 뒷면` 입력 후 바로 저장하도록 단순화했다.
+   - 저장 후 최근 카드가 아래에 바로 보이도록 해서,
+     화면의 빈 공간이 커 보이지 않게 밀도를 다시 맞췄다.
+
+3. 앱 전체 브랜딩을 `MEMORIA`로 바꿨다.
+   - 앱 설정의 이름을 `MEMORIA`로 변경했다.
+   - 슬러그를 `memoria`, 스킴을 `memoria`로 변경했다.
+   - Android 패키지와 iOS 번들 ID도 `com.memoria.app` 기준으로 맞췄다.
+
+4. 시작 화면(런치 느낌)을 추가했다.
+   - 앱 실행 직후, 검은/남색 배경 위에 `MEMORIA`가 중앙에 뜨는
+     런치 오버레이 화면을 구현했다.
+   - 달 모양과 작은 별이 있는 간단한 애니메이션을 넣어,
+     Netflix/Disney+처럼 앱 진입 순간에 브랜드가 보이게 했다.
+   - 동시에 실제 스플래시 설정에도 어두운 배경과
+     `assets/memoria-splash.png` 이미지를 연결했다.
+
+5. 스플래시 에셋도 프로젝트 안에서 새로 만들었다.
+   - `assets/memoria-splash.png` 파일을 생성해
+     앱 시작 시 사용할 로고 이미지를 준비했다.
+
+6. 퀴즈/보관함/정보 탭도 새 톤에 맞게 정리했다.
+   - 퀴즈 탭은 집중형 문제 카드처럼 보이도록 재배치했다.
+   - 보관함은 수정/삭제 흐름을 유지하되 어두운 톤 카드로 정리했다.
+   - 정보 탭에는 양방향 암기, Google 로그인, APK용 리디렉션 URI 정보를 넣었다.
+
+7. Google 로그인 흐름은 실제 APK 테스트를 고려해 유지/정리했다.
+   - 코드 안의 Supabase Google OAuth 흐름은 그대로 살렸다.
+   - `.env.example`의 앱 스킴도 `memoria`로 변경했다.
+   - 앱 정보와 README에 APK 테스트 시 필요한 리디렉션 URI
+     `memoria://auth/callback`를 분명히 남겼다.
+   - 즉, 지금은 Supabase 환경변수만 넣으면 Google 로그인 자체를 테스트할 수 있고,
+     APK에서는 Supabase/Google 설정에 동일한 리디렉션 URI를 추가해야 한다.
+
+8. 검증도 같이 진행했다.
+   - `expo-doctor` 결과 `17/17 checks passed`.
+   - `expo export --platform android`도 성공해서 번들링 가능한 상태를 확인했다.
+   - 이후 LAN 모드 개발 서버를 다시 실행했고,
+     `http://192.168.45.167:8087` 응답과 manifest를 확인했다.
+
+현재 기준 실행 확인 결과
+- 앱 이름: `MEMORIA`
+- Expo Go 실행 주소: `exp://192.168.45.167:8087`
+- 스플래시 이미지: `assets/memoria-splash.png`
+- 릴리스 리디렉션 URI: `memoria://auth/callback`
+- 참고: `.env`가 아직 없기 때문에 현재는 로컬 저장 모드이며,
+  Supabase URL / Anon Key를 넣어야 Google 로그인이 실제로 활성화된다.
+"""

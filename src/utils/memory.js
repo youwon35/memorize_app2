@@ -92,7 +92,7 @@ export const mapPairRecord = (record) => ({
 });
 
 export const getDirectionLabel = (direction) =>
-  direction === "A_TO_B" ? "A -> B" : "B -> A";
+  direction === "A_TO_B" ? "앞면 -> 뒷면" : "뒷면 -> 앞면";
 
 function shuffle(items) {
   const cloned = [...items];
