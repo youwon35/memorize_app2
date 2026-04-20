@@ -51,8 +51,17 @@ Then open the Android emulator, or scan the QR code with Expo Go.
 1. Replace `com.memoria.app` in `app.json` with your final package name if needed.
 2. Install EAS CLI if needed: `npm install -g eas-cli`
 3. Log in to Expo: `eas login`
-4. Build Android App Bundle: `eas build --platform android --profile production`
-5. Submit the generated `.aab` to Google Play Console.
+4. Build an installable APK for device testing: `eas build --platform android --profile preview`
+5. Build Android App Bundle for Play Store release: `eas build --platform android --profile production`
+6. Submit the generated `.aab` to Google Play Console.
+
+## Google login checklist for APK testing
+
+1. Create a local `.env` file from `.env.example` and fill in the real Supabase URL / Anon Key.
+2. In Supabase Auth, enable Google provider.
+3. Add `memoria://auth/callback` to Supabase Redirect URLs.
+4. Add the same redirect URI to the Google OAuth setup used by Supabase.
+5. Build with `eas build --platform android --profile preview` and install the APK from the generated EAS link.
 
 ## Git branch strategy
 

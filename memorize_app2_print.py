@@ -165,4 +165,96 @@
      원격 `origin = https://github.com/youwon35/memorize_app2.git`,
      추적 브랜치 `origin/develop`이다.
    - 즉, 이제 이 폴더에서 그대로 `pull`, `commit`, `push`를 진행할 수 있다.
+
+2026-04-20 실제 APK / Google 로그인 점검 요약
+
+1. 실제 APK 설치 경로를 확인하기 위해 현재 빌드 설정과 환경 상태를 점검했다.
+   - `eas.json`을 확인해보니 `preview` 프로필은 `distribution: internal`만 있었고,
+     Android에서 APK를 명시적으로 만들도록 `android.buildType: "apk"`를 추가해 두었다.
+
+2. 현재 Google 연동이 왜 아직 실제로 동작하지 않는지도 확인했다.
+   - 프로젝트 루트에 `.env` 파일이 없어서 Supabase URL / Anon Key가 비어 있다.
+   - 즉, 지금 빌드하면 앱은 실행되더라도 Google 로그인 버튼은
+     실제 연동 테스트를 끝까지 할 수 없는 상태다.
+
+3. EAS 빌드를 바로 걸 수 있는지도 확인했다.
+   - `npx eas-cli --version`으로 EAS CLI는 실행 가능한 상태임을 확인했다.
+   - 하지만 `npx eas-cli whoami` 결과는 `Not logged in`이었다.
+   - 따라서 지금 이 환경에서는 Expo 계정 로그인 전이라
+     바로 클라우드 APK 빌드를 시작할 수는 없다.
+
+4. 이후 바로 이어갈 수 있도록 문서도 보강했다.
+   - `README.md`에
+     `eas build --platform android --profile preview`로 APK를 만드는 단계,
+     그리고 `memoria://auth/callback`를 포함한 Google 로그인 체크리스트를 추가했다.
+
+현재 기준 남은 실제 조건
+- Expo 계정 로그인 필요: `eas login`
+- 로컬 `.env` 생성 필요: Supabase URL / Anon Key 입력
+- Supabase Auth에서 Google provider 활성화 필요
+- Supabase / Google 설정에 `memoria://auth/callback` 추가 필요
+
+이 네 가지가 준비되면
+`eas build --platform android --profile preview`로
+실제 휴대폰 설치용 APK를 만들 수 있다.
+
+
+2026-04-20 실제 APK / Google 로그인 빌드 마무리 요약
+
+1. 사용자가 준비를 마쳤는지부터 다시 확인했다.
+   - 프로젝트 루트의 `.env` 값을 확인해
+     `EXPO_PUBLIC_SUPABASE_URL`,
+     `EXPO_PUBLIC_SUPABASE_ANON_KEY`,
+     `EXPO_PUBLIC_APP_SCHEME=memoria`
+     가 실제로 들어가 있는 상태임을 확인했다.
+   - `npx eas-cli whoami`도 다시 실행해
+     Expo 계정이 `zinnn`으로 로그인된 상태임을 확인했다.
+
+2. EAS 프로젝트 연결도 실제로 마무리했다.
+   - `npx eas-cli init --force --non-interactive`를 실행해
+     이 앱을 Expo의 EAS 프로젝트 `@zinnn/memoria`에 연결했다.
+   - 이 과정에서 `app.json`에 EAS `projectId`와 `owner`가 추가되었다.
+
+3. 원격 APK 빌드에서 `.env`가 빠질 수 있는 문제를 먼저 확인했다.
+   - 첫 번째 `eas build` 로그를 보니
+     `preview` 환경에 등록된 EAS 환경변수가 없다는 메시지가 나왔다.
+   - 즉 로컬 `.env`가 있더라도, 원격 클라우드 빌드에는
+     Supabase URL / 키 / 앱 스킴이 자동으로 실리지 않을 가능성이 있었다.
+
+4. 그래서 EAS 프로젝트 환경변수를 직접 등록했다.
+   - `EXPO_PUBLIC_SUPABASE_URL`
+   - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+   - `EXPO_PUBLIC_APP_SCHEME`
+   이 세 값을 모두 `preview` 환경에 생성했다.
+   - 이렇게 해야 원격 APK 빌드 안에도 Supabase/Google 로그인 설정이 실제로 포함된다.
+
+5. 그 다음 실제 휴대폰 설치용 APK를 다시 빌드했다.
+   - `npx eas-cli build --platform android --profile preview --non-interactive`
+     를 다시 실행했다.
+   - 이번 빌드 로그에서는
+     `Resolved "preview" environment for the build`와 함께
+     `EXPO_PUBLIC_APP_SCHEME`,
+     `EXPO_PUBLIC_SUPABASE_ANON_KEY`,
+     `EXPO_PUBLIC_SUPABASE_URL`
+     가 실제로 로드되었다는 메시지를 확인했다.
+   - 즉 이번 APK는 Google 로그인에 필요한 환경값이 포함된 상태로 빌드되었다.
+
+6. 최종 결과로 설치 링크를 확보했다.
+   - 최신 성공 빌드:
+     `https://expo.dev/accounts/zinnn/projects/memoria/builds/2dfe0251-8f2a-47ae-95f9-3a293fea88c4`
+   - 이 링크를 휴대폰에서 열면 APK를 설치할 수 있다.
+
+현재 기준 결과
+- Expo/EAS 계정: `zinnn`
+- EAS 프로젝트: `@zinnn/memoria`
+- Android 테스트 빌드 방식: `preview` + `apk`
+- 최신 APK 빌드: 성공
+- 설치 링크:
+  `https://expo.dev/accounts/zinnn/projects/memoria/builds/2dfe0251-8f2a-47ae-95f9-3a293fea88c4`
+
+남아 있는 실제 확인 단계
+- 휴대폰에 APK 설치
+- 앱에서 `Google 로그인` 버튼 실행
+- 브라우저 로그인 후 `memoria://auth/callback`으로 복귀되는지 확인
+- 로그인 후 카드 저장/동기화가 실제로 되는지 확인
 """
