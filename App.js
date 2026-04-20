@@ -16,7 +16,9 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
 import { makeRedirectUri } from "expo-auth-session";
+import { File } from "expo-file-system";
 import * as WebBrowser from "expo-web-browser";
 
 import { isSupabaseConfigured, supabase } from "./src/lib/supabase";
@@ -28,6 +30,8 @@ import {
   getDirectionLabel,
   mapPairRecord,
   mergePairsBySignature,
+  parseImportedPairs,
+  shuffleItems,
   sortPairs,
   updatePairValues,
 } from "./src/utils/memory";
@@ -79,6 +83,9 @@ export default function App() {
   const [feedback, setFeedback] = useState("");
   const [result, setResult] = useState(null);
   const [showAnswer, setShowAnswer] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [roundComplete, setRoundComplete] = useState(false);
+  const [roundIncorrectIds, setRoundIncorrectIds] = useState([]);
   const [launchVisible, setLaunchVisible] = useState(true);
 
   const timerRef = useRef(null);
@@ -113,6 +120,16 @@ export default function App() {
       new Set([Math.min(5, maxQuizCount), Math.min(10, maxQuizCount), maxQuizCount])
     );
   }, [maxQuizCount]);
+  const roundIncorrectCards = useMemo(() => {
+    if (!deck.length || !roundIncorrectIds.length) {
+      return [];
+    }
+
+    const incorrectIdSet = new Set(roundIncorrectIds);
+
+    return deck.filter((card) => incorrectIdSet.has(card.id));
+  }, [deck, roundIncorrectIds]);
+  const roundCorrectCount = deck.length - roundIncorrectCards.length;
 
   useEffect(() => {
     pairsRef.current = pairs;
@@ -357,6 +374,8 @@ export default function App() {
     setFeedback("");
     setResult(null);
     setShowAnswer(false);
+    setRoundComplete(false);
+    setRoundIncorrectIds([]);
   }, [pairs.length]);
 
   const savePairs = async (nextPairs) => {
@@ -364,6 +383,73 @@ export default function App() {
 
     setPairs(sorted);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
+  };
+
+  const saveEntryBatch = async (entries) => {
+    const existingPairs = pairsRef.current;
+    const knownSignatures = new Set(
+      existingPairs.map((pair) => createSignature(pair.left, pair.right))
+    );
+    const uniqueEntries = [];
+    let skippedDuplicates = 0;
+
+    entries.forEach((entry) => {
+      const left = entry.left.trim();
+      const right = entry.right.trim();
+
+      if (!left || !right) {
+        return;
+      }
+
+      const signature = createSignature(left, right);
+
+      if (knownSignatures.has(signature)) {
+        skippedDuplicates += 1;
+        return;
+      }
+
+      knownSignatures.add(signature);
+      uniqueEntries.push({ left, right });
+    });
+
+    if (!uniqueEntries.length) {
+      return { savedCount: 0, skippedDuplicates, cloudSaved: false };
+    }
+
+    let savedPairs = uniqueEntries.map((entry) => createLocalPair(entry.left, entry.right));
+    let cloudSaved = false;
+
+    if (session?.user?.id && supabase) {
+      try {
+        const inserted = await supabase
+          .from("memory_pairs")
+          .insert(
+            uniqueEntries.map((entry) => ({
+              user_id: session.user.id,
+              prompt_a: entry.left,
+              prompt_b: entry.right,
+            }))
+          )
+          .select();
+
+        if (inserted.error) {
+          throw inserted.error;
+        }
+
+        savedPairs = (inserted.data ?? []).map(mapPairRecord);
+        cloudSaved = true;
+      } catch {
+        setNote("클라우드 저장 실패로 로컬에만 저장했습니다.");
+      }
+    }
+
+    await savePairs([...savedPairs, ...existingPairs]);
+
+    return {
+      savedCount: savedPairs.length,
+      skippedDuplicates,
+      cloudSaved,
+    };
   };
 
   const saveCard = async () => {
@@ -375,43 +461,91 @@ export default function App() {
       return;
     }
 
-    const signature = createSignature(left, right);
-    const alreadyExists = pairs.some(
-      (pair) => createSignature(pair.left, pair.right) === signature
-    );
+    const saveResult = await saveEntryBatch([{ left, right }]);
 
-    if (alreadyExists) {
+    if (!saveResult.savedCount) {
       Alert.alert("이미 저장된 카드", "같은 조합의 카드는 이미 보관함에 있습니다.");
       return;
     }
 
-    let nextPair = createLocalPair(left, right);
-
-    if (session?.user?.id && supabase) {
-      try {
-        const inserted = await supabase
-          .from("memory_pairs")
-          .insert({
-            user_id: session.user.id,
-            prompt_a: left,
-            prompt_b: right,
-          })
-          .select()
-          .single();
-
-        if (inserted.error) {
-          throw inserted.error;
-        }
-
-        nextPair = mapPairRecord(inserted.data);
-        setNote("새 카드가 Google 계정에도 저장되었습니다.");
-      } catch {
-        setNote("클라우드 저장 실패로 로컬에만 저장했습니다.");
-      }
-    }
-
-    await savePairs([nextPair, ...pairs]);
     setDraft({ left: "", right: "" });
+
+    if (saveResult.cloudSaved) {
+      setNote("새 카드가 Google 계정에도 저장되었습니다.");
+    }
+  };
+
+  const importCardsFromTextFile = async () => {
+    setImporting(true);
+
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: ["text/plain", "text/*"],
+        copyToCacheDirectory: true,
+      });
+
+      if (picked.canceled) {
+        return;
+      }
+
+      const asset = picked.assets?.[0];
+
+      if (!asset?.uri) {
+        throw new Error("선택한 파일을 읽을 수 없습니다.");
+      }
+
+      const file = new File(asset.uri);
+      const text = await file.text();
+      const { entries, invalidLineNumbers } = parseImportedPairs(text);
+
+      if (!entries.length) {
+        Alert.alert(
+          "카드를 찾지 못했습니다",
+          invalidLineNumbers.length
+            ? "형식이 맞는 줄이 없습니다. 가장 안전한 형식은 한 줄에 앞면과 뒷면을 탭으로 구분하는 방식입니다."
+            : "비어 있는 파일입니다."
+        );
+        return;
+      }
+
+      const saveResult = await saveEntryBatch(entries);
+      const messages = [];
+
+      if (saveResult.savedCount) {
+        messages.push(`${saveResult.savedCount}개의 카드를 만들었습니다.`);
+      }
+
+      if (saveResult.skippedDuplicates) {
+        messages.push(
+          `${saveResult.skippedDuplicates}개는 이미 있거나 파일 안에서 중복되어 건너뛰었습니다.`
+        );
+      }
+
+      if (invalidLineNumbers.length) {
+        messages.push(
+          `${invalidLineNumbers.length}개 줄은 형식이 맞지 않아 제외했습니다.`
+        );
+      }
+
+      if (!saveResult.savedCount) {
+        Alert.alert("텍스트 불러오기 완료", messages.join(" "));
+        return;
+      }
+
+      setNote(
+        saveResult.cloudSaved
+          ? `${saveResult.savedCount}개의 카드가 Google 계정에도 저장되었습니다.`
+          : `${saveResult.savedCount}개의 카드를 파일에서 불러왔습니다.`
+      );
+      Alert.alert("텍스트 불러오기 완료", messages.join(" "));
+    } catch (error) {
+      Alert.alert(
+        "텍스트 파일 불러오기 실패",
+        error?.message || "파일 내용을 읽는 중 문제가 생겼습니다."
+      );
+    } finally {
+      setImporting(false);
+    }
   };
 
   const selectQuizCount = (count) => {
@@ -430,36 +564,54 @@ export default function App() {
     setQuizCountInput(`${resolvedQuizCount}`);
   };
 
+  const beginQuizRound = (nextDeck) => {
+    clearTimeout(timerRef.current);
+    setDeck(nextDeck);
+    setQuizIndex(0);
+    setAnswer("");
+    setFeedback("");
+    setResult(null);
+    setShowAnswer(false);
+    setRoundComplete(false);
+    setRoundIncorrectIds([]);
+    setTab("quiz");
+  };
+
   const startQuiz = (requestedCount = resolvedQuizCount) => {
     if (!pairs.length) {
       Alert.alert("문제가 없습니다", "먼저 카드 한 장 이상을 저장해 주세요.");
       return;
     }
 
-    clearTimeout(timerRef.current);
-    setDeck(buildPracticeDeck(pairs, requestedCount || maxQuizCount));
-    setQuizIndex(0);
-    setAnswer("");
-    setFeedback("");
-    setResult(null);
-    setShowAnswer(false);
-    setTab("quiz");
+    beginQuizRound(buildPracticeDeck(pairs, requestedCount || maxQuizCount));
+  };
+
+  const retryIncorrectCards = () => {
+    if (!roundIncorrectCards.length) {
+      Alert.alert("오답 없음", "이번 라운드에는 다시 풀 문제가 없습니다.");
+      return;
+    }
+
+    beginQuizRound(shuffleItems(roundIncorrectCards));
   };
 
   const goNext = () => {
+    if (!deck.length) {
+      return;
+    }
+
     clearTimeout(timerRef.current);
     setAnswer("");
     setFeedback("");
     setResult(null);
     setShowAnswer(false);
-    setQuizIndex((currentIndex) => {
-      if (!deck.length || currentIndex + 1 >= deck.length) {
-        setDeck(buildPracticeDeck(pairs, resolvedQuizCount || maxQuizCount));
-        return 0;
-      }
 
-      return currentIndex + 1;
-    });
+    if (quizIndex + 1 >= deck.length) {
+      setRoundComplete(true);
+      return;
+    }
+
+    setQuizIndex((currentIndex) => currentIndex + 1);
   };
 
   const submitAnswer = () => {
@@ -481,6 +633,9 @@ export default function App() {
 
     setResult("incorrect");
     setFeedback("다시 한 번 생각해 보세요");
+    setRoundIncorrectIds((currentIds) =>
+      currentIds.includes(current.id) ? currentIds : [...currentIds, current.id]
+    );
   };
 
   const saveEdit = async () => {
@@ -690,6 +845,33 @@ export default function App() {
             <Text style={styles.secondaryButtonText}>바로 암기</Text>
           </Pressable>
         </View>
+
+        <View style={styles.importPanel}>
+          <View style={styles.importHeader}>
+            <View style={styles.importIconWrap}>
+              <MaterialCommunityIcons name="file-document-plus-outline" size={18} color="#B8AEFF" />
+            </View>
+            <View style={styles.flex}>
+              <Text style={styles.importTitle}>텍스트 파일로 여러 장 한꺼번에 추가</Text>
+              <Text style={styles.importBody}>
+                한 줄에 한 쌍씩 적으면 됩니다. 가장 안전한 형식은 `앞면[TAB]뒷면`이고,
+                현재 예시처럼 `sun 해`처럼 공백 한 칸 형식도 읽습니다.
+              </Text>
+            </View>
+          </View>
+
+          <Pressable
+            disabled={importing}
+            onPress={() => void importCardsFromTextFile()}
+            style={({ pressed }) => [
+              styles.importButton,
+              importing && styles.importButtonDisabled,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.importButtonText}>{importing ? "불러오는 중..." : "텍스트 파일 불러오기"}</Text>
+          </Pressable>
+        </View>
       </View>
 
       {recentPairs.length ? (
@@ -786,7 +968,61 @@ export default function App() {
           </View>
         ) : null}
 
-        {current ? (
+        {roundComplete && deck.length ? (
+          <View style={styles.quizSummaryCard}>
+            <View style={styles.quizSummaryHeader}>
+              <Text style={styles.panelTitle}>라운드 완료</Text>
+              <Text style={styles.panelBody}>
+                {roundIncorrectCards.length
+                  ? "틀린 문제만 다시 모아서 바로 한 번 더 풀 수 있습니다."
+                  : "이번 라운드는 모두 맞혔습니다. 같은 개수로 다시 랜덤 시작도 가능합니다."}
+              </Text>
+            </View>
+
+            <View style={styles.quizSummaryStats}>
+              <View style={styles.quizSummaryStat}>
+                <Text style={styles.quizSummaryValue}>{deck.length}</Text>
+                <Text style={styles.quizSummaryLabel}>전체 문제</Text>
+              </View>
+              <View style={styles.quizSummaryStat}>
+                <Text style={[styles.quizSummaryValue, styles.quizSummaryValueGood]}>
+                  {roundCorrectCount}
+                </Text>
+                <Text style={styles.quizSummaryLabel}>맞힌 문제</Text>
+              </View>
+              <View style={styles.quizSummaryStat}>
+                <Text style={[styles.quizSummaryValue, styles.quizSummaryValueBad]}>
+                  {roundIncorrectCards.length}
+                </Text>
+                <Text style={styles.quizSummaryLabel}>다시 풀 문제</Text>
+              </View>
+            </View>
+
+            <View style={styles.actionRow}>
+              <Pressable onPress={startQuiz} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
+                <Text style={styles.secondaryButtonText}>다시 랜덤 시작</Text>
+              </Pressable>
+              <Pressable
+                disabled={!roundIncorrectCards.length}
+                onPress={retryIncorrectCards}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  !roundIncorrectCards.length && styles.primaryButtonDisabled,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.primaryButtonText,
+                    !roundIncorrectCards.length && styles.primaryButtonTextDisabled,
+                  ]}
+                >
+                  오답만 다시풀기
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : current ? (
           <View style={styles.quizCard}>
             <View style={styles.quizMetaRow}>
               <Text style={styles.quizProgress}>
@@ -1293,10 +1529,16 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     backgroundColor: "#B8AEFF",
   },
+  primaryButtonDisabled: {
+    backgroundColor: "#303B5D",
+  },
   primaryButtonText: {
     fontSize: 15,
     fontWeight: "800",
     color: "#0B1020",
+  },
+  primaryButtonTextDisabled: {
+    color: "#97A1BE",
   },
   secondaryButton: {
     flex: 1,
@@ -1312,6 +1554,55 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     color: "#EAEFFF",
+  },
+  importPanel: {
+    gap: 14,
+    padding: 16,
+    borderRadius: 24,
+    backgroundColor: "#0D1426",
+    borderWidth: 1,
+    borderColor: "rgba(184, 174, 255, 0.1)",
+  },
+  importHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  importIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(184, 174, 255, 0.12)",
+  },
+  importTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#F5F7FF",
+  },
+  importBody: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 21,
+    color: "#8E9ABC",
+  },
+  importButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+    paddingVertical: 14,
+    backgroundColor: "#182544",
+    borderWidth: 1,
+    borderColor: "rgba(184, 174, 255, 0.14)",
+  },
+  importButtonDisabled: {
+    backgroundColor: "#121B31",
+  },
+  importButtonText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#DDE4FF",
   },
   dangerButton: {
     flex: 1,
@@ -1561,6 +1852,43 @@ const styles = StyleSheet.create({
     padding: 18,
     borderRadius: 24,
     backgroundColor: "#11182B",
+  },
+  quizSummaryCard: {
+    gap: 16,
+    padding: 18,
+    borderRadius: 24,
+    backgroundColor: "#11182B",
+  },
+  quizSummaryHeader: {
+    gap: 6,
+  },
+  quizSummaryStats: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  quizSummaryStat: {
+    flex: 1,
+    gap: 6,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: "#0B1020",
+    borderWidth: 1,
+    borderColor: "rgba(184, 174, 255, 0.08)",
+  },
+  quizSummaryValue: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: "#F5F7FF",
+  },
+  quizSummaryValueGood: {
+    color: "#86E2A2",
+  },
+  quizSummaryValueBad: {
+    color: "#FFBFCC",
+  },
+  quizSummaryLabel: {
+    fontSize: 13,
+    color: "#8E9ABC",
   },
   quizMetaRow: {
     flexDirection: "row",

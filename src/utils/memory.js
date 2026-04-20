@@ -88,6 +88,35 @@ export const buildPracticeDeck = (pairs, limit) => {
   return randomizedDeck.slice(0, Math.max(1, Math.min(limit, randomizedDeck.length)));
 };
 
+export const shuffleItems = (items) => shuffle(items);
+
+export const parseImportedPairs = (text) => {
+  const entries = [];
+  const invalidLineNumbers = [];
+
+  text
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .forEach((rawLine, index) => {
+      const line = rawLine.trim();
+
+      if (!line || line.startsWith("#")) {
+        return;
+      }
+
+      const pair = splitImportedPair(line);
+
+      if (!pair) {
+        invalidLineNumbers.push(index + 1);
+        return;
+      }
+
+      entries.push(pair);
+    });
+
+  return { entries, invalidLineNumbers };
+};
+
 export const mapPairRecord = (record) => ({
   id: record.id,
   left: record.prompt_a ?? "",
@@ -113,5 +142,45 @@ function shuffle(items) {
   }
 
   return cloned;
+}
+
+function splitImportedPair(line) {
+  const delimitedPair =
+    splitByPattern(line, /\t+/) ||
+    splitByPattern(line, /\s*\|\s*/) ||
+    splitByPattern(line, /\s*::\s*/) ||
+    splitByPattern(line, /\s*→\s*/);
+
+  if (delimitedPair) {
+    return delimitedPair;
+  }
+
+  const tokens = line.split(/\s+/).filter(Boolean);
+
+  if (tokens.length < 2) {
+    return null;
+  }
+
+  return {
+    left: tokens[0].trim(),
+    right: tokens.slice(1).join(" ").trim(),
+  };
+}
+
+function splitByPattern(line, pattern) {
+  const matched = line.match(pattern);
+
+  if (!matched || typeof matched.index !== "number") {
+    return null;
+  }
+
+  const left = line.slice(0, matched.index).trim();
+  const right = line.slice(matched.index + matched[0].length).trim();
+
+  if (!left || !right) {
+    return null;
+  }
+
+  return { left, right };
 }
 
