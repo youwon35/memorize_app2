@@ -39,6 +39,7 @@ const STORAGE_KEY = "@memoria/cards";
 const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
 const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
+const DEFAULT_QUIZ_COUNT = 10;
 const TABS = [
   { key: "save", label: "저장", icon: "cards-outline" },
   { key: "quiz", label: "암기", icon: "moon-waning-crescent" },
@@ -73,6 +74,7 @@ export default function App() {
   const [editingRight, setEditingRight] = useState("");
   const [deck, setDeck] = useState([]);
   const [quizIndex, setQuizIndex] = useState(0);
+  const [quizCountInput, setQuizCountInput] = useState(`${DEFAULT_QUIZ_COUNT}`);
   const [answer, setAnswer] = useState("");
   const [feedback, setFeedback] = useState("");
   const [result, setResult] = useState(null);
@@ -95,10 +97,42 @@ export default function App() {
       ? "Google 계정으로 카드 보관하기"
       : "로컬 저장 모드";
   const authCaption = syncing ? "동기화 중..." : note;
+  const maxQuizCount = pairs.length ? pairs.length * 2 : 0;
+  const parsedQuizCount = Number.parseInt(quizCountInput, 10);
+  const resolvedQuizCount = !maxQuizCount
+    ? 0
+    : Number.isFinite(parsedQuizCount) && parsedQuizCount > 0
+      ? Math.min(parsedQuizCount, maxQuizCount)
+      : Math.min(DEFAULT_QUIZ_COUNT, maxQuizCount);
+  const quizPresetOptions = useMemo(() => {
+    if (!maxQuizCount) {
+      return [];
+    }
+
+    return Array.from(
+      new Set([Math.min(5, maxQuizCount), Math.min(10, maxQuizCount), maxQuizCount])
+    );
+  }, [maxQuizCount]);
 
   useEffect(() => {
     pairsRef.current = pairs;
   }, [pairs]);
+
+  useEffect(() => {
+    if (!maxQuizCount) {
+      return;
+    }
+
+    setQuizCountInput((currentValue) => {
+      const parsedValue = Number.parseInt(currentValue, 10);
+
+      if (!Number.isFinite(parsedValue) || parsedValue < 1) {
+        return `${Math.min(DEFAULT_QUIZ_COUNT, maxQuizCount)}`;
+      }
+
+      return `${Math.min(parsedValue, maxQuizCount)}`;
+    });
+  }, [maxQuizCount]);
 
   useEffect(() => {
     let active = true;
@@ -380,14 +414,30 @@ export default function App() {
     setDraft({ left: "", right: "" });
   };
 
-  const startQuiz = () => {
+  const selectQuizCount = (count) => {
+    if (!maxQuizCount) {
+      return;
+    }
+
+    setQuizCountInput(`${Math.max(1, Math.min(count, maxQuizCount))}`);
+  };
+
+  const normalizeQuizCountInput = () => {
+    if (!maxQuizCount) {
+      return;
+    }
+
+    setQuizCountInput(`${resolvedQuizCount}`);
+  };
+
+  const startQuiz = (requestedCount = resolvedQuizCount) => {
     if (!pairs.length) {
       Alert.alert("문제가 없습니다", "먼저 카드 한 장 이상을 저장해 주세요.");
       return;
     }
 
     clearTimeout(timerRef.current);
-    setDeck(buildPracticeDeck(pairs));
+    setDeck(buildPracticeDeck(pairs, requestedCount || maxQuizCount));
     setQuizIndex(0);
     setAnswer("");
     setFeedback("");
@@ -404,7 +454,7 @@ export default function App() {
     setShowAnswer(false);
     setQuizIndex((currentIndex) => {
       if (!deck.length || currentIndex + 1 >= deck.length) {
-        setDeck(buildPracticeDeck(pairs));
+        setDeck(buildPracticeDeck(pairs, resolvedQuizCount || maxQuizCount));
         return 0;
       }
 
@@ -597,11 +647,6 @@ export default function App() {
         </Pressable>
       </View>
 
-      <View style={styles.metricRow}>
-        <MetricTile icon="cards-outline" label="저장된 카드" value={`${pairs.length}`} />
-        <MetricTile icon="swap-horizontal" label="출제 방향" value={pairs.length ? "양방향" : "대기"} />
-      </View>
-
       <View style={styles.composerPanel}>
         <View style={styles.composerTopline}>
           <View style={styles.moonPill}>
@@ -682,12 +727,64 @@ export default function App() {
         <View style={styles.quizHeader}>
           <View>
             <Text style={styles.panelTitle}>랜덤 퀴즈</Text>
-            <Text style={styles.panelBody}>앞면과 뒷면이 섞여서 문제로 나옵니다.</Text>
+            <Text style={styles.panelBody}>앞면과 뒷면이 섞이고, 시작할 때마다 랜덤 순서로 출제됩니다.</Text>
           </View>
           <Pressable onPress={startQuiz} style={({ pressed }) => [styles.quizStartButton, pressed && styles.pressed]}>
             <Text style={styles.quizStartButtonText}>{deck.length ? "다시 시작" : "시작"}</Text>
           </Pressable>
         </View>
+
+        <View style={styles.quizSetupRow}>
+          <View style={styles.quizSetupCard}>
+            <Text style={styles.quizSetupLabel}>이번 라운드 문제 수</Text>
+            <Text style={styles.quizSetupHint}>
+              {pairs.length
+                ? `1부터 ${maxQuizCount}문제까지 정할 수 있고, 시작할 때마다 랜덤으로 섞입니다.`
+                : "카드를 저장하면 여기서 출제 문제 수를 정할 수 있습니다."}
+            </Text>
+          </View>
+
+          <View style={styles.quizCountBox}>
+            <Text style={styles.quizCountLabel}>문제 수</Text>
+            <TextInput
+              value={pairs.length ? quizCountInput : ""}
+              onBlur={normalizeQuizCountInput}
+              onChangeText={(value) => setQuizCountInput(value.replace(/[^0-9]/g, ""))}
+              editable={pairs.length > 0}
+              keyboardType="number-pad"
+              maxLength={3}
+              placeholder="-"
+              placeholderTextColor="#667392"
+              style={[styles.quizCountInput, !pairs.length && styles.quizCountInputDisabled]}
+            />
+            <Text style={styles.quizCountCaption}>{pairs.length ? `최대 ${maxQuizCount}` : "대기"}</Text>
+          </View>
+        </View>
+
+        {quizPresetOptions.length ? (
+          <View style={styles.quizPresetRow}>
+            {quizPresetOptions.map((count) => (
+              <Pressable
+                key={`quiz-count-${count}`}
+                onPress={() => selectQuizCount(count)}
+                style={({ pressed }) => [
+                  styles.quizPresetChip,
+                  resolvedQuizCount === count && styles.quizPresetChipActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.quizPresetText,
+                    resolvedQuizCount === count && styles.quizPresetTextActive,
+                  ]}
+                >
+                  {count === maxQuizCount ? "전체" : `${count}문제`}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
 
         {current ? (
           <View style={styles.quizCard}>
@@ -950,18 +1047,6 @@ export default function App() {
   );
 }
 
-function MetricTile({ icon, label, value }) {
-  return (
-    <View style={styles.metricTile}>
-      <View style={styles.metricIconWrap}>
-        <MaterialCommunityIcons name={icon} size={16} color="#B8AEFF" />
-      </View>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
-    </View>
-  );
-}
-
 function PreviewRow({ pair, large = false }) {
   return (
     <View style={[styles.previewRow, large && styles.previewRowLarge]}>
@@ -1063,7 +1148,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 18,
     paddingTop: 18,
-    paddingBottom: 136,
+    paddingBottom: Platform.OS === "android" ? 188 : 144,
   },
   scene: {
     gap: 16,
@@ -1140,36 +1225,6 @@ const styles = StyleSheet.create({
   },
   syncButtonTextMuted: {
     color: "#EAEFFF",
-  },
-  metricRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  metricTile: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 22,
-    gap: 8,
-    backgroundColor: "rgba(17, 24, 43, 0.9)",
-    borderWidth: 1,
-    borderColor: "rgba(184, 174, 255, 0.12)",
-  },
-  metricIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(184, 174, 255, 0.12)",
-  },
-  metricValue: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#F5F7FF",
-  },
-  metricLabel: {
-    fontSize: 13,
-    color: "#8794B6",
   },
   composerPanel: {
     padding: 22,
@@ -1407,6 +1462,89 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
   },
+  quizSetupRow: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "stretch",
+  },
+  quizSetupCard: {
+    flex: 1,
+    gap: 6,
+    padding: 16,
+    borderRadius: 20,
+    backgroundColor: "#11182B",
+    borderWidth: 1,
+    borderColor: "rgba(184, 174, 255, 0.1)",
+  },
+  quizSetupLabel: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#D6DBEA",
+  },
+  quizSetupHint: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: "#8E9ABC",
+  },
+  quizCountBox: {
+    width: 108,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    borderRadius: 20,
+    backgroundColor: "#11182B",
+    borderWidth: 1,
+    borderColor: "rgba(184, 174, 255, 0.1)",
+  },
+  quizCountLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    color: "#8E9ABC",
+  },
+  quizCountInput: {
+    minWidth: 54,
+    paddingVertical: 0,
+    fontSize: 30,
+    fontWeight: "800",
+    textAlign: "center",
+    color: "#F5F7FF",
+  },
+  quizCountInputDisabled: {
+    color: "#5B688A",
+  },
+  quizCountCaption: {
+    fontSize: 12,
+    color: "#8E9ABC",
+  },
+  quizPresetRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  quizPresetChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: "#1A2440",
+    borderWidth: 1,
+    borderColor: "rgba(184, 174, 255, 0.12)",
+  },
+  quizPresetChipActive: {
+    backgroundColor: "#B8AEFF",
+    borderColor: "#B8AEFF",
+  },
+  quizPresetText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#D6DBEA",
+  },
+  quizPresetTextActive: {
+    color: "#0B1020",
+  },
   quizStartButton: {
     borderRadius: 16,
     paddingHorizontal: 14,
@@ -1508,18 +1646,20 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 14,
     right: 14,
-    bottom: 14,
+    bottom: Platform.OS === "android" ? 28 : 14,
     flexDirection: "row",
     gap: 8,
-    padding: 10,
+    paddingTop: 10,
+    paddingHorizontal: 10,
+    paddingBottom: Platform.OS === "android" ? 18 : 10,
     borderRadius: 28,
-    backgroundColor: "rgba(11, 16, 32, 0.96)",
+    backgroundColor: "rgba(11, 16, 32, 0.98)",
     borderWidth: 1,
-    borderColor: "rgba(184, 174, 255, 0.14)",
+    borderColor: "rgba(184, 174, 255, 0.18)",
   },
   tab: {
     flex: 1,
-    minHeight: 66,
+    minHeight: Platform.OS === "android" ? 74 : 66,
     borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
@@ -1529,9 +1669,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#B8AEFF",
   },
   tabText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: "700",
-    color: "#8E9ABC",
+    lineHeight: 16,
+    color: "#C0C8DE",
   },
   tabTextActive: {
     color: "#0B1020",

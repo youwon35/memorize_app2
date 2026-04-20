@@ -61,8 +61,8 @@ export const mergePairsBySignature = (...collections) => {
   return sortPairs(Array.from(merged.values()));
 };
 
-export const buildPracticeDeck = (pairs) =>
-  shuffle(
+export const buildPracticeDeck = (pairs, limit) => {
+  const randomizedDeck = shuffle(
     sortPairs(pairs).flatMap((pair) => [
       {
         id: `${pair.id}-front`,
@@ -80,6 +80,13 @@ export const buildPracticeDeck = (pairs) =>
       },
     ])
   );
+
+  if (!Number.isFinite(limit)) {
+    return randomizedDeck;
+  }
+
+  return randomizedDeck.slice(0, Math.max(1, Math.min(limit, randomizedDeck.length)));
+};
 
 export const mapPairRecord = (record) => ({
   id: record.id,
