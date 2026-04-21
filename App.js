@@ -46,9 +46,9 @@ const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
 const DEFAULT_QUIZ_COUNT = 10;
 const TABS = [
   { key: "save", label: "저장", icon: "cards-outline" },
-  { key: "quiz", label: "암기", icon: "moon-waning-crescent" },
+  { key: "quiz", label: "암기", icon: "brain" },
   { key: "manage", label: "보관함", icon: "playlist-edit" },
-  { key: "about", label: "정보", icon: "information-outline" },
+  { key: "about", label: "앱 정보", icon: "information-outline" },
 ];
 const STAR_FIELD = [
   { top: 34, left: 28, size: 4, opacity: 0.45 },
@@ -104,6 +104,7 @@ export default function App() {
       ? "Google 계정으로 카드 보관하기"
       : "로컬 저장 모드";
   const authCaption = syncing ? "동기화 중..." : note;
+  const hasSavedCards = pairs.length > 0;
   const maxQuizCount = pairs.length ? pairs.length * 2 : 0;
   const parsedQuizCount = Number.parseInt(quizCountInput, 10);
   const resolvedQuizCount = !maxQuizCount
@@ -760,56 +761,7 @@ export default function App() {
 
   const renderSaveTab = () => (
     <View style={[styles.scene, styles.saveScene]}>
-      <View style={styles.syncStrip}>
-        <View style={styles.syncLead}>
-          <View style={styles.syncIconWrap}>
-            <MaterialCommunityIcons
-              name={session?.user ? "google" : "cloud-outline"}
-              size={18}
-              color="#0B1020"
-            />
-          </View>
-          <View style={styles.flex}>
-            <Text style={styles.syncTitle}>{authTitle}</Text>
-            <Text style={styles.syncCaption}>{authCaption}</Text>
-          </View>
-        </View>
-        <Pressable
-          disabled={authBusy || !authReady}
-          onPress={session?.user ? signOut : login}
-          style={({ pressed }) => [
-            styles.syncButton,
-            (!isSupabaseConfigured || authBusy || !authReady) && styles.syncButtonMuted,
-            pressed && styles.pressed,
-          ]}
-        >
-          <Text
-            style={[
-              styles.syncButtonText,
-              (!isSupabaseConfigured || authBusy || !authReady) && styles.syncButtonTextMuted,
-            ]}
-          >
-            {!isSupabaseConfigured
-              ? "설정 필요"
-              : session?.user
-                ? authBusy
-                  ? "처리 중"
-                  : "로그아웃"
-                : authBusy
-                  ? "연결 중"
-                  : "Google 로그인"}
-          </Text>
-        </Pressable>
-      </View>
-
       <View style={styles.composerPanel}>
-        <View style={styles.composerTopline}>
-          <View style={styles.moonPill}>
-            <MaterialCommunityIcons name="moon-waning-crescent" size={15} color="#B8AEFF" />
-            <Text style={styles.moonPillText}>Night mode study</Text>
-          </View>
-        </View>
-
         <Text style={styles.composerTitle}>카드를 하나씩 차분하게 쌓아 두세요.</Text>
         <Text style={styles.composerBody}>
           저장하면 앞면과 뒷면이 모두 문제로 출제됩니다. 추가 버튼 없이 바로 한 장씩 기록하도록 단순화했습니다.
@@ -907,7 +859,7 @@ export default function App() {
 
       <View style={styles.quizPanel}>
         <View style={styles.quizHeader}>
-          <View>
+          <View style={styles.quizHeaderContent}>
             <Text style={styles.panelTitle}>랜덤 퀴즈</Text>
             <Text style={styles.panelBody}>앞면과 뒷면이 섞이고, 시작할 때마다 랜덤 순서로 출제됩니다.</Text>
           </View>
@@ -1063,6 +1015,41 @@ export default function App() {
               <Text style={styles.ghostButtonText}>다음 카드로 넘어가기</Text>
             </Pressable>
           </View>
+        ) : hasSavedCards ? (
+          <View style={styles.quizReadyCard}>
+            <View style={styles.quizReadyIconWrap}>
+              <MaterialCommunityIcons name="brain" size={22} color="#B8AEFF" />
+            </View>
+            <Text style={styles.quizReadyTitle}>카드가 준비됐어요. 바로 암기를 시작할 수 있습니다.</Text>
+            <Text style={styles.quizReadyBody}>
+              저장된 카드는 앞면과 뒷면이 모두 문제로 나오고, 이번 라운드에서는
+              최대 {maxQuizCount}문제까지 랜덤으로 섞여 출제됩니다.
+            </Text>
+
+            <View style={styles.quizReadyStats}>
+              <View style={styles.quizReadyStat}>
+                <Text style={styles.quizReadyStatValue}>{pairs.length}</Text>
+                <Text style={styles.quizReadyStatLabel}>저장 카드</Text>
+              </View>
+              <View style={styles.quizReadyStat}>
+                <Text style={styles.quizReadyStatValue}>{resolvedQuizCount}</Text>
+                <Text style={styles.quizReadyStatLabel}>이번 문제 수</Text>
+              </View>
+              <View style={styles.quizReadyStat}>
+                <Text style={styles.quizReadyStatValue}>{maxQuizCount}</Text>
+                <Text style={styles.quizReadyStatLabel}>출제 가능</Text>
+              </View>
+            </View>
+
+            <View style={styles.actionRow}>
+              <Pressable onPress={startQuiz} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
+                <Text style={styles.primaryButtonText}>랜덤 암기 시작</Text>
+              </Pressable>
+              <Pressable onPress={() => setTab("manage")} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
+                <Text style={styles.secondaryButtonText}>보관함 보기</Text>
+              </Pressable>
+            </View>
+          </View>
         ) : (
           <EmptyPanel
             icon="cards-heart-outline"
@@ -1183,11 +1170,64 @@ export default function App() {
       <View style={styles.heroStrip}>
         <Text style={styles.heroEyebrow}>앱 정보</Text>
         <Text style={styles.heroMeta}>
-          한 번 dev build를 설치해 두면 매번 APK를 다시 깔지 않고도 Google 로그인까지 바로 확인할 수 있습니다.
+          계정 연결 상태와 앱 사용 방식을 이곳에서 함께 확인할 수 있습니다.
         </Text>
       </View>
 
+      <View style={styles.syncStrip}>
+        <View style={styles.syncLead}>
+          <View style={styles.syncIconWrap}>
+            <MaterialCommunityIcons
+              name={session?.user ? "google" : "cloud-outline"}
+              size={18}
+              color="#0B1020"
+            />
+          </View>
+          <View style={styles.flex}>
+            <Text style={styles.syncTitle}>{authTitle}</Text>
+            <Text style={styles.syncCaption}>{authCaption}</Text>
+          </View>
+        </View>
+        <Pressable
+          disabled={authBusy || !authReady}
+          onPress={session?.user ? signOut : login}
+          style={({ pressed }) => [
+            styles.syncButton,
+            (!isSupabaseConfigured || authBusy || !authReady) && styles.syncButtonMuted,
+            pressed && styles.pressed,
+          ]}
+        >
+          <Text
+            style={[
+              styles.syncButtonText,
+              (!isSupabaseConfigured || authBusy || !authReady) && styles.syncButtonTextMuted,
+            ]}
+          >
+            {!isSupabaseConfigured
+              ? "설정 필요"
+              : session?.user
+                ? authBusy
+                  ? "처리 중"
+                  : "로그아웃"
+                : authBusy
+                  ? "연결 중"
+                  : "Google 로그인"}
+          </Text>
+        </Pressable>
+      </View>
+
       <View style={styles.infoPanel}>
+        <InfoRow
+          icon="account-circle-outline"
+          title="계정 상태"
+          body={
+            session?.user
+              ? `${session.user.email} 계정으로 동기화되어 있습니다. 이 화면에서 바로 로그아웃하거나 다시 로그인할 수 있습니다.`
+              : isSupabaseConfigured
+                ? "아직 계정 연결 전입니다. 위 버튼으로 Google 로그인을 시작하면 다른 기기와 카드 동기화를 사용할 수 있습니다."
+                : "현재는 로컬 저장 모드입니다. Supabase 값을 넣으면 여기서 Google 로그인 연결 상태를 직접 관리할 수 있습니다."
+          }
+        />
         <InfoRow
           icon="swap-horizontal"
           title="양방향 암기"
@@ -1397,7 +1437,7 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   saveScene: {
-    justifyContent: "center",
+    justifyContent: "flex-start",
   },
   heroStrip: {
     paddingTop: 8,
@@ -1476,24 +1516,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#11182B",
     borderWidth: 1,
     borderColor: "rgba(184, 174, 255, 0.16)",
-  },
-  composerTopline: {
-    flexDirection: "row",
-    justifyContent: "flex-start",
-  },
-  moonPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 999,
-    backgroundColor: "rgba(184, 174, 255, 0.1)",
-  },
-  moonPillText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#B8AEFF",
   },
   composerTitle: {
     fontSize: 28,
@@ -1756,9 +1778,13 @@ const styles = StyleSheet.create({
   },
   quizHeader: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 12,
+  },
+  quizHeaderContent: {
+    flex: 1,
+    minWidth: 0,
   },
   quizSetupRow: {
     flexDirection: "row",
@@ -1844,6 +1870,7 @@ const styles = StyleSheet.create({
     color: "#0B1020",
   },
   quizStartButton: {
+    alignSelf: "flex-start",
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -1865,6 +1892,55 @@ const styles = StyleSheet.create({
     padding: 18,
     borderRadius: 24,
     backgroundColor: "#11182B",
+  },
+  quizReadyCard: {
+    gap: 16,
+    padding: 20,
+    borderRadius: 24,
+    backgroundColor: "#11182B",
+    borderWidth: 1,
+    borderColor: "rgba(184, 174, 255, 0.12)",
+  },
+  quizReadyIconWrap: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(184, 174, 255, 0.12)",
+  },
+  quizReadyTitle: {
+    fontSize: 22,
+    lineHeight: 30,
+    fontWeight: "800",
+    color: "#F5F7FF",
+  },
+  quizReadyBody: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: "#8E9ABC",
+  },
+  quizReadyStats: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  quizReadyStat: {
+    flex: 1,
+    gap: 6,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: "#0B1020",
+    borderWidth: 1,
+    borderColor: "rgba(184, 174, 255, 0.08)",
+  },
+  quizReadyStatValue: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#F5F7FF",
+  },
+  quizReadyStatLabel: {
+    fontSize: 12,
+    color: "#8E9ABC",
   },
   quizSummaryHeader: {
     gap: 6,
