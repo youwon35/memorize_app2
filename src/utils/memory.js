@@ -61,24 +61,50 @@ export const mergePairsBySignature = (...collections) => {
   return sortPairs(Array.from(merged.values()));
 };
 
-export const buildPracticeDeck = (pairs, limit) => {
+export const buildPracticeDeck = (pairs, limit, mode = "both") => {
   const randomizedDeck = shuffle(
-    sortPairs(pairs).flatMap((pair) => [
-      {
-        id: `${pair.id}-front`,
-        pairId: pair.id,
-        prompt: pair.left,
-        answer: pair.right,
-        direction: "A_TO_B",
-      },
-      {
-        id: `${pair.id}-back`,
-        pairId: pair.id,
-        prompt: pair.right,
-        answer: pair.left,
-        direction: "B_TO_A",
-      },
-    ])
+    sortPairs(pairs).flatMap((pair) => {
+      if (mode === "front") {
+        return [
+          {
+            id: `${pair.id}-front`,
+            pairId: pair.id,
+            prompt: pair.left,
+            answer: pair.right,
+            direction: "A_TO_B",
+          },
+        ];
+      }
+
+      if (mode === "back") {
+        return [
+          {
+            id: `${pair.id}-back`,
+            pairId: pair.id,
+            prompt: pair.right,
+            answer: pair.left,
+            direction: "B_TO_A",
+          },
+        ];
+      }
+
+      return [
+        {
+          id: `${pair.id}-front`,
+          pairId: pair.id,
+          prompt: pair.left,
+          answer: pair.right,
+          direction: "A_TO_B",
+        },
+        {
+          id: `${pair.id}-back`,
+          pairId: pair.id,
+          prompt: pair.right,
+          answer: pair.left,
+          direction: "B_TO_A",
+        },
+      ];
+    })
   );
 
   if (!Number.isFinite(limit)) {
