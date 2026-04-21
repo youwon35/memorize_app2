@@ -34,7 +34,43 @@ npx expo install --fix
 npm run start
 ```
 
-Then open the Android emulator, or scan the QR code with Expo Go.
+This starts the app in `dev client + tunnel` mode so you can keep checking Google login on a real phone without reinstalling every time.
+
+Other useful options:
+
+```bash
+npm run start:lan
+npm run start:go
+npm run build:dev
+```
+
+- `npm run start`: recommended default for repeated real-device testing, including Google login
+- `npm run start:lan`: same dev build flow on the local network
+- `npm run start:go`: fallback Expo Go mode for UI-only checks
+- `npm run build:dev`: creates the Android development build you install once on the phone
+
+## Fast Google login testing after each edit
+
+1. Create `.env` from `.env.example` and fill in the real Supabase values.
+2. Build and install the dev build once:
+
+```bash
+npm run build:dev
+```
+
+3. Open the installed dev build on the phone.
+4. Start the Metro server:
+
+```bash
+npm run start
+```
+
+5. After that, most UI / logic edits only need a save plus Fast Refresh. You do not need to rebuild the APK each time.
+
+Rebuild the dev build only when native config changes, for example:
+- app scheme or package name changes
+- a new native Expo library is added
+- config plugins or native permissions change
 
 ## Google account sync setup
 
@@ -44,7 +80,7 @@ Then open the Android emulator, or scan the QR code with Expo Go.
 4. In Google Cloud Console, create a Web OAuth client and connect it to Supabase.
 5. Add a `.env` file using [.env.example](./.env.example).
 6. Add `memoria://auth/callback` to the Supabase redirect allow list.
-7. Add the same redirect URI to your Google / Supabase auth setup before testing an APK.
+7. Add the same redirect URI to your Google / Supabase auth setup before testing a dev build or APK.
 
 ## Android release path
 
@@ -62,6 +98,14 @@ Then open the Android emulator, or scan the QR code with Expo Go.
 3. Add `memoria://auth/callback` to Supabase Redirect URLs.
 4. Add the same redirect URI to the Google OAuth setup used by Supabase.
 5. Build with `eas build --platform android --profile preview` and install the APK from the generated EAS link.
+
+## Recommended daily workflow
+
+1. Keep the dev build installed on your phone.
+2. Run `npm run start`.
+3. Edit code and save.
+4. Confirm the change immediately in the dev build, including Google login flow when needed.
+5. Only make a new build when a native setting changes.
 
 ## Git branch strategy
 

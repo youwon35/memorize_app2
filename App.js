@@ -1182,7 +1182,9 @@ export default function App() {
     <View style={styles.scene}>
       <View style={styles.heroStrip}>
         <Text style={styles.heroEyebrow}>앱 정보</Text>
-        <Text style={styles.heroMeta}>실제 APK 테스트를 염두에 둔 Google 로그인 경로까지 같이 정리했습니다.</Text>
+        <Text style={styles.heroMeta}>
+          한 번 dev build를 설치해 두면 매번 APK를 다시 깔지 않고도 Google 로그인까지 바로 확인할 수 있습니다.
+        </Text>
       </View>
 
       <View style={styles.infoPanel}>
@@ -1196,14 +1198,19 @@ export default function App() {
           title="Google 로그인"
           body={
             isSupabaseConfigured
-              ? "현재 앱 코드에는 Google OAuth 흐름이 연결되어 있습니다. Supabase와 Google Cloud 설정만 맞추면 Expo Go와 APK에서 같은 계정으로 로그인 테스트가 가능합니다."
+              ? "현재 앱 코드에는 Google OAuth 흐름이 연결되어 있습니다. Supabase와 Google Cloud 설정이 맞다면 dev build에서 수정 후 저장만으로 같은 계정 로그인 흐름을 반복 확인할 수 있습니다."
               : "현재는 Supabase 환경변수가 없어 로컬 저장 모드입니다. .env에 Supabase URL과 Anon Key를 넣으면 Google 로그인 버튼이 바로 활성화됩니다."
           }
         />
         <InfoRow
+          icon="cellphone-link"
+          title="빠른 실기기 확인"
+          body="폰에 개발용 빌드를 한 번만 설치한 뒤 `npm run start`를 실행하면, 이후에는 Fast Refresh로 화면 수정과 Google 로그인 흐름을 바로 확인할 수 있습니다."
+        />
+        <InfoRow
           icon="link-variant"
-          title="APK용 리디렉션"
-          body={`Supabase Redirect URLs와 Google 설정에는 ${RELEASE_REDIRECT_URI} 를 추가해 두는 것이 안전합니다.`}
+          title="공통 리디렉션"
+          body={`Supabase Redirect URLs와 Google 설정에는 ${RELEASE_REDIRECT_URI} 를 추가해 두면 dev build와 APK 테스트를 같은 경로로 맞출 수 있습니다.`}
         />
       </View>
     </View>
