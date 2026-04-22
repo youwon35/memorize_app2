@@ -66,6 +66,22 @@ export const createEmptyStudyStats = () => ({
   sessions: [],
 });
 
+export const createPersistableStudyStats = (studyStats, pairs = []) => {
+  const syncedStats = syncStudyStatsWithPairs(studyStats, pairs);
+
+  return {
+    cards: Object.fromEntries(
+      Object.entries(syncedStats.cards).map(([signature, cardStats]) => [
+        signature,
+        createPersistableCardStats(cardStats),
+      ])
+    ),
+    sessions: syncedStats.sessions
+      .map((session) => createPersistableStudySession(session))
+      .filter(Boolean),
+  };
+};
+
 export const syncStudyStatsWithPairs = (studyStats, pairs) => {
   const safeStats = ensureStudyStats(studyStats);
   const nextCards = { ...safeStats.cards };
@@ -215,7 +231,7 @@ export const buildPracticeDeck = (pairs, limit, mode = "both", studyStats = null
           ...card,
           weight: getCardPriority(card, studyStats),
         }))
-      )
+      ).map(({ weight, ...card }) => card)
     : shuffle(candidates);
 
   if (!Number.isFinite(limit)) {
@@ -331,6 +347,73 @@ function ensureDirectionStats(currentStats) {
   };
 }
 
+function createPersistableCardStats(cardStats) {
+  const safeCardStats = ensureCardStats(cardStats);
+
+  return {
+    left: safeCardStats.left,
+    right: safeCardStats.right,
+    createdAt: safeCardStats.createdAt,
+    attempts: safeCardStats.attempts,
+    correct: safeCardStats.correct,
+    incorrect: safeCardStats.incorrect,
+    lastStudiedAt: safeCardStats.lastStudiedAt,
+    lastCorrectAt: safeCardStats.lastCorrectAt,
+    lastIncorrectAt: safeCardStats.lastIncorrectAt,
+    lastResult: safeCardStats.lastResult,
+    directions: {
+      A_TO_B: createPersistableDirectionStats(safeCardStats.directions.A_TO_B),
+      B_TO_A: createPersistableDirectionStats(safeCardStats.directions.B_TO_A),
+    },
+  };
+}
+
+function createPersistableDirectionStats(directionStats) {
+  const safeDirectionStats = ensureDirectionStats(directionStats);
+
+  return {
+    attempts: safeDirectionStats.attempts,
+    correct: safeDirectionStats.correct,
+    incorrect: safeDirectionStats.incorrect,
+    lastStudiedAt: safeDirectionStats.lastStudiedAt,
+    lastCorrectAt: safeDirectionStats.lastCorrectAt,
+    lastIncorrectAt: safeDirectionStats.lastIncorrectAt,
+    lastResult: safeDirectionStats.lastResult,
+  };
+}
+
+function createPersistableStudySession(session) {
+  if (!session || typeof session !== "object") {
+    return null;
+  }
+
+  const timestamp = new Date().toISOString();
+  const incorrectCards = Array.isArray(session.incorrectCards)
+    ? session.incorrectCards.map((card) => ({
+        signature:
+          typeof card?.signature === "string" && card.signature
+            ? card.signature
+            : createSignature(card?.left ?? "", card?.right ?? ""),
+        left: card?.left ?? "",
+        right: card?.right ?? "",
+        direction: card?.direction === "B_TO_A" ? "B_TO_A" : "A_TO_B",
+      }))
+    : [];
+
+  return {
+    id: typeof session.id === "string" && session.id ? session.id : createId("session"),
+    startedAt: typeof session.startedAt === "string" ? session.startedAt : timestamp,
+    completedAt: typeof session.completedAt === "string" ? session.completedAt : timestamp,
+    requestedCount: sanitizeCount(session.requestedCount),
+    totalCards: sanitizeCount(session.totalCards),
+    mode: sanitizeQuizMode(session.mode),
+    source: sanitizeSessionSource(session.source),
+    correctCount: sanitizeCount(session.correctCount),
+    incorrectCount: sanitizeCount(session.incorrectCount ?? incorrectCards.length),
+    incorrectCards,
+  };
+}
+
 function mergeCardStats(previousStats, nextStats, pair) {
   return {
     left: pair.left,
@@ -427,6 +510,32 @@ function hoursBetween(timestamp) {
   }
 
   return Math.max(0, (Date.now() - new Date(timestamp).getTime()) / (1000 * 60 * 60));
+}
+
+function sanitizeCount(value) {
+  const parsedValue = Number(value);
+
+  if (!Number.isFinite(parsedValue)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round(parsedValue));
+}
+
+function sanitizeQuizMode(mode) {
+  if (mode === "front" || mode === "back") {
+    return mode;
+  }
+
+  return "both";
+}
+
+function sanitizeSessionSource(source) {
+  if (source === "retry") {
+    return "retry";
+  }
+
+  return "adaptive";
 }
 
 

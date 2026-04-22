@@ -4,6 +4,7 @@ import {
   Animated,
   Easing,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   SafeAreaView,
@@ -28,6 +29,7 @@ import {
   compareAnswers,
   createEmptyStudyStats,
   createLocalPair,
+  createPersistableStudyStats,
   createSignature,
   getDirectionLabel,
   migrateStudyStatsEntry,
@@ -37,7 +39,6 @@ import {
   recordStudyAttempt,
   shuffleItems,
   sortPairs,
-  syncStudyStatsWithPairs,
   updatePairValues,
 } from "./src/utils/memory";
 
@@ -53,6 +54,7 @@ const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
 const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
 const DEFAULT_QUIZ_COUNT = 10;
 const MAX_SESSION_HISTORY = 60;
+const SUPPORT_EMAIL = ["youwon35", "naver.com"].join("@");
 const THEME_OPTIONS = [
   { key: "dark", label: "다크", icon: "weather-night" },
   { key: "light", label: "라이트", icon: "white-balance-sunny" },
@@ -326,7 +328,7 @@ export default function App() {
 
         if (storedStudyStats && active) {
           try {
-            setStudyStats(syncStudyStatsWithPairs(JSON.parse(storedStudyStats), pairsRef.current));
+            setStudyStats(createPersistableStudyStats(JSON.parse(storedStudyStats), pairsRef.current));
           } catch {
             setStudyStats(createEmptyStudyStats());
           }
@@ -388,7 +390,7 @@ export default function App() {
       return;
     }
 
-    const syncedStudyStats = syncStudyStatsWithPairs(studyStatsRef.current, pairs);
+    const syncedStudyStats = createPersistableStudyStats(studyStatsRef.current, pairs);
     studyStatsRef.current = syncedStudyStats;
     setStudyStats(syncedStudyStats);
     void AsyncStorage.setItem(STUDY_STATS_KEY, JSON.stringify(syncedStudyStats));
@@ -591,7 +593,7 @@ export default function App() {
   };
 
   const updateStudyStats = (nextStudyStats) => {
-    const syncedStudyStats = syncStudyStatsWithPairs(nextStudyStats, pairsRef.current);
+    const syncedStudyStats = createPersistableStudyStats(nextStudyStats, pairsRef.current);
     studyStatsRef.current = syncedStudyStats;
     setStudyStats(syncedStudyStats);
     void AsyncStorage.setItem(STUDY_STATS_KEY, JSON.stringify(syncedStudyStats));
@@ -898,6 +900,7 @@ export default function App() {
     updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, false));
     setResult("incorrect");
     setFeedback("다시 한 번 생각해 보세요");
+    setShowAnswer(true);
     setRoundIncorrectIds((currentIds) =>
       currentIds.includes(current.id) ? currentIds : [...currentIds, current.id]
     );
@@ -981,6 +984,22 @@ export default function App() {
       Alert.alert("로그아웃 실패", error?.message || "잠시 후 다시 시도해 주세요.");
     } finally {
       setAuthBusy(false);
+    }
+  };
+
+  const openSupportEmail = async () => {
+    try {
+      const emailUrl = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${APP_NAME} 문의`)}`;
+      const canOpen = await Linking.canOpenURL(emailUrl);
+
+      if (!canOpen) {
+        Alert.alert("메일 앱 필요", "문의 메일을 보내려면 메일 앱이 필요합니다.");
+        return;
+      }
+
+      await Linking.openURL(emailUrl);
+    } catch (error) {
+      Alert.alert("문의 열기 실패", error?.message || "잠시 후 다시 시도해 주세요.");
     }
   };
 
@@ -1255,14 +1274,10 @@ export default function App() {
               <Pressable onPress={submitAnswer} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
                 <Text style={styles.primaryButtonText}>제출</Text>
               </Pressable>
-              <Pressable onPress={() => setShowAnswer(true)} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-                <Text style={styles.secondaryButtonText}>정답 보기</Text>
+              <Pressable onPress={goNext} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
+                <Text style={styles.secondaryButtonText}>다음 카드로 넘어가기</Text>
               </Pressable>
             </View>
-
-            <Pressable onPress={goNext} style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}>
-              <Text style={styles.ghostButtonText}>다음 카드로 넘어가기</Text>
-            </Pressable>
           </View>
         ) : hasSavedCards ? (
           <View style={styles.quizReadyCard}>
@@ -1643,6 +1658,22 @@ export default function App() {
           </Text>
           <Pressable onPress={() => setTutorialVisible(true)} style={({ pressed }) => [styles.inlineActionButton, pressed && styles.pressed]}>
             <Text style={styles.inlineActionButtonText}>튜토리얼 다시 보기</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.settingsCard}>
+          <View style={styles.settingsHeader}>
+            <Text style={styles.settingsTitle}>문의하기</Text>
+            <Text style={styles.settingsBody}>
+              오류 제보나 기능 제안이 있다면 개발자 네이버 메일로 바로 보낼 수 있습니다.
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => void openSupportEmail()}
+            style={({ pressed }) => [styles.inlineActionButton, styles.contactActionButton, pressed && styles.pressed]}
+          >
+            <MaterialCommunityIcons name="email-fast-outline" size={16} color={theme.textPrimary} />
+            <Text style={styles.inlineActionButtonText}>문의 메일 보내기</Text>
           </Pressable>
         </View>
       </View>
@@ -2110,20 +2141,6 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "700",
     color: theme.danger,
   },
-  ghostButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 18,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-    backgroundColor: theme.surfaceGhost,
-  },
-  ghostButtonText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: theme.textSoft,
-  },
   pressed: {
     opacity: 0.88,
   },
@@ -2560,6 +2577,11 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.surfaceMuted,
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
+  },
+  contactActionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   inlineActionButtonText: {
     fontSize: 13,
