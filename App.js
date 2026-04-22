@@ -211,21 +211,13 @@ export default function App() {
   const hasSavedCards = pairs.length > 0;
   const quizModeConfig = getQuizModeConfig(quizMode);
   const maxQuizCount = pairs.length ? pairs.length * (quizMode === "both" ? 2 : 1) : 0;
+  const contentTopPadding = 18 + (Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0);
   const parsedQuizCount = Number.parseInt(quizCountInput, 10);
   const resolvedQuizCount = !maxQuizCount
     ? 0
     : Number.isFinite(parsedQuizCount) && parsedQuizCount > 0
       ? Math.min(parsedQuizCount, maxQuizCount)
       : Math.min(DEFAULT_QUIZ_COUNT, maxQuizCount);
-  const quizPresetOptions = useMemo(() => {
-    if (!maxQuizCount) {
-      return [];
-    }
-
-    return Array.from(
-      new Set([Math.min(5, maxQuizCount), Math.min(10, maxQuizCount), maxQuizCount])
-    );
-  }, [maxQuizCount]);
   const roundIncorrectCards = useMemo(() => {
     if (!deck.length || !roundIncorrectIds.length) {
       return [];
@@ -612,13 +604,13 @@ export default function App() {
 
       const file = new File(asset.uri);
       const text = await file.text();
-      const { entries, invalidLineNumbers } = parseImportedPairs(text);
+      const { entries, invalidEntryIndexes } = parseImportedPairs(text);
 
       if (!entries.length) {
         Alert.alert(
           "카드를 찾지 못했습니다",
-          invalidLineNumbers.length
-            ? "형식이 맞는 줄이 없습니다. 가장 안전한 형식은 한 줄에 앞면과 뒷면을 탭으로 구분하는 방식입니다."
+          invalidEntryIndexes.length
+            ? "형식이 맞는 카드 묶음이 없습니다. 앞면 한 줄, 뒷면 한 줄을 적고 카드 사이에는 빈 줄 한 줄을 넣어 주세요."
             : "비어 있는 파일입니다."
         );
         return;
@@ -637,9 +629,9 @@ export default function App() {
         );
       }
 
-      if (invalidLineNumbers.length) {
+      if (invalidEntryIndexes.length) {
         messages.push(
-          `${invalidLineNumbers.length}개 줄은 형식이 맞지 않아 제외했습니다.`
+          `${invalidEntryIndexes.length}개 묶음은 형식이 맞지 않아 제외했습니다.`
         );
       }
 
@@ -662,14 +654,6 @@ export default function App() {
     } finally {
       setImporting(false);
     }
-  };
-
-  const selectQuizCount = (count) => {
-    if (!maxQuizCount) {
-      return;
-    }
-
-    setQuizCountInput(`${Math.max(1, Math.min(count, maxQuizCount))}`);
   };
 
   const normalizeQuizCountInput = () => {
@@ -878,16 +862,11 @@ export default function App() {
     <View style={[styles.scene, styles.saveScene]}>
       <View style={styles.composerPanel}>
         <Text style={styles.composerTitle}>카드를 하나씩 차분하게 쌓아 두세요.</Text>
-        <Text style={styles.composerBody}>
-          저장하면 앞면과 뒷면이 모두 문제로 출제됩니다. 추가 버튼 없이 바로 한 장씩 기록하도록 단순화했습니다.
-        </Text>
 
         <Text style={styles.inputLabel}>앞면</Text>
         <TextInput
           value={draft.left}
           onChangeText={(value) => setDraft((currentDraft) => ({ ...currentDraft, left: value }))}
-          placeholder="문제로 보여줄 단어 또는 문장"
-          placeholderTextColor={theme.textPlaceholder}
           style={[styles.input, styles.multilineInput]}
           multiline
           textAlignVertical="top"
@@ -897,8 +876,6 @@ export default function App() {
         <TextInput
           value={draft.right}
           onChangeText={(value) => setDraft((currentDraft) => ({ ...currentDraft, right: value }))}
-          placeholder="뜻, 번역, 해설 또는 정답"
-          placeholderTextColor={theme.textPlaceholder}
           style={[styles.input, styles.multilineInput]}
           multiline
           textAlignVertical="top"
@@ -921,8 +898,8 @@ export default function App() {
             <View style={styles.flex}>
               <Text style={styles.importTitle}>텍스트 파일로 여러 장 한꺼번에 추가</Text>
               <Text style={styles.importBody}>
-                한 줄에 한 쌍씩 적으면 됩니다. 가장 안전한 형식은 `앞면[TAB]뒷면`이고,
-                현재 예시처럼 `sun 해`처럼 공백 한 칸 형식도 읽습니다.
+                앞면 한 줄, 뒷면 한 줄을 적고 카드 사이에는 빈 줄 한 줄을 넣어 주세요.
+                {"\n"}예시: sun{"\n"}해{"\n\n"}달{"\n"}moon
               </Text>
             </View>
           </View>
@@ -989,18 +966,13 @@ export default function App() {
           </Pressable>
         </View>
 
-        <View style={styles.quizSetupRow}>
-          <View style={styles.quizSetupCard}>
-            <Text style={styles.quizSetupLabel}>이번 라운드 문제 수</Text>
-            <Text style={styles.quizSetupHint}>
-              {pairs.length
-                ? `1부터 ${maxQuizCount}문제까지 정할 수 있고, 시작할 때마다 랜덤으로 섞입니다.`
-                : "카드를 저장하면 여기서 출제 문제 수를 정할 수 있습니다."}
-            </Text>
+        <View style={styles.quizCountCard}>
+          <View style={styles.quizCountCardHeader}>
+            <Text style={styles.quizSetupLabel}>문제 수</Text>
+            <Text style={styles.quizCountCompactCaption}>{pairs.length ? `최대 ${maxQuizCount}` : "대기"}</Text>
           </View>
 
-          <View style={styles.quizCountBox}>
-            <Text style={styles.quizCountLabel}>문제 수</Text>
+          <View style={styles.quizCountCompactRow}>
             <TextInput
               value={pairs.length ? quizCountInput : ""}
               onBlur={normalizeQuizCountInput}
@@ -1010,66 +982,15 @@ export default function App() {
               maxLength={3}
               placeholder="-"
               placeholderTextColor={theme.textPlaceholder}
-              style={[styles.quizCountInput, !pairs.length && styles.quizCountInputDisabled]}
+              style={[styles.quizCountCompactInput, !pairs.length && styles.quizCountInputDisabled]}
             />
-            <Text style={styles.quizCountCaption}>{pairs.length ? `최대 ${maxQuizCount}` : "대기"}</Text>
+            <Text style={styles.quizCountCompactHint}>
+              {pairs.length
+                ? "이번 라운드에서 풀 문제 수를 직접 적을 수 있습니다."
+                : "카드를 저장하면 이곳에서 출제 문제 수를 정할 수 있습니다."}
+            </Text>
           </View>
         </View>
-
-        <View style={styles.quizModeCard}>
-          <Text style={styles.quizSetupLabel}>출제 방향</Text>
-          <Text style={styles.quizSetupHint}>
-            {pairs.length
-              ? quizModeConfig.description
-              : "카드를 저장하면 여기서 양방향 또는 한 방향 출제를 고를 수 있습니다."}
-          </Text>
-          <View style={styles.quizModeRow}>
-            {QUIZ_MODE_OPTIONS.map((option) => {
-              const active = quizMode === option.key;
-
-              return (
-                <Pressable
-                  key={option.key}
-                  onPress={() => setQuizMode(option.key)}
-                  style={({ pressed }) => [
-                    styles.quizModeChip,
-                    active && styles.quizModeChipActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={[styles.quizModeChipText, active && styles.quizModeChipTextActive]}>
-                    {option.chipLabel}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        {quizPresetOptions.length ? (
-          <View style={styles.quizPresetRow}>
-            {quizPresetOptions.map((count) => (
-              <Pressable
-                key={`quiz-count-${count}`}
-                onPress={() => selectQuizCount(count)}
-                style={({ pressed }) => [
-                  styles.quizPresetChip,
-                  resolvedQuizCount === count && styles.quizPresetChipActive,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.quizPresetText,
-                    resolvedQuizCount === count && styles.quizPresetTextActive,
-                  ]}
-                >
-                  {count === maxQuizCount ? "전체" : `${count}문제`}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
 
         {roundComplete && deck.length ? (
           <View style={styles.quizSummaryCard}>
@@ -1172,10 +1093,7 @@ export default function App() {
               <MaterialCommunityIcons name="brain" size={22} color={theme.accent} />
             </View>
             <Text style={styles.quizReadyTitle}>카드가 준비됐어요. 바로 암기를 시작할 수 있습니다.</Text>
-            <Text style={styles.quizReadyBody}>
-              {quizModeConfig.label} 모드로 맞춰져 있고, 이번 라운드에서는
-              최대 {maxQuizCount}문제까지 출제할 수 있습니다.
-            </Text>
+            <Text style={styles.quizReadyBody}>이번 라운드에서는 최대 {maxQuizCount}문제까지 출제할 수 있습니다.</Text>
 
             <View style={styles.quizReadyStats}>
               <View style={styles.quizReadyStat}>
@@ -1189,6 +1107,32 @@ export default function App() {
               <View style={styles.quizReadyStat}>
                 <Text style={styles.quizReadyStatValue}>{maxQuizCount}</Text>
                 <Text style={styles.quizReadyStatLabel}>출제 가능</Text>
+              </View>
+            </View>
+
+            <View style={[styles.quizModeCard, styles.quizModeCardEmbedded]}>
+              <Text style={styles.quizSetupLabel}>출제 방향</Text>
+              <Text style={styles.quizSetupHint}>{quizModeConfig.description}</Text>
+              <View style={styles.quizModeRow}>
+                {QUIZ_MODE_OPTIONS.map((option) => {
+                  const active = quizMode === option.key;
+
+                  return (
+                    <Pressable
+                      key={option.key}
+                      onPress={() => setQuizMode(option.key)}
+                      style={({ pressed }) => [
+                        styles.quizModeChip,
+                        active && styles.quizModeChipActive,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text style={[styles.quizModeChipText, active && styles.quizModeChipTextActive]}>
+                        {option.chipLabel}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
             </View>
 
@@ -1447,7 +1391,7 @@ export default function App() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingTop: contentTopPadding }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -1668,11 +1612,6 @@ const createStyles = (theme) => StyleSheet.create({
     lineHeight: 34,
     fontWeight: "800",
     color: theme.textPrimary,
-  },
-  composerBody: {
-    fontSize: 14,
-    lineHeight: 22,
-    color: theme.textMuted,
   },
   inputLabel: {
     fontSize: 13,
@@ -1937,11 +1876,6 @@ const createStyles = (theme) => StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  quizSetupRow: {
-    flexDirection: "row",
-    gap: 12,
-    alignItems: "stretch",
-  },
   quizModeCard: {
     gap: 12,
     padding: 16,
@@ -1949,6 +1883,9 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
+  },
+  quizModeCardEmbedded: {
+    backgroundColor: theme.surfaceCard,
   },
   quizModeRow: {
     flexDirection: "row",
@@ -1976,15 +1913,6 @@ const createStyles = (theme) => StyleSheet.create({
   quizModeChipTextActive: {
     color: theme.accentText,
   },
-  quizSetupCard: {
-    flex: 1,
-    gap: 6,
-    padding: 16,
-    borderRadius: 20,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
   quizSetupLabel: {
     fontSize: 13,
     fontWeight: "800",
@@ -1995,29 +1923,34 @@ const createStyles = (theme) => StyleSheet.create({
     lineHeight: 20,
     color: theme.textSecondary,
   },
-  quizCountBox: {
-    width: 108,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 14,
+  quizCountCard: {
+    gap: 12,
+    padding: 16,
     borderRadius: 20,
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
-  quizCountLabel: {
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.6,
-    textTransform: "uppercase",
-    color: theme.textSecondary,
+  quizCountCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
   },
-  quizCountInput: {
-    minWidth: 54,
-    paddingVertical: 0,
-    fontSize: 30,
+  quizCountCompactRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  quizCountCompactInput: {
+    width: 78,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+    backgroundColor: theme.surfaceMuted,
+    fontSize: 22,
     fontWeight: "800",
     textAlign: "center",
     color: theme.textPrimary,
@@ -2025,34 +1958,15 @@ const createStyles = (theme) => StyleSheet.create({
   quizCountInputDisabled: {
     color: theme.textMuted,
   },
-  quizCountCaption: {
+  quizCountCompactCaption: {
     fontSize: 12,
     color: theme.textSecondary,
   },
-  quizPresetRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  quizPresetChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: theme.surfaceMuted,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-  },
-  quizPresetChipActive: {
-    backgroundColor: theme.accent,
-    borderColor: theme.accent,
-  },
-  quizPresetText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: theme.textStrong,
-  },
-  quizPresetTextActive: {
-    color: theme.accentText,
+  quizCountCompactHint: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 20,
+    color: theme.textSecondary,
   },
   quizStartButton: {
     alignSelf: "flex-start",

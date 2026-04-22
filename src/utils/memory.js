@@ -118,29 +118,37 @@ export const shuffleItems = (items) => shuffle(items);
 
 export const parseImportedPairs = (text) => {
   const entries = [];
-  const invalidLineNumbers = [];
+  const invalidEntryIndexes = [];
 
   text
     .replace(/\r\n/g, "\n")
-    .split("\n")
-    .forEach((rawLine, index) => {
-      const line = rawLine.trim();
+    .split(/\n\s*\n+/)
+    .forEach((rawBlock, index) => {
+      const lines = rawBlock
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("#"));
 
-      if (!line || line.startsWith("#")) {
+      if (!lines.length) {
         return;
       }
 
-      const pair = splitImportedPair(line);
-
-      if (!pair) {
-        invalidLineNumbers.push(index + 1);
+      if (lines.length !== 2) {
+        invalidEntryIndexes.push(index + 1);
         return;
       }
 
-      entries.push(pair);
+      const [left, right] = lines;
+
+      if (!left || !right) {
+        invalidEntryIndexes.push(index + 1);
+        return;
+      }
+
+      entries.push({ left, right });
     });
 
-  return { entries, invalidLineNumbers };
+  return { entries, invalidEntryIndexes };
 };
 
 export const mapPairRecord = (record) => ({
@@ -170,43 +178,4 @@ function shuffle(items) {
   return cloned;
 }
 
-function splitImportedPair(line) {
-  const delimitedPair =
-    splitByPattern(line, /\t+/) ||
-    splitByPattern(line, /\s*\|\s*/) ||
-    splitByPattern(line, /\s*::\s*/) ||
-    splitByPattern(line, /\s*→\s*/);
-
-  if (delimitedPair) {
-    return delimitedPair;
-  }
-
-  const tokens = line.split(/\s+/).filter(Boolean);
-
-  if (tokens.length < 2) {
-    return null;
-  }
-
-  return {
-    left: tokens[0].trim(),
-    right: tokens.slice(1).join(" ").trim(),
-  };
-}
-
-function splitByPattern(line, pattern) {
-  const matched = line.match(pattern);
-
-  if (!matched || typeof matched.index !== "number") {
-    return null;
-  }
-
-  const left = line.slice(0, matched.index).trim();
-  const right = line.slice(matched.index + matched[0].length).trim();
-
-  if (!left || !right) {
-    return null;
-  }
-
-  return { left, right };
-}
 
