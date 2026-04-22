@@ -61,57 +61,168 @@ export const mergePairsBySignature = (...collections) => {
   return sortPairs(Array.from(merged.values()));
 };
 
-export const buildPracticeDeck = (pairs, limit, mode = "both") => {
-  const randomizedDeck = shuffle(
-    sortPairs(pairs).flatMap((pair) => {
-      if (mode === "front") {
-        return [
-          {
-            id: `${pair.id}-front`,
-            pairId: pair.id,
-            prompt: pair.left,
-            answer: pair.right,
-            direction: "A_TO_B",
-          },
-        ];
-      }
+export const createEmptyStudyStats = () => ({
+  cards: {},
+  sessions: [],
+});
 
-      if (mode === "back") {
-        return [
-          {
-            id: `${pair.id}-back`,
-            pairId: pair.id,
-            prompt: pair.right,
-            answer: pair.left,
-            direction: "B_TO_A",
-          },
-        ];
-      }
+export const syncStudyStatsWithPairs = (studyStats, pairs) => {
+  const safeStats = ensureStudyStats(studyStats);
+  const nextCards = { ...safeStats.cards };
 
+  pairs.forEach((pair) => {
+    const signature = createSignature(pair.left, pair.right);
+    nextCards[signature] = ensureCardStats(nextCards[signature], pair);
+  });
+
+  return {
+    ...safeStats,
+    cards: nextCards,
+  };
+};
+
+export const migrateStudyStatsEntry = (studyStats, previousPair, nextPair) => {
+  const safeStats = ensureStudyStats(studyStats);
+  const previousSignature = createSignature(previousPair.left, previousPair.right);
+  const nextSignature = createSignature(nextPair.left, nextPair.right);
+
+  if (previousSignature === nextSignature) {
+    return syncStudyStatsWithPairs(safeStats, [nextPair]);
+  }
+
+  const nextCards = { ...safeStats.cards };
+  const previousStats = nextCards[previousSignature];
+  const nextStats = ensureCardStats(nextCards[nextSignature], nextPair);
+
+  if (previousStats) {
+    nextCards[nextSignature] = mergeCardStats(previousStats, nextStats, nextPair);
+    delete nextCards[previousSignature];
+  } else {
+    nextCards[nextSignature] = nextStats;
+  }
+
+  return {
+    ...safeStats,
+    cards: nextCards,
+  };
+};
+
+export const recordStudyAttempt = (studyStats, card, isCorrect) => {
+  const safeStats = ensureStudyStats(studyStats);
+  const signature = card.signature ?? createSignature(card.left ?? card.prompt, card.right ?? card.answer);
+  const timestamp = new Date().toISOString();
+  const currentCardStats = ensureCardStats(safeStats.cards[signature], card);
+  const currentDirectionStats = ensureDirectionStats(currentCardStats.directions[card.direction]);
+  const nextDirectionStats = {
+    ...currentDirectionStats,
+    attempts: currentDirectionStats.attempts + 1,
+    correct: currentDirectionStats.correct + (isCorrect ? 1 : 0),
+    incorrect: currentDirectionStats.incorrect + (isCorrect ? 0 : 1),
+    lastStudiedAt: timestamp,
+    lastCorrectAt: isCorrect ? timestamp : currentDirectionStats.lastCorrectAt,
+    lastIncorrectAt: isCorrect ? currentDirectionStats.lastIncorrectAt : timestamp,
+    lastResult: isCorrect ? "correct" : "incorrect",
+  };
+  const nextCardStats = {
+    ...currentCardStats,
+    left: card.left ?? currentCardStats.left,
+    right: card.right ?? currentCardStats.right,
+    attempts: currentCardStats.attempts + 1,
+    correct: currentCardStats.correct + (isCorrect ? 1 : 0),
+    incorrect: currentCardStats.incorrect + (isCorrect ? 0 : 1),
+    lastStudiedAt: timestamp,
+    lastCorrectAt: isCorrect ? timestamp : currentCardStats.lastCorrectAt,
+    lastIncorrectAt: isCorrect ? currentCardStats.lastIncorrectAt : timestamp,
+    lastResult: isCorrect ? "correct" : "incorrect",
+    directions: {
+      ...currentCardStats.directions,
+      [card.direction]: nextDirectionStats,
+    },
+  };
+
+  return {
+    ...safeStats,
+    cards: {
+      ...safeStats.cards,
+      [signature]: nextCardStats,
+    },
+  };
+};
+
+export const appendStudySession = (studyStats, session, maxSessions = 60) => {
+  const safeStats = ensureStudyStats(studyStats);
+
+  return {
+    ...safeStats,
+    sessions: [session, ...safeStats.sessions].slice(0, maxSessions),
+  };
+};
+
+export const buildPracticeDeck = (pairs, limit, mode = "both", studyStats = null) => {
+  const candidates = sortPairs(pairs).flatMap((pair) => {
+    const base = {
+      pairId: pair.id,
+      left: pair.left,
+      right: pair.right,
+      signature: createSignature(pair.left, pair.right),
+      createdAt: pair.createdAt ?? new Date().toISOString(),
+    };
+
+    if (mode === "front") {
       return [
         {
+          ...base,
           id: `${pair.id}-front`,
-          pairId: pair.id,
           prompt: pair.left,
           answer: pair.right,
           direction: "A_TO_B",
         },
+      ];
+    }
+
+    if (mode === "back") {
+      return [
         {
+          ...base,
           id: `${pair.id}-back`,
-          pairId: pair.id,
           prompt: pair.right,
           answer: pair.left,
           direction: "B_TO_A",
         },
       ];
-    })
-  );
+    }
+
+    return [
+      {
+        ...base,
+        id: `${pair.id}-front`,
+        prompt: pair.left,
+        answer: pair.right,
+        direction: "A_TO_B",
+      },
+      {
+        ...base,
+        id: `${pair.id}-back`,
+        prompt: pair.right,
+        answer: pair.left,
+        direction: "B_TO_A",
+      },
+    ];
+  });
+  const prioritizedDeck = studyStats
+    ? weightedSample(
+        candidates.map((card) => ({
+          ...card,
+          weight: getCardPriority(card, studyStats),
+        }))
+      )
+    : shuffle(candidates);
 
   if (!Number.isFinite(limit)) {
-    return randomizedDeck;
+    return prioritizedDeck;
   }
 
-  return randomizedDeck.slice(0, Math.max(1, Math.min(limit, randomizedDeck.length)));
+  return prioritizedDeck.slice(0, Math.max(1, Math.min(limit, prioritizedDeck.length)));
 };
 
 export const shuffleItems = (items) => shuffle(items);
@@ -176,6 +287,146 @@ function shuffle(items) {
   }
 
   return cloned;
+}
+
+function ensureStudyStats(studyStats) {
+  if (!studyStats || typeof studyStats !== "object") {
+    return createEmptyStudyStats();
+  }
+
+  return {
+    cards: studyStats.cards && typeof studyStats.cards === "object" ? studyStats.cards : {},
+    sessions: Array.isArray(studyStats.sessions) ? studyStats.sessions : [],
+  };
+}
+
+function ensureCardStats(currentStats, pair = {}) {
+  return {
+    left: currentStats?.left ?? pair.left ?? "",
+    right: currentStats?.right ?? pair.right ?? "",
+    createdAt: currentStats?.createdAt ?? pair.createdAt ?? new Date().toISOString(),
+    attempts: currentStats?.attempts ?? 0,
+    correct: currentStats?.correct ?? 0,
+    incorrect: currentStats?.incorrect ?? 0,
+    lastStudiedAt: currentStats?.lastStudiedAt ?? null,
+    lastCorrectAt: currentStats?.lastCorrectAt ?? null,
+    lastIncorrectAt: currentStats?.lastIncorrectAt ?? null,
+    lastResult: currentStats?.lastResult ?? null,
+    directions: {
+      A_TO_B: ensureDirectionStats(currentStats?.directions?.A_TO_B),
+      B_TO_A: ensureDirectionStats(currentStats?.directions?.B_TO_A),
+    },
+  };
+}
+
+function ensureDirectionStats(currentStats) {
+  return {
+    attempts: currentStats?.attempts ?? 0,
+    correct: currentStats?.correct ?? 0,
+    incorrect: currentStats?.incorrect ?? 0,
+    lastStudiedAt: currentStats?.lastStudiedAt ?? null,
+    lastCorrectAt: currentStats?.lastCorrectAt ?? null,
+    lastIncorrectAt: currentStats?.lastIncorrectAt ?? null,
+    lastResult: currentStats?.lastResult ?? null,
+  };
+}
+
+function mergeCardStats(previousStats, nextStats, pair) {
+  return {
+    left: pair.left,
+    right: pair.right,
+    createdAt: previousStats.createdAt ?? nextStats.createdAt ?? pair.createdAt ?? new Date().toISOString(),
+    attempts: (previousStats.attempts ?? 0) + (nextStats.attempts ?? 0),
+    correct: (previousStats.correct ?? 0) + (nextStats.correct ?? 0),
+    incorrect: (previousStats.incorrect ?? 0) + (nextStats.incorrect ?? 0),
+    lastStudiedAt: laterTimestamp(previousStats.lastStudiedAt, nextStats.lastStudiedAt),
+    lastCorrectAt: laterTimestamp(previousStats.lastCorrectAt, nextStats.lastCorrectAt),
+    lastIncorrectAt: laterTimestamp(previousStats.lastIncorrectAt, nextStats.lastIncorrectAt),
+    lastResult: nextStats.lastResult ?? previousStats.lastResult ?? null,
+    directions: {
+      A_TO_B: mergeDirectionStats(previousStats.directions?.A_TO_B, nextStats.directions?.A_TO_B),
+      B_TO_A: mergeDirectionStats(previousStats.directions?.B_TO_A, nextStats.directions?.B_TO_A),
+    },
+  };
+}
+
+function mergeDirectionStats(previousStats, nextStats) {
+  const safePrevious = ensureDirectionStats(previousStats);
+  const safeNext = ensureDirectionStats(nextStats);
+
+  return {
+    attempts: safePrevious.attempts + safeNext.attempts,
+    correct: safePrevious.correct + safeNext.correct,
+    incorrect: safePrevious.incorrect + safeNext.incorrect,
+    lastStudiedAt: laterTimestamp(safePrevious.lastStudiedAt, safeNext.lastStudiedAt),
+    lastCorrectAt: laterTimestamp(safePrevious.lastCorrectAt, safeNext.lastCorrectAt),
+    lastIncorrectAt: laterTimestamp(safePrevious.lastIncorrectAt, safeNext.lastIncorrectAt),
+    lastResult: safeNext.lastResult ?? safePrevious.lastResult ?? null,
+  };
+}
+
+function laterTimestamp(first, second) {
+  if (!first) {
+    return second ?? null;
+  }
+
+  if (!second) {
+    return first;
+  }
+
+  return new Date(first) >= new Date(second) ? first : second;
+}
+
+function weightedSample(items) {
+  const pool = [...items];
+  const ordered = [];
+
+  while (pool.length) {
+    const totalWeight = pool.reduce((sum, item) => sum + Math.max(item.weight ?? 1, 0.35), 0);
+    let cursor = Math.random() * totalWeight;
+    let targetIndex = pool.length - 1;
+
+    for (let index = 0; index < pool.length; index += 1) {
+      cursor -= Math.max(pool[index].weight ?? 1, 0.35);
+
+      if (cursor <= 0) {
+        targetIndex = index;
+        break;
+      }
+    }
+
+    ordered.push(pool.splice(targetIndex, 1)[0]);
+  }
+
+  return ordered;
+}
+
+function getCardPriority(card, studyStats) {
+  const safeStats = ensureStudyStats(studyStats);
+  const cardStats = ensureCardStats(safeStats.cards[card.signature], card);
+  const directionStats = ensureDirectionStats(cardStats.directions[card.direction]);
+  const attempts = directionStats.attempts;
+  const accuracy = attempts ? directionStats.correct / attempts : 0;
+  const errorRate = attempts ? directionStats.incorrect / attempts : 0;
+  const createdHoursAgo = hoursBetween(cardStats.createdAt);
+  const studiedDaysAgo = directionStats.lastStudiedAt ? hoursBetween(directionStats.lastStudiedAt) / 24 : 7;
+  const newnessBoost = attempts === 0 ? (createdHoursAgo <= 24 ? 7.2 : 5.4) : 0;
+  const mistakeBoost =
+    directionStats.incorrect * 1.35 +
+    errorRate * 4.6 +
+    (directionStats.lastResult === "incorrect" ? 2.1 : 0);
+  const staleBoost = Math.min(studiedDaysAgo, 7) * 0.35;
+  const masteryPenalty = attempts >= 3 ? accuracy * 2.6 : accuracy * 0.8;
+
+  return Math.max(0.35, 1 + newnessBoost + mistakeBoost + staleBoost - masteryPenalty);
+}
+
+function hoursBetween(timestamp) {
+  if (!timestamp) {
+    return 999;
+  }
+
+  return Math.max(0, (Date.now() - new Date(timestamp).getTime()) / (1000 * 60 * 60));
 }
 
 

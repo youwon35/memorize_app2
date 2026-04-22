@@ -23,16 +23,21 @@ import * as WebBrowser from "expo-web-browser";
 
 import { isSupabaseConfigured, supabase } from "./src/lib/supabase";
 import {
+  appendStudySession,
   buildPracticeDeck,
   compareAnswers,
+  createEmptyStudyStats,
   createLocalPair,
   createSignature,
   getDirectionLabel,
+  migrateStudyStatsEntry,
   mapPairRecord,
   mergePairsBySignature,
   parseImportedPairs,
+  recordStudyAttempt,
   shuffleItems,
   sortPairs,
+  syncStudyStatsWithPairs,
   updatePairValues,
 } from "./src/utils/memory";
 
@@ -41,10 +46,13 @@ WebBrowser.maybeCompleteAuthSession();
 const APP_NAME = "MEMORIA";
 const STORAGE_KEY = "@memoria/cards";
 const THEME_MODE_KEY = "@memoria/theme-mode";
+const STUDY_STATS_KEY = "@memoria/study-stats";
+const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen";
 const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
 const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
 const DEFAULT_QUIZ_COUNT = 10;
+const MAX_SESSION_HISTORY = 60;
 const THEME_OPTIONS = [
   { key: "dark", label: "다크", icon: "weather-night" },
   { key: "light", label: "라이트", icon: "white-balance-sunny" },
@@ -72,6 +80,7 @@ const QUIZ_MODE_OPTIONS = [
 const TABS = [
   { key: "save", label: "저장", icon: "cards-outline" },
   { key: "quiz", label: "암기", icon: "brain" },
+  { key: "history", label: "기록", icon: "chart-timeline-variant" },
   { key: "manage", label: "보관함", icon: "playlist-edit" },
   { key: "about", label: "앱 정보", icon: "information-outline" },
 ];
@@ -163,8 +172,12 @@ export default function App() {
   const [tab, setTab] = useState("save");
   const [themeMode, setThemeMode] = useState("dark");
   const [pairs, setPairs] = useState([]);
+  const [studyStats, setStudyStats] = useState(createEmptyStudyStats());
   const [draft, setDraft] = useState({ left: "", right: "" });
   const [storageReady, setStorageReady] = useState(false);
+  const [tutorialSeen, setTutorialSeen] = useState(true);
+  const [tutorialReady, setTutorialReady] = useState(false);
+  const [tutorialVisible, setTutorialVisible] = useState(false);
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
   const [authBusy, setAuthBusy] = useState(false);
@@ -192,6 +205,8 @@ export default function App() {
 
   const timerRef = useRef(null);
   const pairsRef = useRef(pairs);
+  const studyStatsRef = useRef(studyStats);
+  const roundMetaRef = useRef(null);
   const bootStartedAt = useRef(Date.now());
   const launchOpacity = useRef(new Animated.Value(1)).current;
   const launchScale = useRef(new Animated.Value(0.94)).current;
@@ -228,10 +243,57 @@ export default function App() {
     return deck.filter((card) => incorrectIdSet.has(card.id));
   }, [deck, roundIncorrectIds]);
   const roundCorrectCount = deck.length - roundIncorrectCards.length;
+  const todayKey = getLocalDayKey(new Date());
+  const todaySessions = useMemo(
+    () => studyStats.sessions.filter((item) => getLocalDayKey(item.completedAt) === todayKey),
+    [studyStats.sessions, todayKey]
+  );
+  const todaySessionCount = todaySessions.length;
+  const todaySolvedCount = todaySessions.reduce((sum, item) => sum + (item.totalCards ?? 0), 0);
+  const todayIncorrectCount = todaySessions.reduce((sum, item) => sum + (item.incorrectCount ?? 0), 0);
+  const recentSessions = useMemo(() => studyStats.sessions.slice(0, 6), [studyStats.sessions]);
+  const todayMissedCards = useMemo(() => {
+    const counter = new Map();
+
+    todaySessions.forEach((item) => {
+      (item.incorrectCards ?? []).forEach((card) => {
+        const currentCount = counter.get(card.signature) ?? {
+          ...card,
+          count: 0,
+        };
+
+        currentCount.count += 1;
+        counter.set(card.signature, currentCount);
+      });
+    });
+
+    return Array.from(counter.values()).sort((a, b) => b.count - a.count).slice(0, 5);
+  }, [todaySessions]);
+  const topMissedCards = useMemo(
+    () =>
+      Object.values(studyStats.cards)
+        .filter((item) => (item.incorrect ?? 0) > 0)
+        .sort((a, b) => {
+          if ((b.incorrect ?? 0) !== (a.incorrect ?? 0)) {
+            return (b.incorrect ?? 0) - (a.incorrect ?? 0);
+          }
+
+          return (b.attempts ?? 0) - (a.attempts ?? 0);
+        })
+        .slice(0, 5),
+    [studyStats.cards]
+  );
+  const hasStudyHistory =
+    studyStats.sessions.length > 0 ||
+    Object.values(studyStats.cards).some((item) => (item.attempts ?? 0) > 0);
 
   useEffect(() => {
     pairsRef.current = pairs;
   }, [pairs]);
+
+  useEffect(() => {
+    studyStatsRef.current = studyStats;
+  }, [studyStats]);
 
   useEffect(() => {
     if (!maxQuizCount) {
@@ -255,9 +317,24 @@ export default function App() {
     const load = async () => {
       try {
         const storedThemeMode = await AsyncStorage.getItem(THEME_MODE_KEY);
+        const storedStudyStats = await AsyncStorage.getItem(STUDY_STATS_KEY);
+        const storedTutorialSeen = await AsyncStorage.getItem(TUTORIAL_SEEN_KEY);
 
         if (storedThemeMode === "dark" || storedThemeMode === "light") {
           setThemeMode(storedThemeMode);
+        }
+
+        if (storedStudyStats && active) {
+          try {
+            setStudyStats(syncStudyStatsWithPairs(JSON.parse(storedStudyStats), pairsRef.current));
+          } catch {
+            setStudyStats(createEmptyStudyStats());
+          }
+        }
+
+        if (active) {
+          setTutorialSeen(storedTutorialSeen === "1");
+          setTutorialReady(true);
         }
 
         let storedValue = null;
@@ -305,6 +382,25 @@ export default function App() {
   useEffect(() => {
     void AsyncStorage.setItem(THEME_MODE_KEY, themeMode);
   }, [themeMode]);
+
+  useEffect(() => {
+    if (!storageReady) {
+      return;
+    }
+
+    const syncedStudyStats = syncStudyStatsWithPairs(studyStatsRef.current, pairs);
+    studyStatsRef.current = syncedStudyStats;
+    setStudyStats(syncedStudyStats);
+    void AsyncStorage.setItem(STUDY_STATS_KEY, JSON.stringify(syncedStudyStats));
+  }, [pairs, storageReady]);
+
+  useEffect(() => {
+    if (launchVisible || !storageReady || !tutorialReady || tutorialSeen) {
+      return;
+    }
+
+    setTutorialVisible(true);
+  }, [launchVisible, storageReady, tutorialReady, tutorialSeen]);
 
   useEffect(() => {
     if (!supabase) {
@@ -484,6 +580,7 @@ export default function App() {
     setShowAnswer(false);
     setRoundComplete(false);
     setRoundIncorrectIds([]);
+    roundMetaRef.current = null;
   }, [pairs.length]);
 
   const savePairs = async (nextPairs) => {
@@ -491,6 +588,23 @@ export default function App() {
 
     setPairs(sorted);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
+  };
+
+  const updateStudyStats = (nextStudyStats) => {
+    const syncedStudyStats = syncStudyStatsWithPairs(nextStudyStats, pairsRef.current);
+    studyStatsRef.current = syncedStudyStats;
+    setStudyStats(syncedStudyStats);
+    void AsyncStorage.setItem(STUDY_STATS_KEY, JSON.stringify(syncedStudyStats));
+  };
+
+  const closeTutorial = (nextTab = null) => {
+    setTutorialVisible(false);
+    setTutorialSeen(true);
+    void AsyncStorage.setItem(TUTORIAL_SEEN_KEY, "1");
+
+    if (nextTab) {
+      setTab(nextTab);
+    }
   };
 
   const saveEntryBatch = async (entries) => {
@@ -664,7 +778,7 @@ export default function App() {
     setQuizCountInput(`${resolvedQuizCount}`);
   };
 
-  const beginQuizRound = (nextDeck) => {
+  const beginQuizRound = (nextDeck, options = {}) => {
     clearTimeout(timerRef.current);
     setDeck(nextDeck);
     setQuizIndex(0);
@@ -674,7 +788,45 @@ export default function App() {
     setShowAnswer(false);
     setRoundComplete(false);
     setRoundIncorrectIds([]);
+    roundMetaRef.current = {
+      startedAt: new Date().toISOString(),
+      requestedCount: options.requestedCount ?? nextDeck.length,
+      totalCards: nextDeck.length,
+      mode: options.mode ?? quizMode,
+      source: options.source ?? "adaptive",
+    };
     setTab("quiz");
+  };
+
+  const finalizeRound = () => {
+    const completedAt = new Date().toISOString();
+    const incorrectIdSet = new Set(roundIncorrectIds);
+    const incorrectCards = deck.filter((card) => incorrectIdSet.has(card.id));
+    const nextStudyStats = appendStudySession(
+      studyStatsRef.current,
+      {
+        id: `session-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        startedAt: roundMetaRef.current?.startedAt ?? completedAt,
+        completedAt,
+        requestedCount: roundMetaRef.current?.requestedCount ?? deck.length,
+        totalCards: deck.length,
+        mode: roundMetaRef.current?.mode ?? quizMode,
+        source: roundMetaRef.current?.source ?? "adaptive",
+        correctCount: deck.length - incorrectCards.length,
+        incorrectCount: incorrectCards.length,
+        incorrectCards: incorrectCards.map((card) => ({
+          signature: card.signature,
+          left: card.left,
+          right: card.right,
+          direction: card.direction,
+        })),
+      },
+      MAX_SESSION_HISTORY
+    );
+
+    updateStudyStats(nextStudyStats);
+    roundMetaRef.current = null;
+    setRoundComplete(true);
   };
 
   const startQuiz = (requestedCount = resolvedQuizCount) => {
@@ -683,7 +835,14 @@ export default function App() {
       return;
     }
 
-    beginQuizRound(buildPracticeDeck(pairs, requestedCount || maxQuizCount, quizMode));
+    beginQuizRound(
+      buildPracticeDeck(pairs, requestedCount || maxQuizCount, quizMode, studyStatsRef.current),
+      {
+        requestedCount: requestedCount || maxQuizCount,
+        mode: quizMode,
+        source: "adaptive",
+      }
+    );
   };
 
   const retryIncorrectCards = () => {
@@ -692,7 +851,11 @@ export default function App() {
       return;
     }
 
-    beginQuizRound(shuffleItems(roundIncorrectCards));
+    beginQuizRound(shuffleItems(roundIncorrectCards), {
+      requestedCount: roundIncorrectCards.length,
+      mode: quizMode,
+      source: "retry",
+    });
   };
 
   const goNext = () => {
@@ -707,7 +870,7 @@ export default function App() {
     setShowAnswer(false);
 
     if (quizIndex + 1 >= deck.length) {
-      setRoundComplete(true);
+      finalizeRound();
       return;
     }
 
@@ -725,12 +888,14 @@ export default function App() {
     }
 
     if (compareAnswers(answer, current.answer)) {
+      updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, true));
       setResult("correct");
       setFeedback("정답입니다");
       timerRef.current = setTimeout(goNext, 900);
       return;
     }
 
+    updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, false));
     setResult("incorrect");
     setFeedback("다시 한 번 생각해 보세요");
     setRoundIncorrectIds((currentIds) =>
@@ -742,6 +907,17 @@ export default function App() {
     const target = pairs.find((pair) => pair.id === editingId);
 
     if (!target || !editingLeft.trim() || !editingRight.trim()) {
+      return;
+    }
+
+    const nextSignature = createSignature(editingLeft.trim(), editingRight.trim());
+    const duplicateExists = pairs.some(
+      (pair) =>
+        pair.id !== target.id && createSignature(pair.left, pair.right) === nextSignature
+    );
+
+    if (duplicateExists) {
+      Alert.alert("중복 카드", "같은 앞면/뒷면 조합의 카드가 이미 있습니다.");
       return;
     }
 
@@ -765,6 +941,7 @@ export default function App() {
     }
 
     await savePairs(pairs.map((pair) => (pair.id === target.id ? updated : pair)));
+    updateStudyStats(migrateStudyStatsEntry(studyStatsRef.current, target, updated));
     setEditingId(null);
     setEditingLeft("");
     setEditingRight("");
@@ -954,11 +1131,11 @@ export default function App() {
       <View style={styles.quizPanel}>
         <View style={styles.quizHeader}>
           <View style={styles.quizHeaderContent}>
-            <Text style={styles.panelTitle}>랜덤 퀴즈</Text>
+            <Text style={styles.panelTitle}>맞춤 암기</Text>
             <Text style={styles.panelBody}>
               {quizMode === "both"
-                ? "앞면과 뒷면이 함께 섞이고, 시작할 때마다 랜덤 순서로 출제됩니다."
-                : quizModeConfig.description}
+                ? "새로 추가한 카드와 자주 틀린 카드가 더 자주 섞여 출제됩니다."
+                : `${quizModeConfig.description} 새 카드와 오답 카드가 우선 반영됩니다.`}
             </Text>
           </View>
           <Pressable onPress={startQuiz} style={({ pressed }) => [styles.quizStartButton, pressed && styles.pressed]}>
@@ -999,7 +1176,7 @@ export default function App() {
               <Text style={styles.panelBody}>
                 {roundIncorrectCards.length
                   ? "틀린 문제만 다시 모아서 바로 한 번 더 풀 수 있습니다."
-                  : "이번 라운드는 모두 맞혔습니다. 같은 개수로 다시 랜덤 시작도 가능합니다."}
+                  : "이번 라운드는 모두 맞혔습니다. 같은 개수로 다시 맞춤 시작도 가능합니다."}
               </Text>
             </View>
 
@@ -1024,7 +1201,7 @@ export default function App() {
 
             <View style={styles.actionRow}>
               <Pressable onPress={startQuiz} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-                <Text style={styles.secondaryButtonText}>다시 랜덤 시작</Text>
+                <Text style={styles.secondaryButtonText}>다시 맞춤 시작</Text>
               </Pressable>
               <Pressable
                 disabled={!roundIncorrectCards.length}
@@ -1138,7 +1315,7 @@ export default function App() {
 
             <View style={styles.actionRow}>
               <Pressable onPress={startQuiz} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-                <Text style={styles.primaryButtonText}>랜덤 암기 시작</Text>
+                <Text style={styles.primaryButtonText}>맞춤 암기 시작</Text>
               </Pressable>
               <Pressable onPress={() => setTab("manage")} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
                 <Text style={styles.secondaryButtonText}>보관함 보기</Text>
@@ -1151,7 +1328,7 @@ export default function App() {
             theme={theme}
             icon="cards-heart-outline"
             title="지금은 퀴즈를 시작할 카드가 없습니다."
-            body="저장 탭에서 카드를 만들면 바로 이 화면에서 랜덤 암기를 시작할 수 있습니다."
+            body="저장 탭에서 카드를 만들면 바로 이 화면에서 맞춤 암기를 시작할 수 있습니다."
             actionLabel="저장 탭으로 이동"
             onPress={() => setTab("save")}
           />
@@ -1159,6 +1336,115 @@ export default function App() {
       </View>
     </View>
   );
+
+  const renderHistoryTab = () => {
+    const missedCards = todayMissedCards.length ? todayMissedCards : topMissedCards;
+
+    return (
+      <View style={styles.scene}>
+        <View style={styles.heroStrip}>
+          <Text style={styles.heroEyebrow}>학습 기록</Text>
+          <Text style={styles.heroMeta}>
+            {hasStudyHistory
+              ? `오늘 ${todaySessionCount}번 암기했고, ${todayIncorrectCount}개의 오답이 기록되었습니다.`
+              : "암기를 시작하면 오늘의 학습 횟수와 자주 틀린 카드를 여기서 볼 수 있습니다."}
+          </Text>
+        </View>
+
+        {hasStudyHistory ? (
+          <>
+            <View style={styles.historySummaryCard}>
+              <View style={styles.historySummaryHeader}>
+                <Text style={styles.panelTitle}>오늘의 학습</Text>
+                <Text style={styles.panelBody}>오늘 몇 번 암기했는지와 현재 복습이 필요한 카드를 빠르게 확인할 수 있습니다.</Text>
+              </View>
+              <View style={styles.historySummaryGrid}>
+                <View style={styles.historyMetricCard}>
+                  <Text style={styles.historyMetricValue}>{todaySessionCount}</Text>
+                  <Text style={styles.historyMetricLabel}>학습 횟수</Text>
+                </View>
+                <View style={styles.historyMetricCard}>
+                  <Text style={styles.historyMetricValue}>{todaySolvedCount}</Text>
+                  <Text style={styles.historyMetricLabel}>푼 문제</Text>
+                </View>
+                <View style={styles.historyMetricCard}>
+                  <Text style={[styles.historyMetricValue, todayIncorrectCount > 0 && styles.historyMetricValueBad]}>
+                    {todayIncorrectCount}
+                  </Text>
+                  <Text style={styles.historyMetricLabel}>오늘 오답</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.libraryPanel}>
+              <View style={styles.panelHeader}>
+                <Text style={styles.panelTitle}>{todayMissedCards.length ? "오늘 틀린 카드" : "자주 틀린 카드"}</Text>
+                <Text style={styles.historyChipText}>{todayMissedCards.length ? "오늘 기준" : "누적 기준"}</Text>
+              </View>
+              <View style={styles.historyList}>
+                {missedCards.length ? (
+                  missedCards.map((card) => (
+                    <View key={`missed-${card.signature}`} style={styles.historyItem}>
+                      <View style={styles.historyItemBody}>
+                        <Text style={styles.historyItemTitle}>
+                          {card.left} ↔ {card.right}
+                        </Text>
+                        <Text style={styles.historyItemCaption}>
+                          {todayMissedCards.length
+                            ? `오늘 ${card.count}번 틀렸습니다.`
+                            : `누적 ${card.incorrect}번 틀렸고 ${card.attempts}번 풀었습니다.`}
+                        </Text>
+                      </View>
+                      <View style={styles.historyBadge}>
+                        <Text style={styles.historyBadgeText}>
+                          {todayMissedCards.length ? `${card.count}회` : `${card.incorrect}회`}
+                        </Text>
+                      </View>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={styles.historyEmptyText}>아직 틀린 카드가 없습니다.</Text>
+                )}
+              </View>
+            </View>
+
+            <View style={styles.libraryPanel}>
+              <View style={styles.panelHeader}>
+                <Text style={styles.panelTitle}>최근 암기 세션</Text>
+              </View>
+              <View style={styles.historyList}>
+                {recentSessions.map((item) => (
+                  <View key={item.id} style={styles.historyItem}>
+                    <View style={styles.historyItemBody}>
+                      <Text style={styles.historyItemTitle}>{formatSessionLabel(item.completedAt)}</Text>
+                      <Text style={styles.historyItemCaption}>
+                        {item.source === "retry" ? "오답 다시풀기" : "맞춤 암기"} · {item.totalCards}문제 · {item.correctCount}개 정답
+                      </Text>
+                    </View>
+                    <View style={[styles.historyBadge, item.incorrectCount > 0 && styles.historyBadgeBad]}>
+                      <Text style={[styles.historyBadgeText, item.incorrectCount > 0 && styles.historyBadgeTextBad]}>
+                        오답 {item.incorrectCount}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </>
+        ) : (
+          <EmptyPanel
+            styles={styles}
+            theme={theme}
+            icon="chart-line"
+            title="학습 기록은 첫 라운드를 마치면 바로 채워집니다."
+            body="문제를 풀기 시작하면 오늘 몇 번 암기했는지와 자주 틀린 카드가 이 탭에 자동으로 쌓입니다."
+            actionLabel="암기하러 가기"
+            onPress={() => setTab("quiz")}
+          />
+        )}
+      </View>
+    );
+  };
 
   const renderManageTab = () => (
     <View style={styles.scene}>
@@ -1353,8 +1639,11 @@ export default function App() {
         <View style={styles.appSummaryCard}>
           <Text style={styles.settingsTitle}>MEMORIA</Text>
           <Text style={styles.settingsBody}>
-            앞면과 뒷면 한 쌍으로 카드를 저장하고, 원하는 방향으로 문제를 반복해서 암기하는 앱입니다.
+            앞면과 뒷면 한 쌍으로 카드를 저장하고, 자주 틀린 카드와 새 카드를 더 자주 복습하도록 설계된 암기 앱입니다.
           </Text>
+          <Pressable onPress={() => setTutorialVisible(true)} style={({ pressed }) => [styles.inlineActionButton, pressed && styles.pressed]}>
+            <Text style={styles.inlineActionButtonText}>튜토리얼 다시 보기</Text>
+          </Pressable>
         </View>
       </View>
     </View>
@@ -1397,6 +1686,7 @@ export default function App() {
         >
           {tab === "save" ? renderSaveTab() : null}
           {tab === "quiz" ? renderQuizTab() : null}
+          {tab === "history" ? renderHistoryTab() : null}
           {tab === "manage" ? renderManageTab() : null}
           {tab === "about" ? renderAboutTab() : null}
         </ScrollView>
@@ -1429,6 +1719,15 @@ export default function App() {
 
       {launchVisible ? (
         <LaunchScreen opacity={launchOpacity} scale={launchScale} glow={moonGlow} styles={styles} />
+      ) : null}
+      {tutorialVisible ? (
+        <TutorialOverlay
+          styles={styles}
+          theme={theme}
+          onClose={() => closeTutorial()}
+          onStart={() => closeTutorial("save")}
+          onOpenHistory={() => closeTutorial("history")}
+        />
       ) : null}
     </SafeAreaView>
   );
@@ -1467,6 +1766,64 @@ function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) 
   );
 }
 
+function TutorialOverlay({ styles, theme, onClose, onStart, onOpenHistory }) {
+  return (
+    <View style={styles.tutorialOverlay}>
+      <Pressable style={styles.tutorialBackdrop} onPress={onClose} />
+      <View style={styles.tutorialCard}>
+        <View style={styles.tutorialBadge}>
+          <MaterialCommunityIcons name="compass-rose" size={20} color={theme.accentText} />
+        </View>
+        <Text style={styles.tutorialTitle}>MEMORIA 빠른 시작</Text>
+        <Text style={styles.tutorialBody}>
+          처음 보는 사람도 바로 감을 잡을 수 있도록, 이 앱이 하는 일을 3단계로 짧게 보여드릴게요.
+        </Text>
+
+        <View style={styles.tutorialStepList}>
+          <View style={styles.tutorialStep}>
+            <View style={styles.tutorialStepIcon}>
+              <MaterialCommunityIcons name="cards-outline" size={18} color={theme.accent} />
+            </View>
+            <View style={styles.flex}>
+              <Text style={styles.tutorialStepTitle}>1. 카드 저장</Text>
+              <Text style={styles.tutorialStepBody}>앞면과 뒷면을 한 쌍으로 적거나, 텍스트 파일로 여러 장을 한 번에 불러옵니다.</Text>
+            </View>
+          </View>
+
+          <View style={styles.tutorialStep}>
+            <View style={styles.tutorialStepIcon}>
+              <MaterialCommunityIcons name="brain" size={18} color={theme.accent} />
+            </View>
+            <View style={styles.flex}>
+              <Text style={styles.tutorialStepTitle}>2. 맞춤 암기</Text>
+              <Text style={styles.tutorialStepBody}>새 카드와 자주 틀린 카드가 더 자주 나오도록 자동으로 섞여 복습됩니다.</Text>
+            </View>
+          </View>
+
+          <View style={styles.tutorialStep}>
+            <View style={styles.tutorialStepIcon}>
+              <MaterialCommunityIcons name="chart-timeline-variant" size={18} color={theme.accent} />
+            </View>
+            <View style={styles.flex}>
+              <Text style={styles.tutorialStepTitle}>3. 기록 확인</Text>
+              <Text style={styles.tutorialStepBody}>오늘 몇 번 암기했는지, 어떤 카드를 자주 틀렸는지 기록 탭에서 바로 볼 수 있습니다.</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.tutorialActionRow}>
+          <Pressable onPress={onOpenHistory} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
+            <Text style={styles.secondaryButtonText}>기록 먼저 보기</Text>
+          </Pressable>
+          <Pressable onPress={onStart} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
+            <Text style={styles.primaryButtonText}>바로 시작하기</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function LaunchScreen({ opacity, scale, glow, styles }) {
   return (
     <Animated.View style={[styles.launchScreen, { opacity }]}>
@@ -1482,6 +1839,22 @@ function LaunchScreen({ opacity, scale, glow, styles }) {
       </Animated.Text>
     </Animated.View>
   );
+}
+
+function getLocalDayKey(timestamp) {
+  const date = timestamp ? new Date(timestamp) : new Date();
+
+  return [date.getFullYear(), date.getMonth() + 1, date.getDate()].join("-");
+}
+
+function formatSessionLabel(timestamp) {
+  const date = new Date(timestamp);
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const hours = `${date.getHours()}`.padStart(2, "0");
+  const minutes = `${date.getMinutes()}`.padStart(2, "0");
+
+  return `${month}월 ${day}일 ${hours}:${minutes}`;
 }
 
 const createStyles = (theme) => StyleSheet.create({
@@ -2178,6 +2551,111 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
+  inlineActionButton: {
+    alignSelf: "flex-start",
+    marginTop: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceMuted,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  inlineActionButtonText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: theme.textPrimary,
+  },
+  historySummaryCard: {
+    gap: 16,
+    padding: 18,
+    borderRadius: 26,
+    backgroundColor: theme.surfaceStrong,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  historySummaryHeader: {
+    gap: 6,
+  },
+  historySummaryGrid: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  historyMetricCard: {
+    flex: 1,
+    gap: 6,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: theme.surfaceCard,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  historyMetricValue: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  historyMetricValueBad: {
+    color: theme.danger,
+  },
+  historyMetricLabel: {
+    fontSize: 12,
+    color: theme.textSecondary,
+  },
+  historyList: {
+    gap: 10,
+  },
+  historyItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  historyItemBody: {
+    flex: 1,
+    gap: 4,
+  },
+  historyItemTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: theme.textPrimary,
+  },
+  historyItemCaption: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: theme.textSecondary,
+  },
+  historyBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: theme.accentSoft,
+  },
+  historyBadgeBad: {
+    backgroundColor: theme.dangerBgSoft,
+  },
+  historyBadgeText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.accent,
+  },
+  historyBadgeTextBad: {
+    color: theme.danger,
+  },
+  historyChipText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: theme.textSecondary,
+  },
+  historyEmptyText: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: theme.textSecondary,
+  },
   tabs: {
     position: "absolute",
     left: 14,
@@ -2271,5 +2749,76 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 11,
     color: theme.textPrimary,
+  },
+  tutorialOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    paddingHorizontal: 18,
+  },
+  tutorialBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: theme.mode === "dark" ? "rgba(4, 7, 15, 0.72)" : "rgba(19, 27, 48, 0.22)",
+  },
+  tutorialCard: {
+    gap: 16,
+    padding: 22,
+    borderRadius: 28,
+    backgroundColor: theme.surfaceStrong,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  tutorialBadge: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accent,
+  },
+  tutorialTitle: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  tutorialBody: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: theme.textSecondary,
+  },
+  tutorialStepList: {
+    gap: 12,
+  },
+  tutorialStep: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  tutorialStepIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accentSoft,
+  },
+  tutorialStepTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  tutorialStepBody: {
+    marginTop: 3,
+    fontSize: 13,
+    lineHeight: 20,
+    color: theme.textSecondary,
+  },
+  tutorialActionRow: {
+    flexDirection: "row",
+    gap: 12,
   },
 });
