@@ -49,6 +49,7 @@ const STORAGE_KEY = "@memoria/cards";
 const THEME_MODE_KEY = "@memoria/theme-mode";
 const STUDY_STATS_KEY = "@memoria/study-stats";
 const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen";
+const SUPPORT_REQUESTS_KEY = "@memoria/support-requests";
 const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
 const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
@@ -56,8 +57,8 @@ const DEFAULT_QUIZ_COUNT = 10;
 const MAX_SESSION_HISTORY = 60;
 const SUPPORT_EMAIL = ["youwon35", "naver.com"].join("@");
 const THEME_OPTIONS = [
-  { key: "dark", label: "다크", icon: "weather-night" },
   { key: "light", label: "라이트", icon: "white-balance-sunny" },
+  { key: "dark", label: "다크", icon: "weather-night" },
 ];
 const QUIZ_MODE_OPTIONS = [
   {
@@ -177,10 +178,44 @@ const LIGHT_THEME = {
 const getQuizModeConfig = (mode) =>
   QUIZ_MODE_OPTIONS.find((option) => option.key === mode) ?? QUIZ_MODE_OPTIONS[0];
 const appendUniqueId = (items, nextId) => (items.includes(nextId) ? items : [...items, nextId]);
+const isValidEmail = (value) => /\S+@\S+\.\S+/.test(value.trim());
+const createLocalSupportRequest = ({ replyEmail, message, session }) => ({
+  id: `support-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  replyEmail: replyEmail.trim(),
+  message: message.trim(),
+  userEmail: session?.user?.email ?? null,
+  createdAt: new Date().toISOString(),
+  status: "접수됨",
+  source: "local",
+});
+const mapSupportInquiryRecord = (record) => ({
+  id: record.id,
+  replyEmail: record.reply_email ?? "",
+  message: record.message ?? "",
+  userEmail: record.sender_email ?? null,
+  createdAt: record.created_at ?? new Date().toISOString(),
+  status: record.status ?? "접수됨",
+  source: "cloud",
+});
+const mergeSupportRequests = (...collections) => {
+  const mergedMap = new Map();
+
+  collections.flat().forEach((item) => {
+    if (!item?.id) {
+      return;
+    }
+
+    mergedMap.set(item.id, item);
+  });
+
+  return [...mergedMap.values()].sort(
+    (left, right) => new Date(right.createdAt ?? 0) - new Date(left.createdAt ?? 0)
+  );
+};
 
 export default function App() {
   const [tab, setTab] = useState("save");
-  const [themeMode, setThemeMode] = useState("dark");
+  const [themeMode, setThemeMode] = useState("light");
   const [pairs, setPairs] = useState([]);
   const [studyStats, setStudyStats] = useState(createEmptyStudyStats());
   const [draft, setDraft] = useState({ left: "", right: "" });
@@ -211,12 +246,19 @@ export default function App() {
   const [importing, setImporting] = useState(false);
   const [roundComplete, setRoundComplete] = useState(false);
   const [roundIncorrectIds, setRoundIncorrectIds] = useState([]);
+  const [supportReplyEmail, setSupportReplyEmail] = useState("");
+  const [supportMessage, setSupportMessage] = useState("");
+  const [supportRequests, setSupportRequests] = useState([]);
+  const [supportSending, setSupportSending] = useState(false);
+  const [supportNotice, setSupportNotice] = useState("");
   const [launchVisible, setLaunchVisible] = useState(true);
 
   const timerRef = useRef(null);
   const pairsRef = useRef(pairs);
   const studyStatsRef = useRef(studyStats);
+  const supportRequestsRef = useRef([]);
   const roundMetaRef = useRef(null);
+  const roundSnapshotRef = useRef(null);
   const bootStartedAt = useRef(Date.now());
   const launchOpacity = useRef(new Animated.Value(1)).current;
   const launchScale = useRef(new Animated.Value(0.94)).current;
@@ -226,7 +268,6 @@ export default function App() {
   const styles = useMemo(() => createStyles(theme), [theme]);
   const current = deck[quizIndex] ?? null;
   const redirectUri = makeRedirectUri({ scheme: APP_SCHEME, path: "auth/callback" });
-  const recentPairs = useMemo(() => pairs.slice(0, 4), [pairs]);
   const authTitle = session?.user?.email
     ? session.user.email
     : isSupabaseConfigured
@@ -253,6 +294,7 @@ export default function App() {
     return deck.filter((card) => incorrectIdSet.has(card.id));
   }, [deck, roundIncorrectIds]);
   const roundCorrectCount = deck.length - roundIncorrectCards.length;
+  const latestSupportRequests = useMemo(() => supportRequests.slice(0, 3), [supportRequests]);
   const todayKey = getLocalDayKey(new Date());
   const todaySessions = useMemo(
     () => studyStats.sessions.filter((item) => getLocalDayKey(item.completedAt) === todayKey),
@@ -306,6 +348,16 @@ export default function App() {
   }, [studyStats]);
 
   useEffect(() => {
+    supportRequestsRef.current = supportRequests;
+  }, [supportRequests]);
+
+  useEffect(() => {
+    if (session?.user?.email) {
+      setSupportReplyEmail((currentValue) => currentValue || session.user.email);
+    }
+  }, [session?.user?.email]);
+
+  useEffect(() => {
     if (!maxQuizCount) {
       return;
     }
@@ -329,6 +381,7 @@ export default function App() {
         const storedThemeMode = await AsyncStorage.getItem(THEME_MODE_KEY);
         const storedStudyStats = await AsyncStorage.getItem(STUDY_STATS_KEY);
         const storedTutorialSeen = await AsyncStorage.getItem(TUTORIAL_SEEN_KEY);
+        const storedSupportRequests = await AsyncStorage.getItem(SUPPORT_REQUESTS_KEY);
 
         if (storedThemeMode === "dark" || storedThemeMode === "light") {
           setThemeMode(storedThemeMode);
@@ -339,6 +392,14 @@ export default function App() {
             setStudyStats(createPersistableStudyStats(JSON.parse(storedStudyStats), pairsRef.current));
           } catch {
             setStudyStats(createEmptyStudyStats());
+          }
+        }
+
+        if (storedSupportRequests && active) {
+          try {
+            setSupportRequests(JSON.parse(storedSupportRequests));
+          } catch {
+            setSupportRequests([]);
           }
         }
 
@@ -392,6 +453,10 @@ export default function App() {
   useEffect(() => {
     void AsyncStorage.setItem(THEME_MODE_KEY, themeMode);
   }, [themeMode]);
+
+  useEffect(() => {
+    void AsyncStorage.setItem(SUPPORT_REQUESTS_KEY, JSON.stringify(supportRequests));
+  }, [supportRequests]);
 
   useEffect(() => {
     if (!storageReady) {
@@ -518,6 +583,43 @@ export default function App() {
   }, [storageReady, session?.user?.id]);
 
   useEffect(() => {
+    if (!storageReady || !session?.user?.id || !supabase) {
+      return;
+    }
+
+    let active = true;
+
+    const syncSupportRequests = async () => {
+      try {
+        const response = await supabase
+          .from("support_inquiries")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (response.error) {
+          throw response.error;
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setSupportRequests((currentRequests) =>
+          mergeSupportRequests(currentRequests, (response.data ?? []).map(mapSupportInquiryRecord))
+        );
+      } catch {
+        // Keep local inquiries visible even when the cloud table is not ready yet.
+      }
+    };
+
+    void syncSupportRequests();
+
+    return () => {
+      active = false;
+    };
+  }, [storageReady, session?.user?.id]);
+
+  useEffect(() => {
     const pulse = Animated.loop(
       Animated.sequence([
         Animated.timing(moonGlow, {
@@ -591,6 +693,7 @@ export default function App() {
     setRoundComplete(false);
     setRoundIncorrectIds([]);
     roundMetaRef.current = null;
+    roundSnapshotRef.current = null;
   }, [pairs.length]);
 
   const savePairs = async (nextPairs) => {
@@ -605,6 +708,10 @@ export default function App() {
     studyStatsRef.current = syncedStudyStats;
     setStudyStats(syncedStudyStats);
     void AsyncStorage.setItem(STUDY_STATS_KEY, JSON.stringify(syncedStudyStats));
+  };
+
+  const addSupportRequest = (nextRequest) => {
+    setSupportRequests((currentRequests) => mergeSupportRequests([nextRequest], currentRequests));
   };
 
   const closeTutorial = (nextTab = null) => {
@@ -790,6 +897,7 @@ export default function App() {
 
   const beginQuizRound = (nextDeck, options = {}) => {
     clearTimeout(timerRef.current);
+    roundSnapshotRef.current = createPersistableStudyStats(studyStatsRef.current, pairsRef.current);
     setDeck(nextDeck);
     setQuizIndex(0);
     setAnswer("");
@@ -837,6 +945,78 @@ export default function App() {
     updateStudyStats(nextStudyStats);
     roundMetaRef.current = null;
     setRoundComplete(true);
+  };
+
+  const resetQuizSession = () => {
+    clearTimeout(timerRef.current);
+
+    if (roundSnapshotRef.current) {
+      updateStudyStats(roundSnapshotRef.current);
+    }
+
+    roundSnapshotRef.current = null;
+    roundMetaRef.current = null;
+    setDeck([]);
+    setQuizIndex(0);
+    setAnswer("");
+    setFeedback("");
+    setResult(null);
+    setShowAnswer(false);
+    setRoundComplete(false);
+    setRoundIncorrectIds([]);
+  };
+
+  const submitSupportRequest = async () => {
+    const replyEmail = supportReplyEmail.trim();
+    const message = supportMessage.trim();
+
+    if (!isValidEmail(replyEmail)) {
+      Alert.alert("이메일 확인", "답변 받을 이메일을 정확히 입력해 주세요.");
+      return;
+    }
+
+    if (!message) {
+      Alert.alert("문의 내용 필요", "문의 내용을 적은 뒤 전송해 주세요.");
+      return;
+    }
+
+    setSupportSending(true);
+    setSupportNotice("");
+
+    try {
+      let nextRequest = createLocalSupportRequest({ replyEmail, message, session });
+      let cloudSaved = false;
+
+      if (supabase && session?.user?.id) {
+        const response = await supabase
+          .from("support_inquiries")
+          .insert({
+            user_id: session.user.id,
+            reply_email: replyEmail,
+            sender_email: session.user.email ?? null,
+            message,
+          })
+          .select()
+          .single();
+
+        if (!response.error && response.data) {
+          nextRequest = mapSupportInquiryRecord(response.data);
+          cloudSaved = true;
+        }
+      }
+
+      addSupportRequest(nextRequest);
+      setSupportMessage("");
+      setSupportNotice(
+        cloudSaved
+          ? "문의가 접수되었습니다. 아래 최근 문의에서 바로 확인할 수 있습니다."
+          : "문의를 이 기기에 저장했습니다. 아래 최근 문의에서 다시 확인할 수 있습니다."
+      );
+    } catch (error) {
+      setSupportNotice(error?.message || "문의 전송에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setSupportSending(false);
+    }
   };
 
   const startQuiz = (requestedCount = resolvedQuizCount) => {
@@ -1191,29 +1371,6 @@ export default function App() {
         </View>
       </View>
 
-      {recentPairs.length ? (
-        <View style={styles.libraryPanel}>
-          <View style={styles.panelHeader}>
-            <Text style={styles.panelTitle}>최근 저장 카드</Text>
-            <Pressable onPress={() => setTab("manage")} style={({ pressed }) => [styles.inlineLink, pressed && styles.pressed]}>
-              <Text style={styles.inlineLinkText}>보관함 열기</Text>
-            </Pressable>
-          </View>
-          <View style={styles.libraryList}>
-            {recentPairs.map((pair) => (
-              <PreviewRow key={pair.id} pair={pair} styles={styles} />
-            ))}
-          </View>
-        </View>
-      ) : (
-        <EmptyPanel
-          styles={styles}
-          theme={theme}
-          icon="meteor"
-          title="첫 카드를 저장하면 이곳에 최근 기록이 보입니다."
-          body="짧은 단어부터 길게 외울 문장까지 바로 넣어보세요."
-        />
-      )}
     </View>
   );
 
@@ -1234,8 +1391,11 @@ export default function App() {
                 : `${quizModeConfig.description} 새 카드와 오답 카드가 우선 반영됩니다.`}
             </Text>
           </View>
-          <Pressable onPress={startQuiz} style={({ pressed }) => [styles.quizStartButton, pressed && styles.pressed]}>
-            <Text style={styles.quizStartButtonText}>{deck.length ? "다시 시작" : "시작"}</Text>
+          <Pressable
+            onPress={deck.length ? resetQuizSession : startQuiz}
+            style={({ pressed }) => [styles.quizStartButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.quizStartButtonText}>{deck.length ? "초기화" : "시작"}</Text>
           </Pressable>
         </View>
 
@@ -1758,16 +1918,76 @@ export default function App() {
           <View style={styles.settingsHeader}>
             <Text style={styles.settingsTitle}>문의하기</Text>
             <Text style={styles.settingsBody}>
-              오류 제보나 기능 제안이 있다면 개발자 네이버 메일로 바로 보낼 수 있습니다.
+              오류 제보나 기능 제안이 있다면 앱 안에서 바로 내용을 남기고, 아래 최근 문의에서 접수 여부를 확인할 수 있습니다.
             </Text>
           </View>
-          <Pressable
-            onPress={() => void openSupportEmail()}
-            style={({ pressed }) => [styles.inlineActionButton, styles.contactActionButton, pressed && styles.pressed]}
-          >
-            <MaterialCommunityIcons name="email-fast-outline" size={16} color={theme.textPrimary} />
-            <Text style={styles.inlineActionButtonText}>문의 메일 보내기</Text>
-          </Pressable>
+
+          <View style={styles.supportForm}>
+            <View style={styles.supportField}>
+              <Text style={styles.supportLabel}>답변 받을 이메일</Text>
+              <TextInput
+                value={supportReplyEmail}
+                onChangeText={setSupportReplyEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                placeholder="답변 받을 이메일"
+                placeholderTextColor={theme.textPlaceholder}
+                style={styles.input}
+              />
+            </View>
+
+            <View style={styles.supportField}>
+              <Text style={styles.supportLabel}>문의 내용</Text>
+              <TextInput
+                value={supportMessage}
+                onChangeText={setSupportMessage}
+                multiline
+                textAlignVertical="top"
+                placeholder="오류 상황이나 원하는 기능을 적어 주세요."
+                placeholderTextColor={theme.textPlaceholder}
+                style={[styles.input, styles.supportMessageInput]}
+              />
+            </View>
+
+            {supportNotice ? <Text style={styles.supportNotice}>{supportNotice}</Text> : null}
+
+            <Pressable
+              disabled={supportSending}
+              onPress={() => void submitSupportRequest()}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                supportSending && styles.primaryButtonDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.primaryButtonText,
+                  supportSending && styles.primaryButtonTextDisabled,
+                ]}
+              >
+                {supportSending ? "전송 중..." : "전송"}
+              </Text>
+            </Pressable>
+          </View>
+
+          {latestSupportRequests.length ? (
+            <View style={styles.supportHistory}>
+              <Text style={styles.supportHistoryTitle}>최근 문의</Text>
+              {latestSupportRequests.map((item) => (
+                <View key={item.id} style={styles.supportHistoryItem}>
+                  <View style={styles.supportHistoryMeta}>
+                    <Text style={styles.supportHistoryStatus}>{item.status}</Text>
+                    <Text style={styles.supportHistoryDate}>{formatDateTime(item.createdAt)}</Text>
+                  </View>
+                  <Text style={styles.supportHistoryEmail}>{item.replyEmail}</Text>
+                  <Text style={styles.supportHistoryMessage} numberOfLines={3}>
+                    {item.message}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
         </View>
       </View>
     </View>
@@ -1969,6 +2189,18 @@ function getLocalDayKey(timestamp) {
   const date = timestamp ? new Date(timestamp) : new Date();
 
   return [date.getFullYear(), date.getMonth() + 1, date.getDate()].join("-");
+}
+
+function formatDateTime(timestamp) {
+  const date = timestamp ? new Date(timestamp) : new Date();
+
+  if (Number.isNaN(date.getTime())) {
+    return "방금 전송";
+  }
+
+  return `${date.getMonth() + 1}.${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(
+    date.getMinutes()
+  ).padStart(2, "0")}`;
 }
 
 function formatSessionLabel(timestamp) {
@@ -2755,6 +2987,67 @@ const createStyles = (theme) => StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  supportForm: {
+    gap: 12,
+  },
+  supportField: {
+    gap: 6,
+  },
+  supportLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: theme.textStrong,
+  },
+  supportMessageInput: {
+    minHeight: 140,
+  },
+  supportNotice: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: theme.accent,
+  },
+  supportHistory: {
+    gap: 10,
+    paddingTop: 4,
+  },
+  supportHistoryTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  supportHistoryItem: {
+    gap: 6,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  supportHistoryMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  supportHistoryStatus: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.accent,
+  },
+  supportHistoryDate: {
+    fontSize: 12,
+    color: theme.textMuted,
+  },
+  supportHistoryEmail: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: theme.textPrimary,
+  },
+  supportHistoryMessage: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: theme.textSecondary,
   },
   inlineActionButtonText: {
     fontSize: 13,

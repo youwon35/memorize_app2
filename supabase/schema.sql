@@ -53,3 +53,35 @@ on public.memory_pairs
 for delete
 using (auth.uid() = user_id);
 
+create table if not exists public.support_inquiries (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  sender_email text,
+  reply_email text not null,
+  message text not null,
+  status text not null default 'received',
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+alter table public.support_inquiries enable row level security;
+
+drop trigger if exists support_inquiries_set_updated_at on public.support_inquiries;
+
+create trigger support_inquiries_set_updated_at
+before update on public.support_inquiries
+for each row
+execute procedure public.set_memory_pairs_updated_at();
+
+drop policy if exists "Users can view their own support inquiries" on public.support_inquiries;
+create policy "Users can view their own support inquiries"
+on public.support_inquiries
+for select
+using (auth.uid() = user_id);
+
+drop policy if exists "Users can insert their own support inquiries" on public.support_inquiries;
+create policy "Users can insert their own support inquiries"
+on public.support_inquiries
+for insert
+with check (auth.uid() = user_id);
+
