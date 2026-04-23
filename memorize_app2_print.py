@@ -435,4 +435,64 @@
 즉, 이제 새로 뜬 QR을 다시 스캔하면
 이전처럼 `localhost`가 아니라
 현재 PC의 LAN 주소를 보게 되어 휴대폰 dev build에서 정상 연결되어야 한다.
+
+
+2026-04-23 dev build 재설치 기준 및 앱 아이콘 설정 요약
+
+1. 먼저 사용자의 질문을 기준으로 dev build 재설치가 언제 필요한지 정리했다.
+   - 다른 컴퓨터를 쓴다고 해서 dev build를 매번 새로 설치해야 하는 것은 아니다.
+   - 이미 설치된 dev build는 같은 앱 패키지 기준으로
+     다른 PC에서 띄운 Metro 서버에도 연결할 수 있다.
+   - 다만 아이콘, 앱 스킴, 네이티브 플러그인, 네이티브 라이브러리처럼
+     빌드 시점에 앱 안으로 들어가는 설정이 바뀌면
+     그때는 새 dev build를 다시 설치해야 한다.
+
+2. 이번 변경이 바로 재설치가 필요한 종류인지도 같이 판단했다.
+   - 사용자가 올린 `app-icon.png`를 앱 아이콘으로 쓰도록 연결하는 작업은
+     네이티브 빌드 산출물에 반영되는 설정이다.
+   - 따라서 이번 아이콘 변경은
+     기존에 설치된 dev build 앱에는 자동으로 보이지 않고,
+     새로 dev build를 만들어 다시 설치해야 반영된다.
+
+3. 아이콘 원본 파일 상태를 먼저 점검했다.
+   - 프로젝트 루트에 `app-icon.png`가 올라와 있는 것을 확인했다.
+   - 파일은 실제로 존재했고,
+     Expo 아이콘 자산으로 쓰기에 충분한 정사각형 해상도였다.
+
+4. Expo 설정에 실제 아이콘 경로를 연결했다.
+   - `app.json`의 최상위 `icon`에 `./app-icon.png`를 추가했다.
+   - Android 쪽은 `adaptiveIcon.foregroundImage`에도 같은 파일을 연결했다.
+   - 배경색은 기존 앱 톤과 맞춰 `#050814`를 유지했다.
+
+5. dev build 경고 원인도 같이 정리했다.
+   - 이전에 보였던
+     `Unable to determine the default URI scheme for deep linking into the app`
+     경고를 안정적으로 없애기 위해
+     `expo-dev-client` config plugin도 `app.json`에 명시했다.
+   - 그런데 확인해 보니 `package.json`에는 `expo-dev-client`가 적혀 있었지만,
+     실제 `node_modules`에는 빠져 있어서 Expo가 플러그인을 못 읽는 상태였다.
+
+6. 누락된 의존성도 바로 보정했다.
+   - 처음에는 기본 npm 캐시 경로 권한 문제와 네트워크 오류가 겹쳐 설치가 막혔다.
+   - 그래서 작업 폴더 안의 로컬 캐시를 쓰도록 방향을 바꿔
+     `npm install --cache .npm-cache`
+     방식으로 다시 설치했다.
+   - 그 결과 `expo-dev-client`를 포함한 누락 패키지가 정상 반영되었다.
+
+7. 설정이 실제로 Expo에서 읽히는지 검증했다.
+   - `npx expo config --json` 결과에서
+     `icon: ./app-icon.png`
+     `android.adaptiveIcon.foregroundImage: ./app-icon.png`
+     `expo-dev-client` plugin이 모두 잡히는 것을 확인했다.
+   - 이어서 `npx expo export --platform android`도 성공했다.
+   - 즉 현재 설정은 Expo SDK 54 기준에서
+     아이콘 경로와 dev client plugin 모두 정상 해석되는 상태다.
+
+8. 사용자가 기억하면 좋은 실제 기준도 같이 정리했다.
+   - 컴퓨터만 바뀐 경우:
+     새 dev build 설치가 항상 필요한 것은 아니다.
+   - 앱 아이콘, 스킴, 플러그인, 네이티브 패키지가 바뀐 경우:
+     새 dev build를 다시 빌드하고 다시 설치해야 한다.
+   - 이번 변경은 여기에 해당하므로,
+     아이콘이 보이는 새 dev build를 한 번 더 설치하는 것이 맞다.
 """

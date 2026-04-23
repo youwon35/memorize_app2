@@ -6,12 +6,19 @@
     "orientation": "portrait",
     "scheme": "memoria",
     "userInterfaceStyle": "light",
+    "icon": "./app-icon.png",
     "splash": {
       "image": "./assets/memoria-splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#050814"
     },
     "plugins": [
+      [
+        "expo-dev-client",
+        {
+          "launchMode": "launcher"
+        }
+      ],
       [
         "expo-web-browser",
         {
@@ -23,6 +30,7 @@
     "android": {
       "package": "com.memoria.app",
       "adaptiveIcon": {
+        "foregroundImage": "./app-icon.png",
         "backgroundColor": "#050814"
       }
     },
