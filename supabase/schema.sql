@@ -56,6 +56,7 @@ using (auth.uid() = user_id);
 create table if not exists public.support_inquiries (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users (id) on delete cascade,
+  category text not null default '기타',
   sender_email text,
   reply_email text not null,
   message text not null,
@@ -63,6 +64,9 @@ create table if not exists public.support_inquiries (
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
+
+alter table public.support_inquiries
+  add column if not exists category text not null default '기타';
 
 alter table public.support_inquiries enable row level security;
 

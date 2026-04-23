@@ -56,6 +56,7 @@ const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
 const DEFAULT_QUIZ_COUNT = 10;
 const MAX_SESSION_HISTORY = 60;
 const SUPPORT_EMAIL = ["youwon35", "naver.com"].join("@");
+const SUPPORT_CATEGORY_OPTIONS = ["오류제보", "기능제안", "기타"];
 const THEME_OPTIONS = [
   { key: "light", label: "라이트", icon: "white-balance-sunny" },
   { key: "dark", label: "다크", icon: "weather-night" },
@@ -179,8 +180,9 @@ const getQuizModeConfig = (mode) =>
   QUIZ_MODE_OPTIONS.find((option) => option.key === mode) ?? QUIZ_MODE_OPTIONS[0];
 const appendUniqueId = (items, nextId) => (items.includes(nextId) ? items : [...items, nextId]);
 const isValidEmail = (value) => /\S+@\S+\.\S+/.test(value.trim());
-const createLocalSupportRequest = ({ replyEmail, message, session }) => ({
+const createLocalSupportRequest = ({ replyEmail, message, category, session }) => ({
   id: `support-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  category: category || "기타",
   replyEmail: replyEmail.trim(),
   message: message.trim(),
   userEmail: session?.user?.email ?? null,
@@ -190,11 +192,12 @@ const createLocalSupportRequest = ({ replyEmail, message, session }) => ({
 });
 const mapSupportInquiryRecord = (record) => ({
   id: record.id,
+  category: record.category ?? "기타",
   replyEmail: record.reply_email ?? "",
   message: record.message ?? "",
   userEmail: record.sender_email ?? null,
   createdAt: record.created_at ?? new Date().toISOString(),
-  status: record.status ?? "접수됨",
+  status: record.status === "received" ? "접수됨" : record.status ?? "접수됨",
   source: "cloud",
 });
 const mergeSupportRequests = (...collections) => {
@@ -246,6 +249,7 @@ export default function App() {
   const [importing, setImporting] = useState(false);
   const [roundComplete, setRoundComplete] = useState(false);
   const [roundIncorrectIds, setRoundIncorrectIds] = useState([]);
+  const [supportCategory, setSupportCategory] = useState(SUPPORT_CATEGORY_OPTIONS[0]);
   const [supportReplyEmail, setSupportReplyEmail] = useState("");
   const [supportMessage, setSupportMessage] = useState("");
   const [supportRequests, setSupportRequests] = useState([]);
@@ -984,13 +988,19 @@ export default function App() {
     setSupportNotice("");
 
     try {
-      let nextRequest = createLocalSupportRequest({ replyEmail, message, session });
+      let nextRequest = createLocalSupportRequest({
+        replyEmail,
+        message,
+        category: supportCategory,
+        session,
+      });
       let cloudSaved = false;
 
       if (supabase && session?.user?.id) {
         const response = await supabase
           .from("support_inquiries")
           .insert({
+            category: supportCategory,
             user_id: session.user.id,
             reply_email: replyEmail,
             sender_email: session.user.email ?? null,
@@ -1019,16 +1029,37 @@ export default function App() {
     }
   };
 
-  const startQuiz = (requestedCount = resolvedQuizCount) => {
+  const resolveRequestedQuizCount = (requestedCount) => {
+    if (!maxQuizCount) {
+      return 0;
+    }
+
+    const normalizedValue =
+      typeof requestedCount === "number"
+        ? requestedCount
+        : typeof requestedCount === "string"
+          ? Number.parseInt(requestedCount, 10)
+          : Number.parseInt(quizCountInput, 10);
+
+    if (!Number.isFinite(normalizedValue) || normalizedValue < 1) {
+      return Math.min(DEFAULT_QUIZ_COUNT, maxQuizCount);
+    }
+
+    return Math.min(normalizedValue, maxQuizCount);
+  };
+
+  const startQuiz = (requestedCount) => {
     if (!pairs.length) {
       Alert.alert("문제가 없습니다", "먼저 카드 한 장 이상을 저장해 주세요.");
       return;
     }
 
+    const finalRequestedCount = resolveRequestedQuizCount(requestedCount);
+
     beginQuizRound(
-      buildPracticeDeck(pairs, requestedCount || maxQuizCount, quizMode, studyStatsRef.current),
+      buildPracticeDeck(pairs, finalRequestedCount, quizMode, studyStatsRef.current),
       {
-        requestedCount: requestedCount || maxQuizCount,
+        requestedCount: finalRequestedCount,
         mode: quizMode,
         source: "adaptive",
       }
@@ -1311,48 +1342,48 @@ export default function App() {
           <Pressable onPress={() => void saveCard()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
             <Text style={styles.primaryButtonText}>저장하기</Text>
           </Pressable>
-          <Pressable onPress={startQuiz} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
+          <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
             <Text style={styles.secondaryButtonText}>바로 암기</Text>
           </Pressable>
         </View>
 
         <View style={styles.importPanel}>
           <View style={styles.importHeader}>
-            <View style={styles.importIconWrap}>
-              <MaterialCommunityIcons name="file-document-plus-outline" size={18} color={theme.accent} />
-            </View>
-            <View style={styles.flex}>
+            <View style={styles.importTitleRow}>
+              <View style={styles.importIconWrap}>
+                <MaterialCommunityIcons name="file-document-plus-outline" size={18} color={theme.accent} />
+              </View>
               <Text style={styles.importTitle}>텍스트 파일로 여러 장 한꺼번에 추가</Text>
-              <View style={styles.importPreviewCard}>
-                <View style={styles.importPreviewTopBar}>
-                  <View style={styles.importPreviewDots}>
-                    <View style={styles.importPreviewDot} />
-                    <View style={styles.importPreviewDot} />
-                    <View style={styles.importPreviewDot} />
+            </View>
+            <View style={styles.importPreviewCard}>
+              <View style={styles.importPreviewTopBar}>
+                <View style={styles.importPreviewDots}>
+                  <View style={styles.importPreviewDot} />
+                  <View style={styles.importPreviewDot} />
+                  <View style={styles.importPreviewDot} />
+                </View>
+                <Text style={styles.importPreviewFileName}>cards-example.txt</Text>
+              </View>
+              <View style={styles.importPreviewSheet}>
+                {IMPORT_PREVIEW_LINES.map((line) => (
+                  <View key={`${line.no}-${line.text || "blank"}`} style={styles.importPreviewLine}>
+                    <Text style={styles.importPreviewLineNo}>{line.no}</Text>
+                    <Text
+                      style={[
+                        styles.importPreviewLineText,
+                        line.tone === "front" && styles.importPreviewLineFront,
+                        line.tone === "back" && styles.importPreviewLineBack,
+                        line.tone === "blank" && styles.importPreviewLineBlank,
+                      ]}
+                    >
+                      {line.text || " "}
+                    </Text>
                   </View>
-                  <Text style={styles.importPreviewFileName}>cards-example.txt</Text>
-                </View>
-                <View style={styles.importPreviewSheet}>
-                  {IMPORT_PREVIEW_LINES.map((line) => (
-                    <View key={`${line.no}-${line.text || "blank"}`} style={styles.importPreviewLine}>
-                      <Text style={styles.importPreviewLineNo}>{line.no}</Text>
-                      <Text
-                        style={[
-                          styles.importPreviewLineText,
-                          line.tone === "front" && styles.importPreviewLineFront,
-                          line.tone === "back" && styles.importPreviewLineBack,
-                          line.tone === "blank" && styles.importPreviewLineBlank,
-                        ]}
-                      >
-                        {line.text || " "}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-                <View style={styles.importPreviewFooter}>
-                  <MaterialCommunityIcons name="cards-outline" size={15} color={theme.accent} />
-                  <Text style={styles.importPreviewHint}>빈 줄로 카드를 구분하면 여러 장이 자동 저장됩니다.</Text>
-                </View>
+                ))}
+              </View>
+              <View style={styles.importPreviewFooter}>
+                <MaterialCommunityIcons name="cards-outline" size={15} color={theme.accent} />
+                <Text style={styles.importPreviewHint}>빈 줄로 카드를 구분하면 여러 장이 자동 저장됩니다.</Text>
               </View>
             </View>
           </View>
@@ -1392,37 +1423,11 @@ export default function App() {
             </Text>
           </View>
           <Pressable
-            onPress={deck.length ? resetQuizSession : startQuiz}
+            onPress={() => (deck.length ? resetQuizSession() : startQuiz())}
             style={({ pressed }) => [styles.quizStartButton, pressed && styles.pressed]}
           >
             <Text style={styles.quizStartButtonText}>{deck.length ? "초기화" : "시작"}</Text>
           </Pressable>
-        </View>
-
-        <View style={styles.quizCountCard}>
-          <View style={styles.quizCountCardHeader}>
-            <Text style={styles.quizSetupLabel}>문제 수</Text>
-            <Text style={styles.quizCountCompactCaption}>{pairs.length ? `최대 ${maxQuizCount}` : "대기"}</Text>
-          </View>
-
-          <View style={styles.quizCountCompactRow}>
-            <TextInput
-              value={pairs.length ? quizCountInput : ""}
-              onBlur={normalizeQuizCountInput}
-              onChangeText={(value) => setQuizCountInput(value.replace(/[^0-9]/g, ""))}
-              editable={pairs.length > 0}
-              keyboardType="number-pad"
-              maxLength={3}
-              placeholder="-"
-              placeholderTextColor={theme.textPlaceholder}
-              style={[styles.quizCountCompactInput, !pairs.length && styles.quizCountInputDisabled]}
-            />
-            <Text style={styles.quizCountCompactHint}>
-              {pairs.length
-                ? "이번 라운드에서 풀 문제 수를 직접 적을 수 있습니다."
-                : "카드를 저장하면 이곳에서 출제 문제 수를 정할 수 있습니다."}
-            </Text>
-          </View>
         </View>
 
         {roundComplete && deck.length ? (
@@ -1456,8 +1461,8 @@ export default function App() {
             </View>
 
             <View style={styles.actionRow}>
-              <Pressable onPress={startQuiz} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-                <Text style={styles.secondaryButtonText}>다시 맞춤 시작</Text>
+              <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
+                <Text style={styles.secondaryButtonText}>다시 암기 시작</Text>
               </Pressable>
               <Pressable
                 disabled={!roundIncorrectCards.length}
@@ -1555,6 +1560,32 @@ export default function App() {
               </View>
             </View>
 
+            <View style={styles.quizCountCard}>
+              <View style={styles.quizCountCardHeader}>
+                <Text style={styles.quizSetupLabel}>문제 수</Text>
+                <Text style={styles.quizCountCompactCaption}>{pairs.length ? `최대 ${maxQuizCount}` : "대기"}</Text>
+              </View>
+
+              <View style={styles.quizCountCompactRow}>
+                <TextInput
+                  value={pairs.length ? quizCountInput : ""}
+                  onBlur={normalizeQuizCountInput}
+                  onChangeText={(value) => setQuizCountInput(value.replace(/[^0-9]/g, ""))}
+                  editable={pairs.length > 0}
+                  keyboardType="number-pad"
+                  maxLength={3}
+                  placeholder="-"
+                  placeholderTextColor={theme.textPlaceholder}
+                  style={[styles.quizCountCompactInput, !pairs.length && styles.quizCountInputDisabled]}
+                />
+                <Text style={styles.quizCountCompactHint}>
+                  {pairs.length
+                    ? "이번 라운드에서 풀 문제 수를 직접 적을 수 있습니다."
+                    : "카드를 저장하면 이곳에서 출제 문제 수를 정할 수 있습니다."}
+                </Text>
+              </View>
+            </View>
+
             <View style={[styles.quizModeCard, styles.quizModeCardEmbedded]}>
               <Text style={styles.quizSetupLabel}>출제 방향</Text>
               <Text style={styles.quizSetupHint}>{quizModeConfig.description}</Text>
@@ -1582,8 +1613,8 @@ export default function App() {
             </View>
 
             <View style={styles.actionRow}>
-              <Pressable onPress={startQuiz} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-                <Text style={styles.primaryButtonText}>맞춤 암기 시작</Text>
+              <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
+                <Text style={styles.primaryButtonText}>암기 시작</Text>
               </Pressable>
               <Pressable onPress={() => setTab("manage")} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
                 <Text style={styles.secondaryButtonText}>보관함 보기</Text>
@@ -1924,6 +1955,36 @@ export default function App() {
 
           <View style={styles.supportForm}>
             <View style={styles.supportField}>
+              <Text style={styles.supportLabel}>문의 분류</Text>
+              <View style={styles.supportCategoryRow}>
+                {SUPPORT_CATEGORY_OPTIONS.map((option) => {
+                  const active = supportCategory === option;
+
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => setSupportCategory(option)}
+                      style={({ pressed }) => [
+                        styles.supportCategoryChip,
+                        active && styles.supportCategoryChipActive,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.supportCategoryChipText,
+                          active && styles.supportCategoryChipTextActive,
+                        ]}
+                      >
+                        {option}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.supportField}>
               <Text style={styles.supportLabel}>답변 받을 이메일</Text>
               <TextInput
                 value={supportReplyEmail}
@@ -1977,7 +2038,10 @@ export default function App() {
               {latestSupportRequests.map((item) => (
                 <View key={item.id} style={styles.supportHistoryItem}>
                   <View style={styles.supportHistoryMeta}>
-                    <Text style={styles.supportHistoryStatus}>{item.status}</Text>
+                    <View style={styles.supportHistoryLead}>
+                      <Text style={styles.supportHistoryCategory}>{item.category}</Text>
+                      <Text style={styles.supportHistoryStatus}>{item.status}</Text>
+                    </View>
                     <Text style={styles.supportHistoryDate}>{formatDateTime(item.createdAt)}</Text>
                   </View>
                   <Text style={styles.supportHistoryEmail}>{item.replyEmail}</Text>
@@ -2411,8 +2475,11 @@ const createStyles = (theme) => StyleSheet.create({
     borderColor: theme.surfaceBorderSoft,
   },
   importHeader: {
+    gap: 12,
+  },
+  importTitleRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: 12,
   },
   importIconWrap: {
@@ -2435,7 +2502,6 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textSecondary,
   },
   importPreviewCard: {
-    marginTop: 8,
     gap: 10,
     padding: 12,
     borderRadius: 18,
@@ -2991,6 +3057,33 @@ const createStyles = (theme) => StyleSheet.create({
   supportForm: {
     gap: 12,
   },
+  supportCategoryRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  supportCategoryChip: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
+    borderRadius: 16,
+    backgroundColor: theme.surfaceMuted,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+    paddingHorizontal: 10,
+  },
+  supportCategoryChipActive: {
+    backgroundColor: theme.accent,
+    borderColor: theme.accent,
+  },
+  supportCategoryChipText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: theme.textStrong,
+  },
+  supportCategoryChipTextActive: {
+    color: theme.accentText,
+  },
   supportField: {
     gap: 6,
   },
@@ -3029,6 +3122,21 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
+  },
+  supportHistoryLead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  supportHistoryCategory: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    overflow: "hidden",
+    backgroundColor: theme.accentSoft,
+    fontSize: 11,
+    fontWeight: "800",
+    color: theme.accent,
   },
   supportHistoryStatus: {
     fontSize: 12,
