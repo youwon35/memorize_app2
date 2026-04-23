@@ -373,4 +373,66 @@
      텍스트 파일 파싱,
      오답 라운드 UI
      까지 포함해도 Android 번들링은 정상 동작한다.
+
+
+2026-04-23 dev build localhost 접속 오류 해결 요약
+
+1. 먼저 현재 증상을 실제로 분리해서 확인했다.
+   - 사용자는 같은 와이파이에서 dev build QR을 스캔했는데
+     `failed to connect to localhost`가 뜬다고 했다.
+   - 이 경우 보통 휴대폰이 PC의 Metro 주소가 아니라
+     자기 자신(`localhost`)을 보려고 해서 생긴다.
+
+2. 실제 Expo 서버가 무엇을 광고하고 있는지 확인했다.
+   - 현재 떠 있던 Expo 프로세스는 겉으로는 `--host lan`으로 실행되어 있었지만,
+     실제 manifest 내용을 조회해 보니
+     `hostUri`, `debuggerHost`, bundle URL이 모두 `127.0.0.1:8081`로 잡혀 있었다.
+   - 즉 문제는 단순히 같은 와이파이 여부가 아니라,
+     Expo가 dev build에 넘기는 접속 주소 자체가 `localhost`였다는 점이었다.
+
+3. 고정 LAN 주소를 강제로 주입하는 실행 방식을 만들었다.
+   - `scripts/start-dev-build.ps1`를 새로 만들었다.
+   - 이 스크립트는 현재 활성화된 네트워크의 IPv4 주소를 자동으로 찾고,
+     `REACT_NATIVE_PACKAGER_HOSTNAME`
+     `EXPO_PACKAGER_PROXY_URL`
+     를 현재 IP와 포트로 강제로 설정한 뒤
+     Expo dev client 서버를 실행한다.
+   - 즉 단순 `expo start --dev-client --host lan`보다
+     한 단계 더 강하게 현재 PC IP를 manifest에 박아 넣는 방식이다.
+
+4. npm 실행 스크립트도 같이 정리했다.
+   - `npm start`
+   - `npm run start:lan`
+   는 새 PowerShell 스크립트를 타도록 변경했다.
+   - `npm run start:tunnel`은 같은 스크립트의 tunnel 모드를 타도록 변경했다.
+   - 따라서 앞으로는 같은 와이파이에서 dev build를 실행할 때
+     `npm start`만 써도 LAN IP 기준으로 뜨도록 맞췄다.
+
+5. 실제 서버를 다시 띄워서 결과를 검증했다.
+   - 기존에 잘못 떠 있던 8081/8082 Expo 프로세스를 정리했다.
+   - 그 다음 새 스크립트로 8081 서버를 다시 실행했다.
+   - manifest를 직접 조회한 결과,
+     이번에는
+     `hostUri: 172.30.1.57:8081`
+     `debuggerHost: 172.30.1.57:8081`
+     번들 URL도 `http://172.30.1.57:8081/...`
+     로 바뀐 것을 확인했다.
+   - 또한 `http://172.30.1.57:8081` 접근도 HTTP 200으로 확인했다.
+
+6. 임시 로그도 Git에 남지 않도록 정리했다.
+   - `expo-devclient-*.log`
+   - `expo-devclient-*.err`
+   패턴을 `.gitignore`에 추가했다.
+
+현재 기준 사용 방법
+- 같은 와이파이에서 dev build 실행:
+  `npm start`
+- 또는 명시적으로 LAN:
+  `npm run start:lan`
+- 현재 확인된 접속 주소:
+  `172.30.1.57:8081`
+
+즉, 이제 새로 뜬 QR을 다시 스캔하면
+이전처럼 `localhost`가 아니라
+현재 PC의 LAN 주소를 보게 되어 휴대폰 dev build에서 정상 연결되어야 한다.
 """

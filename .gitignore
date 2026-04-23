@@ -17,4 +17,6 @@ expo-live.log
 expo-live.err
 dev-client-*.log
 dev-client-*.err
+expo-devclient-*.log
+expo-devclient-*.err
 
