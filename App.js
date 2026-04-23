@@ -94,6 +94,13 @@ const STAR_FIELD = [
   { top: 520, left: 24, size: 3, opacity: 0.24 },
   { top: 640, right: 26, size: 4, opacity: 0.2 },
 ];
+const IMPORT_PREVIEW_LINES = [
+  { no: "1", text: "sun", tone: "front" },
+  { no: "2", text: "해", tone: "back" },
+  { no: "3", text: "", tone: "blank" },
+  { no: "4", text: "moon", tone: "front" },
+  { no: "5", text: "달", tone: "back" },
+];
 const DARK_THEME = {
   mode: "dark",
   appBg: "#070B16",
@@ -169,6 +176,7 @@ const LIGHT_THEME = {
 
 const getQuizModeConfig = (mode) =>
   QUIZ_MODE_OPTIONS.find((option) => option.key === mode) ?? QUIZ_MODE_OPTIONS[0];
+const appendUniqueId = (items, nextId) => (items.includes(nextId) ? items : [...items, nextId]);
 
 export default function App() {
   const [tab, setTab] = useState("save");
@@ -800,9 +808,9 @@ export default function App() {
     setTab("quiz");
   };
 
-  const finalizeRound = () => {
+  const finalizeRound = (incorrectIds = roundIncorrectIds) => {
     const completedAt = new Date().toISOString();
-    const incorrectIdSet = new Set(roundIncorrectIds);
+    const incorrectIdSet = new Set(incorrectIds);
     const incorrectCards = deck.filter((card) => incorrectIdSet.has(card.id));
     const nextStudyStats = appendStudySession(
       studyStatsRef.current,
@@ -860,7 +868,7 @@ export default function App() {
     });
   };
 
-  const goNext = () => {
+  const goNext = (incorrectIds = roundIncorrectIds) => {
     if (!deck.length) {
       return;
     }
@@ -872,11 +880,33 @@ export default function App() {
     setShowAnswer(false);
 
     if (quizIndex + 1 >= deck.length) {
-      finalizeRound();
+      finalizeRound(incorrectIds);
       return;
     }
 
     setQuizIndex((currentIndex) => currentIndex + 1);
+  };
+
+  const skipCurrentCard = () => {
+    if (!current) {
+      return;
+    }
+
+    clearTimeout(timerRef.current);
+
+    if (result === "correct") {
+      goNext();
+      return;
+    }
+
+    const nextIncorrectIds = appendUniqueId(roundIncorrectIds, current.id);
+
+    if (result !== "incorrect") {
+      updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, false));
+      setRoundIncorrectIds(nextIncorrectIds);
+    }
+
+    goNext(nextIncorrectIds);
   };
 
   const submitAnswer = () => {
@@ -885,7 +915,10 @@ export default function App() {
     }
 
     if (!answer.trim()) {
-      Alert.alert("답 입력", "정답을 입력해 주세요.");
+      clearTimeout(timerRef.current);
+      setResult("warning");
+      setFeedback("무언가를 입력해 주세요.");
+      setShowAnswer(false);
       return;
     }
 
@@ -893,17 +926,17 @@ export default function App() {
       updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, true));
       setResult("correct");
       setFeedback("정답입니다");
-      timerRef.current = setTimeout(goNext, 900);
+      timerRef.current = setTimeout(() => goNext(), 900);
       return;
     }
 
+    const nextIncorrectIds = appendUniqueId(roundIncorrectIds, current.id);
     updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, false));
     setResult("incorrect");
-    setFeedback("다시 한 번 생각해 보세요");
-    setShowAnswer(true);
-    setRoundIncorrectIds((currentIds) =>
-      currentIds.includes(current.id) ? currentIds : [...currentIds, current.id]
-    );
+    setFeedback("틀렸습니다");
+    setShowAnswer(false);
+    setRoundIncorrectIds(nextIncorrectIds);
+    timerRef.current = setTimeout(() => goNext(nextIncorrectIds), 900);
   };
 
   const saveEdit = async () => {
@@ -989,15 +1022,30 @@ export default function App() {
 
   const openSupportEmail = async () => {
     try {
-      const emailUrl = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${APP_NAME} 문의`)}`;
+      const subject = `${APP_NAME} 문의`;
+      const body = [
+        "문의 내용을 아래에 적어 주세요.",
+        "",
+        session?.user?.email ? `보내는 사람: ${session.user.email}` : null,
+        `앱: ${APP_NAME}`,
+        `플랫폼: ${Platform.OS}`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+      const encodedSubject = encodeURIComponent(subject);
+      const encodedBody = encodeURIComponent(body);
+      const emailUrl = `mailto:${SUPPORT_EMAIL}?subject=${encodedSubject}&body=${encodedBody}`;
+      const browserComposeUrl =
+        `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(SUPPORT_EMAIL)}` +
+        `&su=${encodedSubject}&body=${encodedBody}`;
       const canOpen = await Linking.canOpenURL(emailUrl);
 
-      if (!canOpen) {
-        Alert.alert("메일 앱 필요", "문의 메일을 보내려면 메일 앱이 필요합니다.");
+      if (canOpen) {
+        await Linking.openURL(emailUrl);
         return;
       }
 
-      await Linking.openURL(emailUrl);
+      await WebBrowser.openBrowserAsync(browserComposeUrl);
     } catch (error) {
       Alert.alert("문의 열기 실패", error?.message || "잠시 후 다시 시도해 주세요.");
     }
@@ -1057,7 +1105,9 @@ export default function App() {
   const renderSaveTab = () => (
     <View style={[styles.scene, styles.saveScene]}>
       <View style={styles.composerPanel}>
-        <Text style={styles.composerTitle}>카드를 하나씩 차분하게 쌓아 두세요.</Text>
+        <Text style={styles.composerTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.84}>
+          암기하고 싶은 쌍을 저장하세요!
+        </Text>
 
         <Text style={styles.inputLabel}>앞면</Text>
         <TextInput
@@ -1093,10 +1143,37 @@ export default function App() {
             </View>
             <View style={styles.flex}>
               <Text style={styles.importTitle}>텍스트 파일로 여러 장 한꺼번에 추가</Text>
-              <Text style={styles.importBody}>
-                앞면 한 줄, 뒷면 한 줄을 적고 카드 사이에는 빈 줄 한 줄을 넣어 주세요.
-                {"\n"}예시: sun{"\n"}해{"\n\n"}달{"\n"}moon
-              </Text>
+              <View style={styles.importPreviewCard}>
+                <View style={styles.importPreviewTopBar}>
+                  <View style={styles.importPreviewDots}>
+                    <View style={styles.importPreviewDot} />
+                    <View style={styles.importPreviewDot} />
+                    <View style={styles.importPreviewDot} />
+                  </View>
+                  <Text style={styles.importPreviewFileName}>cards-example.txt</Text>
+                </View>
+                <View style={styles.importPreviewSheet}>
+                  {IMPORT_PREVIEW_LINES.map((line) => (
+                    <View key={`${line.no}-${line.text || "blank"}`} style={styles.importPreviewLine}>
+                      <Text style={styles.importPreviewLineNo}>{line.no}</Text>
+                      <Text
+                        style={[
+                          styles.importPreviewLineText,
+                          line.tone === "front" && styles.importPreviewLineFront,
+                          line.tone === "back" && styles.importPreviewLineBack,
+                          line.tone === "blank" && styles.importPreviewLineBlank,
+                        ]}
+                      >
+                        {line.text || " "}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.importPreviewFooter}>
+                  <MaterialCommunityIcons name="cards-outline" size={15} color={theme.accent} />
+                  <Text style={styles.importPreviewHint}>빈 줄로 카드를 구분하면 여러 장이 자동 저장됩니다.</Text>
+                </View>
+              </View>
             </View>
           </View>
 
@@ -1255,7 +1332,14 @@ export default function App() {
 
             <TextInput
               value={answer}
-              onChangeText={setAnswer}
+              onChangeText={(value) => {
+                setAnswer(value);
+
+                if (result === "warning") {
+                  setFeedback("");
+                  setResult(null);
+                }
+              }}
               placeholder="정답 입력"
               placeholderTextColor={theme.textPlaceholder}
               autoCapitalize="none"
@@ -1263,7 +1347,16 @@ export default function App() {
             />
 
             {feedback ? (
-              <Text style={[styles.feedback, result === "correct" ? styles.feedbackGood : styles.feedbackBad]}>
+              <Text
+                style={[
+                  styles.feedback,
+                  result === "correct"
+                    ? styles.feedbackGood
+                    : result === "warning"
+                      ? styles.feedbackNeutral
+                      : styles.feedbackBad,
+                ]}
+              >
                 {feedback}
               </Text>
             ) : null}
@@ -1274,7 +1367,7 @@ export default function App() {
               <Pressable onPress={submitAnswer} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
                 <Text style={styles.primaryButtonText}>제출</Text>
               </Pressable>
-              <Pressable onPress={goNext} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
+              <Pressable onPress={skipCurrentCard} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
                 <Text style={styles.secondaryButtonText}>다음 카드로 넘어가기</Text>
               </Pressable>
             </View>
@@ -2012,8 +2105,8 @@ const createStyles = (theme) => StyleSheet.create({
     borderColor: theme.surfaceBorder,
   },
   composerTitle: {
-    fontSize: 28,
-    lineHeight: 34,
+    fontSize: 24,
+    lineHeight: 30,
     fontWeight: "800",
     color: theme.textPrimary,
   },
@@ -2107,6 +2200,83 @@ const createStyles = (theme) => StyleSheet.create({
     marginTop: 4,
     fontSize: 13,
     lineHeight: 21,
+    color: theme.textSecondary,
+  },
+  importPreviewCard: {
+    marginTop: 8,
+    gap: 10,
+    padding: 12,
+    borderRadius: 18,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  importPreviewTopBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  importPreviewDots: {
+    flexDirection: "row",
+    gap: 4,
+  },
+  importPreviewDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: theme.textPlaceholder,
+    opacity: 0.7,
+  },
+  importPreviewFileName: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: theme.textMuted,
+  },
+  importPreviewSheet: {
+    gap: 6,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: theme.surfaceCard,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  importPreviewLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  importPreviewLineNo: {
+    width: 16,
+    fontSize: 12,
+    fontWeight: "700",
+    color: theme.textPlaceholder,
+  },
+  importPreviewLineText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
+    color: theme.textSecondary,
+  },
+  importPreviewLineFront: {
+    color: theme.textPrimary,
+    fontWeight: "700",
+  },
+  importPreviewLineBack: {
+    color: theme.accent,
+    fontWeight: "700",
+  },
+  importPreviewLineBlank: {
+    color: "transparent",
+  },
+  importPreviewFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  importPreviewHint: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
     color: theme.textSecondary,
   },
   importButton: {
@@ -2493,6 +2663,9 @@ const createStyles = (theme) => StyleSheet.create({
   },
   feedbackGood: {
     color: theme.success,
+  },
+  feedbackNeutral: {
+    color: theme.accent,
   },
   feedbackBad: {
     color: theme.danger,
