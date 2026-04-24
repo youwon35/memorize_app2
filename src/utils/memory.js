@@ -278,6 +278,62 @@ export const parseImportedPairs = (text) => {
   return { entries, invalidEntryIndexes };
 };
 
+export const extractPairsFromRecognizedText = (recognizedText) => {
+  const segments = collectRecognizedSegments(recognizedText);
+
+  if (!segments.length) {
+    return { entries: [], invalidRowIndexes: [], rows: [] };
+  }
+
+  const medianHeight = getMedian(segments.map((segment) => segment.height));
+  const rowThreshold = Math.max(18, medianHeight * 0.72);
+  const rows = [];
+
+  segments
+    .sort((left, right) => left.centerY - right.centerY || left.left - right.left)
+    .forEach((segment) => {
+      const latestRow = rows[rows.length - 1];
+
+      if (!latestRow || !shouldAppendSegmentToRow(latestRow, segment, rowThreshold)) {
+        rows.push(createRecognizedRow(segment));
+        return;
+      }
+
+      appendSegmentToRow(latestRow, segment);
+    });
+
+  const entries = [];
+  const invalidRowIndexes = [];
+  const parsedRows = rows.map((row, index) => {
+    const parsed = parseRecognizedRow(row.segments, rowThreshold);
+
+    if (!parsed) {
+      invalidRowIndexes.push(index + 1);
+      return {
+        index: index + 1,
+        left: "",
+        right: "",
+        rawText: row.segments.map((segment) => segment.text).join(" ").trim(),
+      };
+    }
+
+    const entry = {
+      left: parsed.left,
+      right: parsed.right,
+    };
+
+    entries.push(entry);
+
+    return {
+      index: index + 1,
+      ...entry,
+      rawText: row.segments.map((segment) => segment.text).join(" ").trim(),
+    };
+  });
+
+  return { entries, invalidRowIndexes, rows: parsedRows };
+};
+
 export const mapPairRecord = (record) => ({
   id: record.id,
   left: record.prompt_a ?? "",
@@ -303,6 +359,202 @@ function shuffle(items) {
   }
 
   return cloned;
+}
+
+function collectRecognizedSegments(recognizedText) {
+  return (recognizedText?.blocks ?? []).flatMap((block) =>
+    (block?.lines ?? []).flatMap((line) => {
+      const units =
+        Array.isArray(line?.elements) && line.elements.length
+          ? line.elements
+          : line?.text
+            ? [line]
+            : [];
+
+      return units
+        .map((unit) => {
+          const text = normalizeOcrText(unit?.text);
+          const frame = normalizeOcrFrame(unit?.frame);
+
+          if (!text || !frame) {
+            return null;
+          }
+
+          return {
+            text,
+            ...frame,
+            centerY: (frame.top + frame.bottom) / 2,
+            height: Math.max(1, frame.bottom - frame.top),
+          };
+        })
+        .filter(Boolean);
+    })
+  );
+}
+
+function normalizeOcrText(value = "") {
+  return `${value}`.replace(/\s+/g, " ").trim();
+}
+
+function normalizeOcrFrame(frame) {
+  if (!frame || typeof frame !== "object") {
+    return null;
+  }
+
+  const left = Number(frame.left ?? frame.x ?? NaN);
+  const top = Number(frame.top ?? frame.y ?? NaN);
+  const right = Number(
+    frame.right ??
+      (Number.isFinite(frame.width) && Number.isFinite(left) ? left + frame.width : NaN)
+  );
+  const bottom = Number(
+    frame.bottom ??
+      (Number.isFinite(frame.height) && Number.isFinite(top) ? top + frame.height : NaN)
+  );
+
+  if (![left, top, right, bottom].every(Number.isFinite)) {
+    return null;
+  }
+
+  return { left, top, right, bottom };
+}
+
+function getMedian(values) {
+  const sorted = values
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => left - right);
+
+  if (!sorted.length) {
+    return 0;
+  }
+
+  const middle = Math.floor(sorted.length / 2);
+
+  if (sorted.length % 2 === 0) {
+    return (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+
+  return sorted[middle];
+}
+
+function createRecognizedRow(segment) {
+  return {
+    segments: [segment],
+    top: segment.top,
+    bottom: segment.bottom,
+    centerY: segment.centerY,
+    height: segment.height,
+  };
+}
+
+function shouldAppendSegmentToRow(row, segment, rowThreshold) {
+  const verticalDistance = Math.abs(segment.centerY - row.centerY);
+
+  return verticalDistance <= Math.max(rowThreshold, row.height * 0.82, segment.height * 0.82);
+}
+
+function appendSegmentToRow(row, segment) {
+  row.segments.push(segment);
+  row.top = Math.min(row.top, segment.top);
+  row.bottom = Math.max(row.bottom, segment.bottom);
+  row.height = Math.max(1, row.bottom - row.top);
+  row.centerY = (row.top + row.bottom) / 2;
+}
+
+function parseRecognizedRow(segments, rowThreshold) {
+  const sortedSegments = [...segments].sort((left, right) => left.left - right.left);
+
+  if (!sortedSegments.length) {
+    return null;
+  }
+
+  if (sortedSegments.length === 1) {
+    return splitMergedRecognizedText(sortedSegments[0].text);
+  }
+
+  const rowWidth = Math.max(
+    1,
+    sortedSegments[sortedSegments.length - 1].right - sortedSegments[0].left
+  );
+  const gaps = sortedSegments.slice(0, -1).map((segment, index) => ({
+    index,
+    gap: sortedSegments[index + 1].left - segment.right,
+  }));
+  const largestGap = gaps.reduce(
+    (currentLargest, gap) => (gap.gap > currentLargest.gap ? gap : currentLargest),
+    { index: -1, gap: -Infinity }
+  );
+  const gapThreshold = Math.max(28, rowWidth * 0.08, rowThreshold * 1.15);
+
+  if (
+    largestGap.index >= 0 &&
+    (largestGap.gap >= gapThreshold ||
+      (sortedSegments.length === 2 && largestGap.gap >= Math.max(18, rowThreshold)))
+  ) {
+    return buildPairFromRecognizedClusters(
+      sortedSegments.slice(0, largestGap.index + 1),
+      sortedSegments.slice(largestGap.index + 1)
+    );
+  }
+
+  return splitMergedRecognizedText(
+    sortedSegments.map((segment) => segment.text).join("   ")
+  );
+}
+
+function buildPairFromRecognizedClusters(leftSegments, rightSegments) {
+  const left = leftSegments.map((segment) => segment.text).join(" ").replace(/\s+/g, " ").trim();
+  const right = rightSegments
+    .map((segment) => segment.text)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!left || !right) {
+    return null;
+  }
+
+  return { left, right };
+}
+
+function splitMergedRecognizedText(text) {
+  const normalized = normalizeOcrText(text);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const separatorPatterns = [
+    /\t+/,
+    /\s{3,}/,
+    /\s+(?:\||\/|::|=>|->|→)\s+/,
+    /\s{2,}/,
+  ];
+
+  for (const separatorPattern of separatorPatterns) {
+    if (!separatorPattern.test(normalized)) {
+      continue;
+    }
+
+    const parts = normalized
+      .split(separatorPattern)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (parts.length < 2) {
+      continue;
+    }
+
+    const splitIndex = Math.ceil(parts.length / 2);
+    const left = parts.slice(0, splitIndex).join(" ").trim();
+    const right = parts.slice(splitIndex).join(" ").trim();
+
+    if (left && right) {
+      return { left, right };
+    }
+  }
+
+  return null;
 }
 
 function ensureStudyStats(studyStats) {

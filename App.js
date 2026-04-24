@@ -3,6 +3,7 @@ import {
   Alert,
   Animated,
   Easing,
+  Image,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -18,6 +19,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
+import * as ImagePicker from "expo-image-picker";
 import { makeRedirectUri } from "expo-auth-session";
 import { File } from "expo-file-system";
 import * as WebBrowser from "expo-web-browser";
@@ -31,6 +33,7 @@ import {
   createLocalPair,
   createPersistableStudyStats,
   createSignature,
+  extractPairsFromRecognizedText,
   getDirectionLabel,
   migrateStudyStatsEntry,
   mapPairRecord,
@@ -87,6 +90,11 @@ const TABS = [
   { key: "history", label: "기록", icon: "chart-timeline-variant" },
   { key: "manage", label: "보관함", icon: "playlist-edit" },
   { key: "about", label: "앱 정보", icon: "information-outline" },
+];
+const SAVE_INPUT_OPTIONS = [
+  { key: "single", label: "한쌍씩", icon: "cards-outline" },
+  { key: "text", label: "텍스트 파일로", icon: "file-document-plus-outline" },
+  { key: "photo", label: "사진으로", icon: "camera-outline" },
 ];
 const STAR_FIELD = [
   { top: 34, left: 28, size: 4, opacity: 0.45 },
@@ -219,6 +227,7 @@ const mergeSupportRequests = (...collections) => {
 export default function App() {
   const [tab, setTab] = useState("save");
   const [themeMode, setThemeMode] = useState("light");
+  const [saveInputMode, setSaveInputMode] = useState("single");
   const [pairs, setPairs] = useState([]);
   const [studyStats, setStudyStats] = useState(createEmptyStudyStats());
   const [draft, setDraft] = useState({ left: "", right: "" });
@@ -247,6 +256,11 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [showAnswer, setShowAnswer] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [photoImporting, setPhotoImporting] = useState(false);
+  const [photoAsset, setPhotoAsset] = useState(null);
+  const [photoImportedPairs, setPhotoImportedPairs] = useState([]);
+  const [photoInvalidRowIndexes, setPhotoInvalidRowIndexes] = useState([]);
+  const [photoImportNotice, setPhotoImportNotice] = useState("");
   const [roundComplete, setRoundComplete] = useState(false);
   const [roundIncorrectIds, setRoundIncorrectIds] = useState([]);
   const [supportCategory, setSupportCategory] = useState(SUPPORT_CATEGORY_OPTIONS[0]);
@@ -299,6 +313,7 @@ export default function App() {
   }, [deck, roundIncorrectIds]);
   const roundCorrectCount = deck.length - roundIncorrectCards.length;
   const latestSupportRequests = useMemo(() => supportRequests.slice(0, 3), [supportRequests]);
+  const photoPreviewPairs = useMemo(() => photoImportedPairs.slice(0, 6), [photoImportedPairs]);
   const todayKey = getLocalDayKey(new Date());
   const todaySessions = useMemo(
     () => studyStats.sessions.filter((item) => getLocalDayKey(item.completedAt) === todayKey),
@@ -891,6 +906,149 @@ export default function App() {
     }
   };
 
+  const resetPhotoImportState = () => {
+    setPhotoAsset(null);
+    setPhotoImportedPairs([]);
+    setPhotoInvalidRowIndexes([]);
+    setPhotoImportNotice("");
+  };
+
+  const readPairsFromPhotoAsset = async (asset) => {
+    if (!asset?.uri) {
+      throw new Error("선택한 사진을 읽을 수 없습니다.");
+    }
+
+    let recognizeText;
+
+    try {
+      ({ recognizeText } = require("@infinitered/react-native-mlkit-text-recognition"));
+    } catch (error) {
+      throw new Error(
+        "사진 인식은 dev build 또는 APK에서 사용할 수 있습니다. 새 빌드를 설치한 뒤 다시 시도해 주세요."
+      );
+    }
+
+    const recognitionResult = await recognizeText(asset.uri);
+
+    return extractPairsFromRecognizedText(recognitionResult);
+  };
+
+  const handlePickedPhotoForImport = async (asset) => {
+    if (!asset?.uri) {
+      return;
+    }
+
+    setPhotoAsset(asset);
+    setPhotoImporting(true);
+    setPhotoImportedPairs([]);
+    setPhotoInvalidRowIndexes([]);
+    setPhotoImportNotice("사진을 읽고 카드 쌍을 찾는 중입니다.");
+
+    try {
+      const { entries, invalidRowIndexes } = await readPairsFromPhotoAsset(asset);
+
+      setPhotoImportedPairs(entries);
+      setPhotoInvalidRowIndexes(invalidRowIndexes);
+
+      if (!entries.length) {
+        setPhotoImportNotice(
+          invalidRowIndexes.length
+            ? "글자는 읽었지만 좌우 한 쌍으로 묶지 못했습니다. 가운데 간격을 더 넓혀 다시 찍어 주세요."
+            : "사진에서 읽을 수 있는 글자를 찾지 못했습니다."
+        );
+        return;
+      }
+
+      const messages = [`사진에서 ${entries.length}개의 카드 쌍을 찾았습니다.`];
+
+      if (invalidRowIndexes.length) {
+        messages.push(`${invalidRowIndexes.length}개 줄은 짝을 만들지 못해 제외했습니다.`);
+      }
+
+      setPhotoImportNotice(messages.join(" "));
+    } catch (error) {
+      setPhotoImportNotice(error?.message || "사진 속 글자를 읽는 중 문제가 생겼습니다.");
+    } finally {
+      setPhotoImporting(false);
+    }
+  };
+
+  const pickPhotoFromLibrary = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      Alert.alert("사진 권한 필요", "사진으로 가져오려면 사진 보관함 접근 권한이 필요합니다.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      quality: 1,
+    });
+
+    if (result.canceled) {
+      return;
+    }
+
+    await handlePickedPhotoForImport(result.assets?.[0]);
+  };
+
+  const takePhotoForImport = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+
+    if (!permission.granted) {
+      Alert.alert("카메라 권한 필요", "사진으로 가져오려면 카메라 접근 권한이 필요합니다.");
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 1,
+      cameraType: ImagePicker.CameraType.back,
+    });
+
+    if (result.canceled) {
+      return;
+    }
+
+    await handlePickedPhotoForImport(result.assets?.[0]);
+  };
+
+  const saveRecognizedPhotoPairs = async () => {
+    if (!photoImportedPairs.length) {
+      Alert.alert("저장할 카드 없음", "먼저 사진을 읽어 카드 쌍을 찾은 뒤 저장해 주세요.");
+      return;
+    }
+
+    const saveResult = await saveEntryBatch(photoImportedPairs);
+    const messages = [];
+
+    if (saveResult.savedCount) {
+      messages.push(`${saveResult.savedCount}개의 카드를 저장했습니다.`);
+    }
+
+    if (saveResult.skippedDuplicates) {
+      messages.push(`${saveResult.skippedDuplicates}개는 이미 있어서 건너뛰었습니다.`);
+    }
+
+    setPhotoImportNotice(
+      messages.length
+        ? messages.join(" ")
+        : "모든 카드가 이미 저장되어 있어 새로 추가된 내용은 없습니다."
+    );
+
+    if (saveResult.cloudSaved) {
+      setNote("사진에서 읽은 카드가 Google 계정에도 저장되었습니다.");
+    }
+
+    if (saveResult.savedCount) {
+      Alert.alert("사진 카드 저장 완료", messages.join(" "));
+    }
+  };
+
   const normalizeQuizCountInput = () => {
     if (!maxQuizCount) {
       return;
@@ -1315,38 +1473,69 @@ export default function App() {
 
   const renderSaveTab = () => (
     <View style={[styles.scene, styles.saveScene]}>
-      <View style={styles.composerPanel}>
-        <Text style={styles.composerTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.84}>
-          암기하고 싶은 쌍을 저장하세요!
-        </Text>
+      <View style={styles.saveModeRow}>
+        {SAVE_INPUT_OPTIONS.map((option) => {
+          const active = saveInputMode === option.key;
 
-        <Text style={styles.inputLabel}>앞면</Text>
-        <TextInput
-          value={draft.left}
-          onChangeText={(value) => setDraft((currentDraft) => ({ ...currentDraft, left: value }))}
-          style={[styles.input, styles.multilineInput]}
-          multiline
-          textAlignVertical="top"
-        />
+          return (
+            <Pressable
+              key={option.key}
+              onPress={() => setSaveInputMode(option.key)}
+              style={({ pressed }) => [
+                styles.saveModeChip,
+                active && styles.saveModeChipActive,
+                pressed && styles.pressed,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={option.icon}
+                size={18}
+                color={active ? theme.accentText : theme.textSecondary}
+              />
+              <Text style={[styles.saveModeChipText, active && styles.saveModeChipTextActive]}>
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
 
-        <Text style={styles.inputLabel}>뒷면</Text>
-        <TextInput
-          value={draft.right}
-          onChangeText={(value) => setDraft((currentDraft) => ({ ...currentDraft, right: value }))}
-          style={[styles.input, styles.multilineInput]}
-          multiline
-          textAlignVertical="top"
-        />
+      {saveInputMode === "single" ? (
+        <View style={styles.composerPanel}>
+          <Text style={styles.composerTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.84}>
+            암기하고 싶은 쌍을 저장하세요!
+          </Text>
 
-        <View style={styles.actionRow}>
-          <Pressable onPress={() => void saveCard()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-            <Text style={styles.primaryButtonText}>저장하기</Text>
-          </Pressable>
-          <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-            <Text style={styles.secondaryButtonText}>바로 암기</Text>
-          </Pressable>
+          <Text style={styles.inputLabel}>앞면</Text>
+          <TextInput
+            value={draft.left}
+            onChangeText={(value) => setDraft((currentDraft) => ({ ...currentDraft, left: value }))}
+            style={[styles.input, styles.multilineInput]}
+            multiline
+            textAlignVertical="top"
+          />
+
+          <Text style={styles.inputLabel}>뒷면</Text>
+          <TextInput
+            value={draft.right}
+            onChangeText={(value) => setDraft((currentDraft) => ({ ...currentDraft, right: value }))}
+            style={[styles.input, styles.multilineInput]}
+            multiline
+            textAlignVertical="top"
+          />
+
+          <View style={styles.actionRow}>
+            <Pressable onPress={() => void saveCard()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
+              <Text style={styles.primaryButtonText}>저장하기</Text>
+            </Pressable>
+            <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
+              <Text style={styles.secondaryButtonText}>바로 암기</Text>
+            </Pressable>
+          </View>
         </View>
+      ) : null}
 
+      {saveInputMode === "text" ? (
         <View style={styles.importPanel}>
           <View style={styles.importHeader}>
             <View style={styles.importTitleRow}>
@@ -1400,8 +1589,157 @@ export default function App() {
             <Text style={styles.importButtonText}>{importing ? "불러오는 중..." : "텍스트 파일 불러오기"}</Text>
           </Pressable>
         </View>
-      </View>
+      ) : null}
 
+      {saveInputMode === "photo" ? (
+        <View style={styles.importPanel}>
+          <View style={styles.importHeader}>
+            <View style={styles.importTitleRow}>
+              <View style={styles.importIconWrap}>
+                <MaterialCommunityIcons name="camera-outline" size={18} color={theme.accent} />
+              </View>
+              <Text style={styles.importTitle}>사진으로 여러 장 읽어오기</Text>
+            </View>
+            <Text style={styles.importBody}>
+              좌우 간격이 크게 벌어진 노트 사진을 찍거나 고르면, 한 줄씩 읽어서 카드 쌍으로 나눠 저장합니다.
+            </Text>
+          </View>
+
+          {photoAsset?.uri ? (
+            <View style={styles.photoPreviewFrame}>
+              <Image source={{ uri: photoAsset.uri }} style={styles.photoPreviewImage} resizeMode="cover" />
+            </View>
+          ) : (
+            <View style={styles.photoPlaceholderCard}>
+              <View style={styles.photoPlaceholderIcon}>
+                <MaterialCommunityIcons name="image-search-outline" size={22} color={theme.accent} />
+              </View>
+              <Text style={styles.photoPlaceholderTitle}>노트 사진을 선택하면 자동으로 글자를 읽습니다.</Text>
+              <Text style={styles.photoPlaceholderBody}>
+                왼쪽 단어와 오른쪽 뜻 사이 간격이 클수록 더 안정적으로 짝을 찾을 수 있습니다.
+              </Text>
+            </View>
+          )}
+
+          {photoImportNotice ? <Text style={styles.photoImportNotice}>{photoImportNotice}</Text> : null}
+
+          {photoPreviewPairs.length ? (
+            <View style={styles.photoResultsCard}>
+              <Text style={styles.photoResultsTitle}>인식된 카드 미리보기</Text>
+              <View style={styles.libraryList}>
+                {photoPreviewPairs.map((entry, index) => (
+                  <View key={`${entry.left}-${entry.right}-${index}`} style={[styles.previewRow, styles.previewRowLarge]}>
+                    <View style={styles.previewColumn}>
+                      <Text style={styles.previewLabel}>앞면</Text>
+                      <Text style={styles.previewText}>{entry.left}</Text>
+                    </View>
+                    <Text style={styles.previewDivider}>↔</Text>
+                    <View style={styles.previewColumn}>
+                      <Text style={styles.previewLabel}>뒷면</Text>
+                      <Text style={styles.previewText}>{entry.right}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+              {photoImportedPairs.length > photoPreviewPairs.length ? (
+                <Text style={styles.photoImportMeta}>
+                  추가로 {photoImportedPairs.length - photoPreviewPairs.length}개의 카드가 더 있습니다.
+                </Text>
+              ) : null}
+              {photoInvalidRowIndexes.length ? (
+                <Text style={styles.photoImportMeta}>
+                  짝을 만들지 못한 줄: {photoInvalidRowIndexes.join(", ")}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+
+          <View style={styles.actionRow}>
+            <Pressable
+              disabled={photoImporting}
+              onPress={() => void takePhotoForImport()}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                photoImporting && styles.primaryButtonDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.primaryButtonText,
+                  photoImporting && styles.primaryButtonTextDisabled,
+                ]}
+              >
+                {photoImporting ? "읽는 중..." : "사진 촬영"}
+              </Text>
+            </Pressable>
+            <Pressable
+              disabled={photoImporting}
+              onPress={() => void pickPhotoFromLibrary()}
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                photoImporting && styles.secondaryButtonDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.secondaryButtonText,
+                  photoImporting && styles.secondaryButtonTextDisabled,
+                ]}
+              >
+                앨범에서 선택
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.actionRow}>
+            <Pressable
+              disabled={!photoImportedPairs.length || photoImporting}
+              onPress={() => void saveRecognizedPhotoPairs()}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                (!photoImportedPairs.length || photoImporting) && styles.primaryButtonDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.primaryButtonText,
+                  (!photoImportedPairs.length || photoImporting) &&
+                    styles.primaryButtonTextDisabled,
+                ]}
+              >
+                인식한 카드 저장하기
+              </Text>
+            </Pressable>
+            <Pressable
+              disabled={!photoAsset?.uri && !photoImportedPairs.length && !photoImportNotice}
+              onPress={resetPhotoImportState}
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                !photoAsset?.uri &&
+                  !photoImportedPairs.length &&
+                  !photoImportNotice &&
+                  styles.secondaryButtonDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.secondaryButtonText,
+                  !photoAsset?.uri &&
+                    !photoImportedPairs.length &&
+                    !photoImportNotice &&
+                    styles.secondaryButtonTextDisabled,
+                ]}
+              >
+                초기화
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 
@@ -2322,6 +2660,35 @@ const createStyles = (theme) => StyleSheet.create({
   saveScene: {
     justifyContent: "flex-start",
   },
+  saveModeRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  saveModeChip: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    minHeight: 62,
+    borderRadius: 20,
+    backgroundColor: theme.accentSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+    paddingHorizontal: 10,
+  },
+  saveModeChipActive: {
+    backgroundColor: theme.accent,
+    borderColor: theme.accent,
+  },
+  saveModeChipText: {
+    fontSize: 13,
+    fontWeight: "800",
+    textAlign: "center",
+    color: theme.textStrong,
+  },
+  saveModeChipTextActive: {
+    color: theme.accentText,
+  },
   heroStrip: {
     paddingTop: 8,
     gap: 4,
@@ -2466,6 +2833,13 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "700",
     color: theme.textPrimary,
   },
+  secondaryButtonDisabled: {
+    backgroundColor: theme.surfaceSoft,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  secondaryButtonTextDisabled: {
+    color: theme.textMuted,
+  },
   importPanel: {
     gap: 14,
     padding: 16,
@@ -2593,6 +2967,69 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 14,
     fontWeight: "800",
     color: theme.textPrimary,
+  },
+  photoPreviewFrame: {
+    height: 228,
+    overflow: "hidden",
+    borderRadius: 22,
+    backgroundColor: theme.surfaceCard,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  photoPreviewImage: {
+    width: "100%",
+    height: "100%",
+  },
+  photoPlaceholderCard: {
+    alignItems: "flex-start",
+    gap: 12,
+    padding: 18,
+    borderRadius: 22,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  photoPlaceholderIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accentSoft,
+  },
+  photoPlaceholderTitle: {
+    fontSize: 18,
+    lineHeight: 25,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  photoPlaceholderBody: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: theme.textSecondary,
+  },
+  photoImportNotice: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: theme.textSecondary,
+  },
+  photoResultsCard: {
+    gap: 12,
+    padding: 14,
+    borderRadius: 20,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  photoResultsTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  photoImportMeta: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: theme.textSecondary,
   },
   dangerButton: {
     flex: 1,

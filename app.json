@@ -25,6 +25,14 @@
           "experimentalLauncherActivity": false
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "MEMORIA가 노트 사진에서 단어 쌍을 읽을 수 있도록 사진 접근 권한이 필요합니다.",
+          "cameraPermission": "MEMORIA가 노트 사진에서 단어 쌍을 읽을 수 있도록 카메라 접근 권한이 필요합니다.",
+          "microphonePermission": false
+        }
+      ],
       "expo-secure-store"
     ],
     "android": {
