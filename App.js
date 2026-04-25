@@ -272,6 +272,7 @@ export default function App() {
   const [launchVisible, setLaunchVisible] = useState(true);
 
   const timerRef = useRef(null);
+  const scrollRef = useRef(null);
   const pairsRef = useRef(pairs);
   const studyStatsRef = useRef(studyStats);
   const supportRequestsRef = useRef([]);
@@ -302,6 +303,13 @@ export default function App() {
     : Number.isFinite(parsedQuizCount) && parsedQuizCount > 0
       ? Math.min(parsedQuizCount, maxQuizCount)
       : Math.min(DEFAULT_QUIZ_COUNT, maxQuizCount);
+
+  const handleTabChange = (nextTab) => {
+    setTab(nextTab);
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo?.({ y: 0, animated: false });
+    });
+  };
   const roundIncorrectCards = useMemo(() => {
     if (!deck.length || !roundIncorrectIds.length) {
       return [];
@@ -739,7 +747,7 @@ export default function App() {
     void AsyncStorage.setItem(TUTORIAL_SEEN_KEY, "1");
 
     if (nextTab) {
-      setTab(nextTab);
+      handleTabChange(nextTab);
     }
   };
 
@@ -1075,7 +1083,7 @@ export default function App() {
       mode: options.mode ?? quizMode,
       source: options.source ?? "adaptive",
     };
-    setTab("quiz");
+    handleTabChange("quiz");
   };
 
   const finalizeRound = (incorrectIds = roundIncorrectIds) => {
@@ -1954,7 +1962,7 @@ export default function App() {
               <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
                 <Text style={styles.primaryButtonText}>암기 시작</Text>
               </Pressable>
-              <Pressable onPress={() => setTab("manage")} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
+              <Pressable onPress={() => handleTabChange("manage")} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
                 <Text style={styles.secondaryButtonText}>보관함 보기</Text>
               </Pressable>
             </View>
@@ -1967,7 +1975,7 @@ export default function App() {
             title="지금은 퀴즈를 시작할 카드가 없습니다."
             body="저장 탭에서 카드를 만들면 바로 이 화면에서 맞춤 암기를 시작할 수 있습니다."
             actionLabel="저장 탭으로 이동"
-            onPress={() => setTab("save")}
+            onPress={() => handleTabChange("save")}
           />
         )}
       </View>
@@ -2076,7 +2084,7 @@ export default function App() {
             title="학습 기록은 첫 라운드를 마치면 바로 채워집니다."
             body="문제를 풀기 시작하면 오늘 몇 번 암기했는지와 자주 틀린 카드가 이 탭에 자동으로 쌓입니다."
             actionLabel="암기하러 가기"
-            onPress={() => setTab("quiz")}
+            onPress={() => handleTabChange("quiz")}
           />
         )}
       </View>
@@ -2138,35 +2146,54 @@ export default function App() {
                 </>
               ) : (
                 <>
-                  <PreviewRow pair={pair} large styles={styles} />
-                  <View style={styles.manageActionRow}>
-                    <Pressable
-                      onPress={() => {
-                        setEditingId(pair.id);
-                        setEditingLeft(pair.left);
-                        setEditingRight(pair.right);
-                      }}
-                      style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
-                    >
-                      <Text style={styles.secondaryButtonText}>수정</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() =>
-                        Alert.alert("카드 삭제", "이 카드를 보관함에서 삭제할까요?", [
-                          { text: "취소", style: "cancel" },
-                          {
-                            text: "삭제",
-                            style: "destructive",
-                            onPress: () => {
-                              void removePair(pair);
+                  <View style={styles.manageDisplayStack}>
+                    <View style={styles.manageDisplayRow}>
+                      <View style={styles.manageTextBlock}>
+                        <Text style={styles.previewLabel}>앞면</Text>
+                        <Text style={styles.managePairText}>{pair.left}</Text>
+                      </View>
+                      <Pressable
+                        onPress={() => {
+                          setEditingId(pair.id);
+                          setEditingLeft(pair.left);
+                          setEditingRight(pair.right);
+                        }}
+                        style={({ pressed }) => [
+                          styles.secondaryButton,
+                          styles.manageSideButton,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Text style={styles.secondaryButtonText}>수정</Text>
+                      </Pressable>
+                    </View>
+                    <View style={styles.manageDisplayRow}>
+                      <View style={styles.manageTextBlock}>
+                        <Text style={styles.previewLabel}>뒷면</Text>
+                        <Text style={styles.managePairText}>{pair.right}</Text>
+                      </View>
+                      <Pressable
+                        onPress={() =>
+                          Alert.alert("카드 삭제", "이 카드를 보관함에서 삭제할까요?", [
+                            { text: "취소", style: "cancel" },
+                            {
+                              text: "삭제",
+                              style: "destructive",
+                              onPress: () => {
+                                void removePair(pair);
+                              },
                             },
-                          },
-                        ])
-                      }
-                      style={({ pressed }) => [styles.dangerButton, pressed && styles.pressed]}
-                    >
-                      <Text style={styles.dangerButtonText}>삭제</Text>
-                    </Pressable>
+                          ])
+                        }
+                        style={({ pressed }) => [
+                          styles.dangerButton,
+                          styles.manageSideButton,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Text style={styles.dangerButtonText}>삭제</Text>
+                      </Pressable>
+                    </View>
                   </View>
                 </>
               )}
@@ -2181,7 +2208,7 @@ export default function App() {
           title="보관함은 저장된 카드가 생기면 바로 채워집니다."
           body="중앙 입력 패널에서 카드 하나를 저장한 뒤 다시 확인해 보세요."
           actionLabel="카드 저장하러 가기"
-          onPress={() => setTab("save")}
+          onPress={() => handleTabChange("save")}
         />
       )}
     </View>
@@ -2426,6 +2453,7 @@ export default function App() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={[styles.content, { paddingTop: contentTopPadding }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -2444,7 +2472,7 @@ export default function App() {
             return (
               <Pressable
                 key={item.key}
-                onPress={() => setTab(item.key)}
+                onPress={() => handleTabChange(item.key)}
                 style={({ pressed }) => [
                   styles.tab,
                   active && styles.tabActive,
@@ -3415,6 +3443,32 @@ const createStyles = (theme) => StyleSheet.create({
     padding: 16,
     borderRadius: 22,
     backgroundColor: theme.surface,
+  },
+  manageDisplayStack: {
+    gap: 14,
+  },
+  manageDisplayRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  manageTextBlock: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+    paddingVertical: 4,
+  },
+  managePairText: {
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: "700",
+    color: theme.textPrimary,
+  },
+  manageSideButton: {
+    flex: 0,
+    width: 108,
+    minHeight: 58,
+    paddingVertical: 0,
   },
   aboutStack: {
     gap: 12,
