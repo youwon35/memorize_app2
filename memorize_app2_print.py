@@ -705,4 +705,36 @@
    - `npx expo export --platform android`도 성공해서
      저장 탭 3분할, 사진 OCR UI, 이미지 선택기, ML Kit 연동 코드까지 포함한 상태에서
      Expo SDK 54 기준 Android 번들링이 정상임을 확인했다.
+
+
+2026년 4월 25일 최신 커밋 기준 Android dev build와 APK를 실제로 다시 빌드했다.
+
+1. 먼저 현재 작업 기준점을 확인했다.
+   - Git HEAD는 `45e316a`였고,
+     이 커밋에는 저장 탭 3분할과 사진 OCR 기능이 이미 반영되어 있었다.
+   - Expo 계정도 `zinnn / youwon35@naver.com`으로 로그인된 상태였다.
+
+2. development profile로 Android dev build를 새로 만들었다.
+   - 명령은 `eas-cli build --platform android --profile development --non-interactive`였다.
+   - 빌드 완료 링크는
+     `https://expo.dev/accounts/zinnn/projects/memoria/builds/c3c72217-22e4-4a9f-930f-ac2210da7c5c`
+     이다.
+   - 이 빌드는 development client라서,
+     사진 OCR 같은 네이티브 모듈을 포함한 최신 상태를 휴대폰에 설치해 확인할 수 있다.
+
+3. preview profile로 실제 APK도 새로 만들었다.
+   - 명령은 `eas-cli build --platform android --profile preview --non-interactive`였다.
+   - preview 환경의 `EXPO_PUBLIC_APP_SCHEME`,
+     `EXPO_PUBLIC_SUPABASE_ANON_KEY`,
+     `EXPO_PUBLIC_SUPABASE_URL`도 정상 로드된 상태로 빌드가 진행되었다.
+   - 빌드 완료 링크는
+     `https://expo.dev/accounts/zinnn/projects/memoria/builds/eb774b55-0ccf-4e6d-b65b-2c7ce3c03633`
+     이다.
+   - 따라서 이 APK에는 최신 사진 OCR 기능과 Google/Supabase 설정이 포함된 상태다.
+
+4. 이번 빌드로 확인된 중요한 의미도 있다.
+   - 사진 OCR은 네이티브 ML Kit 모듈을 새로 추가한 기능이기 때문에,
+     예전 dev build를 그대로 쓰면 이 기능은 실제로 동작하지 않는다.
+   - 이번에 다시 만든 development build 또는 preview APK를 설치해야
+     최신 OCR 기능을 휴대폰에서 테스트할 수 있다.
 """
