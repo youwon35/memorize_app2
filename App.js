@@ -249,6 +249,7 @@ export default function App() {
   const [themeMode, setThemeMode] = useState("light");
   const [saveInputMode, setSaveInputMode] = useState("single");
   const [manageSort, setManageSort] = useState("recent");
+  const [manageSearch, setManageSearch] = useState("");
   const [pairs, setPairs] = useState([]);
   const [studyStats, setStudyStats] = useState(createEmptyStudyStats());
   const [draft, setDraft] = useState({ left: "", right: "" });
@@ -356,6 +357,7 @@ export default function App() {
   const todaySolvedCount = todaySessions.reduce((sum, item) => sum + (item.totalCards ?? 0), 0);
   const todayIncorrectCount = todaySessions.reduce((sum, item) => sum + (item.incorrectCount ?? 0), 0);
   const recentSessions = useMemo(() => studyStats.sessions.slice(0, 6), [studyStats.sessions]);
+  const normalizedManageSearch = manageSearch.trim().toLocaleLowerCase(language);
   const sortedManagePairs = useMemo(() => {
     if (manageSort === "alphabetical") {
       return [...pairs].sort((leftPair, rightPair) => {
@@ -388,6 +390,17 @@ export default function App() {
 
     return sortPairs(pairs);
   }, [language, manageSort, pairs, studyStats.cards]);
+  const visibleManagePairs = useMemo(() => {
+    if (!normalizedManageSearch) {
+      return sortedManagePairs;
+    }
+
+    return sortedManagePairs.filter((pair) =>
+      [pair.left, pair.right].some((value) =>
+        value.toLocaleLowerCase(language).includes(normalizedManageSearch)
+      )
+    );
+  }, [language, normalizedManageSearch, sortedManagePairs]);
   const todayMissedCards = useMemo(() => {
     const counter = new Map();
 
@@ -2169,6 +2182,21 @@ export default function App() {
         <>
           <View style={styles.settingsCard}>
             <View style={styles.settingsHeader}>
+              <Text style={styles.settingsTitle}>{t("manage.searchTitle")}</Text>
+              <Text style={styles.settingsBody}>{t("manage.searchBody")}</Text>
+            </View>
+            <TextInput
+              value={manageSearch}
+              onChangeText={setManageSearch}
+              placeholder={t("manage.searchPlaceholder")}
+              placeholderTextColor={theme.textPlaceholder}
+              style={styles.input}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+
+            <View style={styles.settingsHeader}>
               <Text style={styles.settingsTitle}>{t("manage.sortTitle")}</Text>
               <Text style={styles.settingsBody}>{t("manage.sortBody")}</Text>
             </View>
@@ -2200,105 +2228,117 @@ export default function App() {
             </View>
           </View>
 
-          <View style={styles.libraryPanel}>
-            {sortedManagePairs.map((pair) => (
-            <View key={pair.id} style={styles.manageCard}>
-              {editingId === pair.id ? (
-                <>
-                  <Text style={styles.inputLabel}>{t("common.front")}</Text>
-                  <TextInput
-                    value={editingLeft}
-                    onChangeText={setEditingLeft}
-                    placeholder={t("common.front")}
-                    placeholderTextColor={theme.textPlaceholder}
-                    style={[styles.input, styles.multilineInput]}
-                    multiline
-                    textAlignVertical="top"
-                  />
+          {visibleManagePairs.length ? (
+            <View style={styles.libraryPanel}>
+              {visibleManagePairs.map((pair) => (
+                <View key={pair.id} style={styles.manageCard}>
+                  {editingId === pair.id ? (
+                    <>
+                      <Text style={styles.inputLabel}>{t("common.front")}</Text>
+                      <TextInput
+                        value={editingLeft}
+                        onChangeText={setEditingLeft}
+                        placeholder={t("common.front")}
+                        placeholderTextColor={theme.textPlaceholder}
+                        style={[styles.input, styles.multilineInput]}
+                        multiline
+                        textAlignVertical="top"
+                      />
 
-                  <Text style={styles.inputLabel}>{t("common.back")}</Text>
-                  <TextInput
-                    value={editingRight}
-                    onChangeText={setEditingRight}
-                    placeholder={t("common.back")}
-                    placeholderTextColor={theme.textPlaceholder}
-                    style={[styles.input, styles.multilineInput]}
-                    multiline
-                    textAlignVertical="top"
-                  />
+                      <Text style={styles.inputLabel}>{t("common.back")}</Text>
+                      <TextInput
+                        value={editingRight}
+                        onChangeText={setEditingRight}
+                        placeholder={t("common.back")}
+                        placeholderTextColor={theme.textPlaceholder}
+                        style={[styles.input, styles.multilineInput]}
+                        multiline
+                        textAlignVertical="top"
+                      />
 
-                  <View style={styles.manageActionRow}>
-                    <Pressable onPress={() => void saveEdit()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-                      <Text style={styles.primaryButtonText}>{t("manage.saveEdit")}</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => {
-                        setEditingId(null);
-                        setEditingLeft("");
-                        setEditingRight("");
-                      }}
-                      style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
-                    >
-                      <Text style={styles.secondaryButtonText}>{t("common.cancel")}</Text>
-                    </Pressable>
-                  </View>
-                </>
-              ) : (
-                <>
-                  <View style={styles.manageDisplayStack}>
-                    <View style={styles.manageDisplayRow}>
-                      <View style={styles.manageTextBlock}>
-                        <Text style={styles.previewLabel}>{t("common.front")}</Text>
-                        <Text style={styles.managePairText}>{pair.left}</Text>
+                      <View style={styles.manageActionRow}>
+                        <Pressable onPress={() => void saveEdit()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
+                          <Text style={styles.primaryButtonText}>{t("manage.saveEdit")}</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => {
+                            setEditingId(null);
+                            setEditingLeft("");
+                            setEditingRight("");
+                          }}
+                          style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+                        >
+                          <Text style={styles.secondaryButtonText}>{t("common.cancel")}</Text>
+                        </Pressable>
                       </View>
-                      <Pressable
-                        onPress={() => {
-                          setEditingId(pair.id);
-                          setEditingLeft(pair.left);
-                          setEditingRight(pair.right);
-                        }}
-                        style={({ pressed }) => [
-                          styles.secondaryButton,
-                          styles.manageSideButton,
-                          pressed && styles.pressed,
-                        ]}
-                      >
-                        <Text style={styles.secondaryButtonText}>{t("manage.edit")}</Text>
-                      </Pressable>
-                    </View>
-                    <View style={styles.manageDisplayRow}>
-                      <View style={styles.manageTextBlock}>
-                        <Text style={styles.previewLabel}>{t("common.back")}</Text>
-                        <Text style={styles.managePairText}>{pair.right}</Text>
+                    </>
+                  ) : (
+                    <>
+                      <View style={styles.manageDisplayStack}>
+                        <View style={styles.manageDisplayRow}>
+                          <View style={styles.manageTextBlock}>
+                            <Text style={styles.previewLabel}>{t("common.front")}</Text>
+                            <Text style={styles.managePairText}>{pair.left}</Text>
+                          </View>
+                          <Pressable
+                            onPress={() => {
+                              setEditingId(pair.id);
+                              setEditingLeft(pair.left);
+                              setEditingRight(pair.right);
+                            }}
+                            style={({ pressed }) => [
+                              styles.secondaryButton,
+                              styles.manageSideButton,
+                              pressed && styles.pressed,
+                            ]}
+                          >
+                            <Text style={styles.secondaryButtonText}>{t("manage.edit")}</Text>
+                          </Pressable>
+                        </View>
+                        <View style={styles.manageDisplayRow}>
+                          <View style={styles.manageTextBlock}>
+                            <Text style={styles.previewLabel}>{t("common.back")}</Text>
+                            <Text style={styles.managePairText}>{pair.right}</Text>
+                          </View>
+                          <Pressable
+                            onPress={() =>
+                              Alert.alert(t("manage.deleteTitle"), t("manage.deleteBody"), [
+                                { text: t("common.cancel"), style: "cancel" },
+                                {
+                                  text: t("common.delete"),
+                                  style: "destructive",
+                                  onPress: () => {
+                                    void removePair(pair);
+                                  },
+                                },
+                              ])
+                            }
+                            style={({ pressed }) => [
+                              styles.dangerButton,
+                              styles.manageSideButton,
+                              pressed && styles.pressed,
+                            ]}
+                          >
+                            <Text style={styles.dangerButtonText}>{t("common.delete")}</Text>
+                          </Pressable>
+                        </View>
                       </View>
-                      <Pressable
-                        onPress={() =>
-                          Alert.alert(t("manage.deleteTitle"), t("manage.deleteBody"), [
-                            { text: t("common.cancel"), style: "cancel" },
-                            {
-                              text: t("common.delete"),
-                              style: "destructive",
-                              onPress: () => {
-                                void removePair(pair);
-                              },
-                            },
-                          ])
-                        }
-                        style={({ pressed }) => [
-                          styles.dangerButton,
-                          styles.manageSideButton,
-                          pressed && styles.pressed,
-                        ]}
-                      >
-                        <Text style={styles.dangerButtonText}>{t("common.delete")}</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                </>
-              )}
+                    </>
+                  )}
+                </View>
+              ))}
             </View>
-            ))}
-          </View>
+          ) : (
+            <EmptyPanel
+              styles={styles}
+              theme={theme}
+              icon="magnify"
+              title={t("manage.searchEmptyTitle")}
+              body={t("manage.searchEmptyBody", { query: manageSearch.trim() })}
+              actionLabel={t("manage.clearSearch")}
+              onPress={() => setManageSearch("")}
+            />
+          )}
         </>
       ) : (
         <EmptyPanel
