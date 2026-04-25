@@ -34,7 +34,6 @@ import {
   createPersistableStudyStats,
   createSignature,
   extractPairsFromRecognizedText,
-  getDirectionLabel,
   migrateStudyStatsEntry,
   mapPairRecord,
   mergePairsBySignature,
@@ -44,12 +43,22 @@ import {
   sortPairs,
   updatePairValues,
 } from "./src/utils/memory";
+import {
+  createTranslator,
+  formatDateTimeForLanguage,
+  formatSessionLabelForLanguage,
+  getPreferredLanguage,
+  LANGUAGE_OPTIONS,
+  normalizeSupportCategory,
+  normalizeSupportStatus,
+} from "./src/i18n";
 
 WebBrowser.maybeCompleteAuthSession();
 
 const APP_NAME = "MEMORIA";
 const STORAGE_KEY = "@memoria/cards";
 const THEME_MODE_KEY = "@memoria/theme-mode";
+const LANGUAGE_KEY = "@memoria/language";
 const STUDY_STATS_KEY = "@memoria/study-stats";
 const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen";
 const SUPPORT_REQUESTS_KEY = "@memoria/support-requests";
@@ -59,42 +68,47 @@ const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
 const DEFAULT_QUIZ_COUNT = 10;
 const MAX_SESSION_HISTORY = 60;
 const SUPPORT_EMAIL = ["youwon35", "naver.com"].join("@");
-const SUPPORT_CATEGORY_OPTIONS = ["오류제보", "기능제안", "기타"];
+const SUPPORT_CATEGORY_OPTIONS = ["bug", "feature", "other"];
+const MANAGE_SORT_OPTIONS = [
+  { key: "recent", labelKey: "manage.sortRecent" },
+  { key: "alphabetical", labelKey: "manage.sortAlphabetical" },
+  { key: "missed", labelKey: "manage.sortMissed" },
+];
 const THEME_OPTIONS = [
-  { key: "light", label: "라이트", icon: "white-balance-sunny" },
-  { key: "dark", label: "다크", icon: "weather-night" },
+  { key: "light", labelKey: "theme.light", icon: "white-balance-sunny" },
+  { key: "dark", labelKey: "theme.dark", icon: "weather-night" },
 ];
 const QUIZ_MODE_OPTIONS = [
   {
     key: "both",
-    label: "양방향 랜덤",
-    chipLabel: "양방향",
-    description: "앞면과 뒷면이 모두 문제로 섞여 출제됩니다.",
+    labelKey: "quiz.modes.both.label",
+    chipLabelKey: "quiz.modes.both.chip",
+    descriptionKey: "quiz.modes.both.description",
   },
   {
     key: "front",
-    label: "앞면 -> 뒷면",
-    chipLabel: "앞면만",
-    description: "앞면을 보고 뒷면을 맞히는 문제만 출제됩니다.",
+    labelKey: "quiz.modes.front.label",
+    chipLabelKey: "quiz.modes.front.chip",
+    descriptionKey: "quiz.modes.front.description",
   },
   {
     key: "back",
-    label: "뒷면 -> 앞면",
-    chipLabel: "뒷면만",
-    description: "뒷면을 보고 앞면을 떠올리는 문제만 출제됩니다.",
+    labelKey: "quiz.modes.back.label",
+    chipLabelKey: "quiz.modes.back.chip",
+    descriptionKey: "quiz.modes.back.description",
   },
 ];
 const TABS = [
-  { key: "save", label: "저장", icon: "cards-outline" },
-  { key: "quiz", label: "암기", icon: "brain" },
-  { key: "history", label: "기록", icon: "chart-timeline-variant" },
-  { key: "manage", label: "보관함", icon: "playlist-edit" },
-  { key: "about", label: "앱 정보", icon: "information-outline" },
+  { key: "save", labelKey: "tabs.save", icon: "cards-outline" },
+  { key: "quiz", labelKey: "tabs.quiz", icon: "brain" },
+  { key: "history", labelKey: "tabs.history", icon: "chart-timeline-variant" },
+  { key: "manage", labelKey: "tabs.manage", icon: "playlist-edit" },
+  { key: "about", labelKey: "tabs.about", icon: "information-outline" },
 ];
 const SAVE_INPUT_OPTIONS = [
-  { key: "single", label: "한쌍씩", icon: "cards-outline" },
-  { key: "text", label: "텍스트 파일로", icon: "file-document-plus-outline" },
-  { key: "photo", label: "사진으로", icon: "camera-outline" },
+  { key: "single", labelKey: "saveModes.single", icon: "cards-outline" },
+  { key: "text", labelKey: "saveModes.text", icon: "file-document-plus-outline" },
+  { key: "photo", labelKey: "saveModes.photo", icon: "camera-outline" },
 ];
 const STAR_FIELD = [
   { top: 34, left: 28, size: 4, opacity: 0.45 },
@@ -190,23 +204,28 @@ const appendUniqueId = (items, nextId) => (items.includes(nextId) ? items : [...
 const isValidEmail = (value) => /\S+@\S+\.\S+/.test(value.trim());
 const createLocalSupportRequest = ({ replyEmail, message, category, session }) => ({
   id: `support-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  category: category || "기타",
+  category: normalizeSupportCategory(category),
   replyEmail: replyEmail.trim(),
   message: message.trim(),
   userEmail: session?.user?.email ?? null,
   createdAt: new Date().toISOString(),
-  status: "접수됨",
+  status: "received",
   source: "local",
 });
 const mapSupportInquiryRecord = (record) => ({
   id: record.id,
-  category: record.category ?? "기타",
+  category: normalizeSupportCategory(record.category),
   replyEmail: record.reply_email ?? "",
   message: record.message ?? "",
   userEmail: record.sender_email ?? null,
   createdAt: record.created_at ?? new Date().toISOString(),
-  status: record.status === "received" ? "접수됨" : record.status ?? "접수됨",
+  status: normalizeSupportStatus(record.status),
   source: "cloud",
+});
+const normalizeSupportRequest = (request) => ({
+  ...request,
+  category: normalizeSupportCategory(request?.category),
+  status: normalizeSupportStatus(request?.status),
 });
 const mergeSupportRequests = (...collections) => {
   const mergedMap = new Map();
@@ -216,7 +235,7 @@ const mergeSupportRequests = (...collections) => {
       return;
     }
 
-    mergedMap.set(item.id, item);
+    mergedMap.set(item.id, normalizeSupportRequest(item));
   });
 
   return [...mergedMap.values()].sort(
@@ -226,8 +245,10 @@ const mergeSupportRequests = (...collections) => {
 
 export default function App() {
   const [tab, setTab] = useState("save");
+  const [language, setLanguage] = useState(getPreferredLanguage());
   const [themeMode, setThemeMode] = useState("light");
   const [saveInputMode, setSaveInputMode] = useState("single");
+  const [manageSort, setManageSort] = useState("recent");
   const [pairs, setPairs] = useState([]);
   const [studyStats, setStudyStats] = useState(createEmptyStudyStats());
   const [draft, setDraft] = useState({ left: "", right: "" });
@@ -239,11 +260,10 @@ export default function App() {
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
   const [authBusy, setAuthBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [note, setNote] = useState(
-    isSupabaseConfigured
-      ? "Google 로그인으로 여러 기기를 동기화할 수 있습니다."
-      : "현재는 로컬 저장 모드입니다. Supabase를 연결하면 Google 로그인이 열립니다."
-  );
+  const [noteState, setNoteState] = useState({
+    key: isSupabaseConfigured ? "notes.googleSyncAvailable" : "notes.localMode",
+    params: {},
+  });
   const [editingId, setEditingId] = useState(null);
   const [editingLeft, setEditingLeft] = useState("");
   const [editingRight, setEditingRight] = useState("");
@@ -283,16 +303,18 @@ export default function App() {
   const launchScale = useRef(new Animated.Value(0.94)).current;
   const moonGlow = useRef(new Animated.Value(0.56)).current;
 
+  const t = useMemo(() => createTranslator(language), [language]);
   const theme = themeMode === "light" ? LIGHT_THEME : DARK_THEME;
   const styles = useMemo(() => createStyles(theme), [theme]);
   const current = deck[quizIndex] ?? null;
   const redirectUri = makeRedirectUri({ scheme: APP_SCHEME, path: "auth/callback" });
+  const note = noteState.raw ? noteState.raw : t(noteState.key, noteState.params);
   const authTitle = session?.user?.email
     ? session.user.email
     : isSupabaseConfigured
-      ? "Google 계정으로 카드 보관하기"
-      : "로컬 저장 모드";
-  const authCaption = syncing ? "동기화 중..." : note;
+      ? t("about.authRemoteTitle")
+      : t("about.authLocalTitle");
+  const authCaption = syncing ? t("notes.syncing") : note;
   const hasSavedCards = pairs.length > 0;
   const quizModeConfig = getQuizModeConfig(quizMode);
   const maxQuizCount = pairs.length ? pairs.length * (quizMode === "both" ? 2 : 1) : 0;
@@ -309,6 +331,9 @@ export default function App() {
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo?.({ y: 0, animated: false });
     });
+  };
+  const setTranslatedNote = (key, params = {}) => {
+    setNoteState({ key, params });
   };
   const roundIncorrectCards = useMemo(() => {
     if (!deck.length || !roundIncorrectIds.length) {
@@ -331,6 +356,38 @@ export default function App() {
   const todaySolvedCount = todaySessions.reduce((sum, item) => sum + (item.totalCards ?? 0), 0);
   const todayIncorrectCount = todaySessions.reduce((sum, item) => sum + (item.incorrectCount ?? 0), 0);
   const recentSessions = useMemo(() => studyStats.sessions.slice(0, 6), [studyStats.sessions]);
+  const sortedManagePairs = useMemo(() => {
+    if (manageSort === "alphabetical") {
+      return [...pairs].sort((leftPair, rightPair) => {
+        const leftText = `${leftPair.left} ${leftPair.right}`.trim();
+        const rightText = `${rightPair.left} ${rightPair.right}`.trim();
+
+        return leftText.localeCompare(rightText, language, { sensitivity: "base" });
+      });
+    }
+
+    if (manageSort === "missed") {
+      return [...pairs].sort((leftPair, rightPair) => {
+        const leftStats = studyStats.cards[createSignature(leftPair.left, leftPair.right)] ?? {};
+        const rightStats = studyStats.cards[createSignature(rightPair.left, rightPair.right)] ?? {};
+        const incorrectGap = (rightStats.incorrect ?? 0) - (leftStats.incorrect ?? 0);
+
+        if (incorrectGap !== 0) {
+          return incorrectGap;
+        }
+
+        const attemptsGap = (rightStats.attempts ?? 0) - (leftStats.attempts ?? 0);
+
+        if (attemptsGap !== 0) {
+          return attemptsGap;
+        }
+
+        return new Date(rightPair.updatedAt || rightPair.createdAt || 0) - new Date(leftPair.updatedAt || leftPair.createdAt || 0);
+      });
+    }
+
+    return sortPairs(pairs);
+  }, [language, manageSort, pairs, studyStats.cards]);
   const todayMissedCards = useMemo(() => {
     const counter = new Map();
 
@@ -405,10 +462,15 @@ export default function App() {
 
     const load = async () => {
       try {
+        const storedLanguage = await AsyncStorage.getItem(LANGUAGE_KEY);
         const storedThemeMode = await AsyncStorage.getItem(THEME_MODE_KEY);
         const storedStudyStats = await AsyncStorage.getItem(STUDY_STATS_KEY);
         const storedTutorialSeen = await AsyncStorage.getItem(TUTORIAL_SEEN_KEY);
         const storedSupportRequests = await AsyncStorage.getItem(SUPPORT_REQUESTS_KEY);
+
+        if (storedLanguage === "ko" || storedLanguage === "en" || storedLanguage === "ja") {
+          setLanguage(storedLanguage);
+        }
 
         if (storedThemeMode === "dark" || storedThemeMode === "light") {
           setThemeMode(storedThemeMode);
@@ -424,7 +486,7 @@ export default function App() {
 
         if (storedSupportRequests && active) {
           try {
-            setSupportRequests(JSON.parse(storedSupportRequests));
+            setSupportRequests(JSON.parse(storedSupportRequests).map(normalizeSupportRequest));
           } catch {
             setSupportRequests([]);
           }
@@ -478,6 +540,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    void AsyncStorage.setItem(LANGUAGE_KEY, language);
+  }, [language]);
+
+  useEffect(() => {
     void AsyncStorage.setItem(THEME_MODE_KEY, themeMode);
   }, [themeMode]);
 
@@ -525,11 +591,7 @@ export default function App() {
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession ?? null);
       setAuthReady(true);
-      setNote(
-        nextSession?.user
-          ? "Google 계정과 연결되었습니다."
-          : "Google 로그인으로 여러 기기를 동기화할 수 있습니다."
-      );
+      setTranslatedNote(nextSession?.user ? "notes.authLinked" : "notes.googleSyncAvailable");
     });
 
     return () => {
@@ -589,11 +651,11 @@ export default function App() {
         if (active) {
           setPairs(merged);
           await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-          setNote("Google 계정과 동기화되었습니다.");
+          setTranslatedNote("notes.synced");
         }
       } catch (error) {
         if (active) {
-          setNote(error?.message || "동기화에 실패했습니다.");
+          setNoteState({ raw: error?.message || t("common.retryLater") });
         }
       } finally {
         if (active) {
@@ -798,15 +860,15 @@ export default function App() {
           )
           .select();
 
-        if (inserted.error) {
-          throw inserted.error;
-        }
-
-        savedPairs = (inserted.data ?? []).map(mapPairRecord);
-        cloudSaved = true;
-      } catch {
-        setNote("클라우드 저장 실패로 로컬에만 저장했습니다.");
+      if (inserted.error) {
+        throw inserted.error;
       }
+
+      savedPairs = (inserted.data ?? []).map(mapPairRecord);
+      cloudSaved = true;
+    } catch {
+      setTranslatedNote("notes.cloudLocalOnly");
+    }
     }
 
     await savePairs([...savedPairs, ...existingPairs]);
@@ -823,21 +885,21 @@ export default function App() {
     const right = draft.right.trim();
 
     if (!left || !right) {
-      Alert.alert("입력 필요", "앞면과 뒷면을 모두 입력해 주세요.");
+      Alert.alert(t("alerts.inputNeededTitle"), t("alerts.inputNeededBody"));
       return;
     }
 
     const saveResult = await saveEntryBatch([{ left, right }]);
 
     if (!saveResult.savedCount) {
-      Alert.alert("이미 저장된 카드", "같은 조합의 카드는 이미 보관함에 있습니다.");
+      Alert.alert(t("alerts.duplicateSavedTitle"), t("alerts.duplicateSavedBody"));
       return;
     }
 
     setDraft({ left: "", right: "" });
 
     if (saveResult.cloudSaved) {
-      setNote("새 카드가 Google 계정에도 저장되었습니다.");
+      setTranslatedNote("notes.cardSavedCloud");
     }
   };
 
@@ -857,7 +919,7 @@ export default function App() {
       const asset = picked.assets?.[0];
 
       if (!asset?.uri) {
-        throw new Error("선택한 파일을 읽을 수 없습니다.");
+        throw new Error(t("alerts.fileUnreadable"));
       }
 
       const file = new File(asset.uri);
@@ -866,10 +928,10 @@ export default function App() {
 
       if (!entries.length) {
         Alert.alert(
-          "카드를 찾지 못했습니다",
+          t("alerts.importNoCardsTitle"),
           invalidEntryIndexes.length
-            ? "형식이 맞는 카드 묶음이 없습니다. 앞면 한 줄, 뒷면 한 줄을 적고 카드 사이에는 빈 줄 한 줄을 넣어 주세요."
-            : "비어 있는 파일입니다."
+            ? t("alerts.importNoCardsBody")
+            : t("alerts.importEmptyFile")
         );
         return;
       }
@@ -878,36 +940,31 @@ export default function App() {
       const messages = [];
 
       if (saveResult.savedCount) {
-        messages.push(`${saveResult.savedCount}개의 카드를 만들었습니다.`);
+        messages.push(t("alerts.importCreated", { count: saveResult.savedCount }));
       }
 
       if (saveResult.skippedDuplicates) {
-        messages.push(
-          `${saveResult.skippedDuplicates}개는 이미 있거나 파일 안에서 중복되어 건너뛰었습니다.`
-        );
+        messages.push(t("alerts.importSkippedDuplicates", { count: saveResult.skippedDuplicates }));
       }
 
       if (invalidEntryIndexes.length) {
-        messages.push(
-          `${invalidEntryIndexes.length}개 묶음은 형식이 맞지 않아 제외했습니다.`
-        );
+        messages.push(t("alerts.importInvalidGroups", { count: invalidEntryIndexes.length }));
       }
 
       if (!saveResult.savedCount) {
-        Alert.alert("텍스트 불러오기 완료", messages.join(" "));
+        Alert.alert(t("alerts.importDoneTitle"), messages.join(" "));
         return;
       }
 
-      setNote(
-        saveResult.cloudSaved
-          ? `${saveResult.savedCount}개의 카드가 Google 계정에도 저장되었습니다.`
-          : `${saveResult.savedCount}개의 카드를 파일에서 불러왔습니다.`
+      setTranslatedNote(
+        saveResult.cloudSaved ? "notes.importSavedCloud" : "notes.importSavedLocal",
+        { count: saveResult.savedCount }
       );
-      Alert.alert("텍스트 불러오기 완료", messages.join(" "));
+      Alert.alert(t("alerts.importDoneTitle"), messages.join(" "));
     } catch (error) {
       Alert.alert(
-        "텍스트 파일 불러오기 실패",
-        error?.message || "파일 내용을 읽는 중 문제가 생겼습니다."
+        t("alerts.importFailTitle"),
+        error?.message || t("alerts.importFailBody")
       );
     } finally {
       setImporting(false);
@@ -923,7 +980,7 @@ export default function App() {
 
   const readPairsFromPhotoAsset = async (asset) => {
     if (!asset?.uri) {
-      throw new Error("선택한 사진을 읽을 수 없습니다.");
+      throw new Error(t("alerts.photoUnreadable"));
     }
 
     let recognizeText;
@@ -931,9 +988,7 @@ export default function App() {
     try {
       ({ recognizeText } = require("@infinitered/react-native-mlkit-text-recognition"));
     } catch (error) {
-      throw new Error(
-        "사진 인식은 dev build 또는 APK에서 사용할 수 있습니다. 새 빌드를 설치한 뒤 다시 시도해 주세요."
-      );
+      throw new Error(t("alerts.devBuildOnly"));
     }
 
     const recognitionResult = await recognizeText(asset.uri);
@@ -950,7 +1005,7 @@ export default function App() {
     setPhotoImporting(true);
     setPhotoImportedPairs([]);
     setPhotoInvalidRowIndexes([]);
-    setPhotoImportNotice("사진을 읽고 카드 쌍을 찾는 중입니다.");
+    setPhotoImportNotice(t("save.photoScanning"));
 
     try {
       const { entries, invalidRowIndexes } = await readPairsFromPhotoAsset(asset);
@@ -961,21 +1016,21 @@ export default function App() {
       if (!entries.length) {
         setPhotoImportNotice(
           invalidRowIndexes.length
-            ? "글자는 읽었지만 좌우 한 쌍으로 묶지 못했습니다. 가운데 간격을 더 넓혀 다시 찍어 주세요."
-            : "사진에서 읽을 수 있는 글자를 찾지 못했습니다."
+            ? t("save.photoPairNotGrouped")
+            : t("save.photoNoText")
         );
         return;
       }
 
-      const messages = [`사진에서 ${entries.length}개의 카드 쌍을 찾았습니다.`];
+      const messages = [t("save.photoPairFound", { count: entries.length })];
 
       if (invalidRowIndexes.length) {
-        messages.push(`${invalidRowIndexes.length}개 줄은 짝을 만들지 못해 제외했습니다.`);
+        messages.push(t("save.photoPairInvalid", { count: invalidRowIndexes.length }));
       }
 
       setPhotoImportNotice(messages.join(" "));
     } catch (error) {
-      setPhotoImportNotice(error?.message || "사진 속 글자를 읽는 중 문제가 생겼습니다.");
+      setPhotoImportNotice(error?.message || t("save.photoReadFailed"));
     } finally {
       setPhotoImporting(false);
     }
@@ -985,7 +1040,7 @@ export default function App() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert("사진 권한 필요", "사진으로 가져오려면 사진 보관함 접근 권한이 필요합니다.");
+      Alert.alert(t("alerts.photoLibraryPermissionTitle"), t("alerts.photoLibraryPermissionBody"));
       return;
     }
 
@@ -1006,7 +1061,7 @@ export default function App() {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert("카메라 권한 필요", "사진으로 가져오려면 카메라 접근 권한이 필요합니다.");
+      Alert.alert(t("alerts.photoCameraPermissionTitle"), t("alerts.photoCameraPermissionBody"));
       return;
     }
 
@@ -1027,7 +1082,7 @@ export default function App() {
 
   const saveRecognizedPhotoPairs = async () => {
     if (!photoImportedPairs.length) {
-      Alert.alert("저장할 카드 없음", "먼저 사진을 읽어 카드 쌍을 찾은 뒤 저장해 주세요.");
+      Alert.alert(t("alerts.noPhotoPairsTitle"), t("alerts.noPhotoPairsBody"));
       return;
     }
 
@@ -1035,25 +1090,25 @@ export default function App() {
     const messages = [];
 
     if (saveResult.savedCount) {
-      messages.push(`${saveResult.savedCount}개의 카드를 저장했습니다.`);
+      messages.push(t("alerts.photoSaved", { count: saveResult.savedCount }));
     }
 
     if (saveResult.skippedDuplicates) {
-      messages.push(`${saveResult.skippedDuplicates}개는 이미 있어서 건너뛰었습니다.`);
+      messages.push(t("alerts.photoSkipped", { count: saveResult.skippedDuplicates }));
     }
 
     setPhotoImportNotice(
       messages.length
         ? messages.join(" ")
-        : "모든 카드가 이미 저장되어 있어 새로 추가된 내용은 없습니다."
+        : t("alerts.photoAllSkipped")
     );
 
     if (saveResult.cloudSaved) {
-      setNote("사진에서 읽은 카드가 Google 계정에도 저장되었습니다.");
+      setTranslatedNote("notes.photoSavedCloud");
     }
 
     if (saveResult.savedCount) {
-      Alert.alert("사진 카드 저장 완료", messages.join(" "));
+      Alert.alert(t("alerts.photoSavedTitle"), messages.join(" "));
     }
   };
 
@@ -1141,12 +1196,12 @@ export default function App() {
     const message = supportMessage.trim();
 
     if (!isValidEmail(replyEmail)) {
-      Alert.alert("이메일 확인", "답변 받을 이메일을 정확히 입력해 주세요.");
+      Alert.alert(t("about.emailCheckTitle"), t("about.emailCheckBody"));
       return;
     }
 
     if (!message) {
-      Alert.alert("문의 내용 필요", "문의 내용을 적은 뒤 전송해 주세요.");
+      Alert.alert(t("about.messageNeededTitle"), t("about.messageNeededBody"));
       return;
     }
 
@@ -1185,11 +1240,11 @@ export default function App() {
       setSupportMessage("");
       setSupportNotice(
         cloudSaved
-          ? "문의가 접수되었습니다. 아래 최근 문의에서 바로 확인할 수 있습니다."
-          : "문의를 이 기기에 저장했습니다. 아래 최근 문의에서 다시 확인할 수 있습니다."
+          ? t("about.supportSavedCloud")
+          : t("about.supportSavedLocal")
       );
     } catch (error) {
-      setSupportNotice(error?.message || "문의 전송에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      setSupportNotice(error?.message || t("about.supportFail"));
     } finally {
       setSupportSending(false);
     }
@@ -1216,7 +1271,7 @@ export default function App() {
 
   const startQuiz = (requestedCount) => {
     if (!pairs.length) {
-      Alert.alert("문제가 없습니다", "먼저 카드 한 장 이상을 저장해 주세요.");
+      Alert.alert(t("quiz.noQuestionsTitle"), t("quiz.noQuestionsBody"));
       return;
     }
 
@@ -1234,7 +1289,7 @@ export default function App() {
 
   const retryIncorrectCards = () => {
     if (!roundIncorrectCards.length) {
-      Alert.alert("오답 없음", "이번 라운드에는 다시 풀 문제가 없습니다.");
+      Alert.alert(t("quiz.noRetryTitle"), t("quiz.noRetryBody"));
       return;
     }
 
@@ -1294,7 +1349,7 @@ export default function App() {
     if (!answer.trim()) {
       clearTimeout(timerRef.current);
       setResult("warning");
-      setFeedback("무언가를 입력해 주세요.");
+      setFeedback(t("quiz.feedbackEmpty"));
       setShowAnswer(false);
       return;
     }
@@ -1302,7 +1357,7 @@ export default function App() {
     if (compareAnswers(answer, current.answer)) {
       updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, true));
       setResult("correct");
-      setFeedback("정답입니다");
+      setFeedback(t("quiz.feedbackCorrect"));
       timerRef.current = setTimeout(() => goNext(), 900);
       return;
     }
@@ -1310,7 +1365,7 @@ export default function App() {
     const nextIncorrectIds = appendUniqueId(roundIncorrectIds, current.id);
     updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, false));
     setResult("incorrect");
-    setFeedback("틀렸습니다");
+    setFeedback(t("quiz.feedbackIncorrect"));
     setShowAnswer(false);
     setRoundIncorrectIds(nextIncorrectIds);
     timerRef.current = setTimeout(() => goNext(nextIncorrectIds), 900);
@@ -1330,7 +1385,7 @@ export default function App() {
     );
 
     if (duplicateExists) {
-      Alert.alert("중복 카드", "같은 앞면/뒷면 조합의 카드가 이미 있습니다.");
+      Alert.alert(t("manage.duplicateTitle"), t("manage.duplicateBody"));
       return;
     }
 
@@ -1346,7 +1401,7 @@ export default function App() {
         .single();
 
       if (response.error) {
-        Alert.alert("수정 실패", response.error.message);
+        Alert.alert(t("manage.editFail"), response.error.message);
         return;
       }
 
@@ -1369,7 +1424,7 @@ export default function App() {
         .eq("user_id", session.user.id);
 
       if (response.error) {
-        Alert.alert("삭제 실패", response.error.message);
+        Alert.alert(t("manage.deleteFail"), response.error.message);
         return;
       }
     }
@@ -1391,7 +1446,7 @@ export default function App() {
         throw error;
       }
     } catch (error) {
-      Alert.alert("로그아웃 실패", error?.message || "잠시 후 다시 시도해 주세요.");
+      Alert.alert(t("about.signOutFailTitle"), error?.message || t("common.retryLater"));
     } finally {
       setAuthBusy(false);
     }
@@ -1399,13 +1454,13 @@ export default function App() {
 
   const openSupportEmail = async () => {
     try {
-      const subject = `${APP_NAME} 문의`;
+      const subject = `${APP_NAME} ${t("about.supportTitle")}`;
       const body = [
-        "문의 내용을 아래에 적어 주세요.",
+        t("about.supportMessagePlaceholder"),
         "",
-        session?.user?.email ? `보내는 사람: ${session.user.email}` : null,
-        `앱: ${APP_NAME}`,
-        `플랫폼: ${Platform.OS}`,
+        session?.user?.email ? `${t("common.sender")}: ${session.user.email}` : null,
+        `${t("common.app")}: ${APP_NAME}`,
+        `${t("common.platform")}: ${Platform.OS}`,
       ]
         .filter(Boolean)
         .join("\n");
@@ -1424,15 +1479,15 @@ export default function App() {
 
       await WebBrowser.openBrowserAsync(browserComposeUrl);
     } catch (error) {
-      Alert.alert("문의 열기 실패", error?.message || "잠시 후 다시 시도해 주세요.");
+      Alert.alert(t("about.openSupportFail"), error?.message || t("common.retryLater"));
     }
   };
 
   const login = async () => {
     if (!supabase) {
       Alert.alert(
-        "Google 로그인 준비 필요",
-        "Supabase URL과 Anon Key를 .env에 넣으면 Google 로그인을 바로 테스트할 수 있습니다."
+        t("about.authPrepTitle"),
+        t("about.authPrepBody")
       );
       return;
     }
@@ -1450,7 +1505,7 @@ export default function App() {
       });
 
       if (error || !data?.url) {
-        throw error || new Error("로그인 URL 생성 실패");
+        throw error || new Error(t("about.authFailBody"));
       }
 
       const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUri);
@@ -1470,10 +1525,10 @@ export default function App() {
       }
 
       if (result.type !== "cancel") {
-        setNote("로그인이 완료되지 않았습니다. 설정을 다시 확인해 주세요.");
+        setTranslatedNote("notes.loginIncomplete");
       }
     } catch (error) {
-      Alert.alert("Google 로그인 실패", error?.message || "설정을 확인해 주세요.");
+      Alert.alert(t("about.authFailTitle"), error?.message || t("about.authFailBody"));
     } finally {
       setAuthBusy(false);
     }
@@ -1501,7 +1556,7 @@ export default function App() {
                 color={active ? theme.accentText : theme.textSecondary}
               />
               <Text style={[styles.saveModeChipText, active && styles.saveModeChipTextActive]}>
-                {option.label}
+                {t(option.labelKey)}
               </Text>
             </Pressable>
           );
@@ -1511,10 +1566,10 @@ export default function App() {
       {saveInputMode === "single" ? (
         <View style={styles.composerPanel}>
           <Text style={styles.composerTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.84}>
-            암기하고 싶은 쌍을 저장하세요!
+            {t("save.title")}
           </Text>
 
-          <Text style={styles.inputLabel}>앞면</Text>
+          <Text style={styles.inputLabel}>{t("common.front")}</Text>
           <TextInput
             value={draft.left}
             onChangeText={(value) => setDraft((currentDraft) => ({ ...currentDraft, left: value }))}
@@ -1523,7 +1578,7 @@ export default function App() {
             textAlignVertical="top"
           />
 
-          <Text style={styles.inputLabel}>뒷면</Text>
+          <Text style={styles.inputLabel}>{t("common.back")}</Text>
           <TextInput
             value={draft.right}
             onChangeText={(value) => setDraft((currentDraft) => ({ ...currentDraft, right: value }))}
@@ -1534,10 +1589,10 @@ export default function App() {
 
           <View style={styles.actionRow}>
             <Pressable onPress={() => void saveCard()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-              <Text style={styles.primaryButtonText}>저장하기</Text>
+              <Text style={styles.primaryButtonText}>{t("save.saveButton")}</Text>
             </Pressable>
             <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-              <Text style={styles.secondaryButtonText}>바로 암기</Text>
+              <Text style={styles.secondaryButtonText}>{t("save.memorizeNow")}</Text>
             </Pressable>
           </View>
         </View>
@@ -1550,7 +1605,7 @@ export default function App() {
               <View style={styles.importIconWrap}>
                 <MaterialCommunityIcons name="file-document-plus-outline" size={18} color={theme.accent} />
               </View>
-              <Text style={styles.importTitle}>텍스트 파일로 여러 장 한꺼번에 추가</Text>
+              <Text style={styles.importTitle}>{t("save.textImportTitle")}</Text>
             </View>
             <View style={styles.importPreviewCard}>
               <View style={styles.importPreviewTopBar}>
@@ -1580,7 +1635,7 @@ export default function App() {
               </View>
               <View style={styles.importPreviewFooter}>
                 <MaterialCommunityIcons name="cards-outline" size={15} color={theme.accent} />
-                <Text style={styles.importPreviewHint}>빈 줄로 카드를 구분하면 여러 장이 자동 저장됩니다.</Text>
+                <Text style={styles.importPreviewHint}>{t("save.textImportHint")}</Text>
               </View>
             </View>
           </View>
@@ -1594,7 +1649,7 @@ export default function App() {
               pressed && styles.pressed,
             ]}
           >
-            <Text style={styles.importButtonText}>{importing ? "불러오는 중..." : "텍스트 파일 불러오기"}</Text>
+            <Text style={styles.importButtonText}>{importing ? t("save.textImportLoading") : t("save.textImportButton")}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -1606,11 +1661,9 @@ export default function App() {
               <View style={styles.importIconWrap}>
                 <MaterialCommunityIcons name="camera-outline" size={18} color={theme.accent} />
               </View>
-              <Text style={styles.importTitle}>사진으로 여러 장 읽어오기</Text>
+              <Text style={styles.importTitle}>{t("save.photoImportTitle")}</Text>
             </View>
-            <Text style={styles.importBody}>
-              좌우 간격이 크게 벌어진 노트 사진을 찍거나 고르면, 한 줄씩 읽어서 카드 쌍으로 나눠 저장합니다.
-            </Text>
+            <Text style={styles.importBody}>{t("save.photoImportBody")}</Text>
           </View>
 
           {photoAsset?.uri ? (
@@ -1622,10 +1675,8 @@ export default function App() {
               <View style={styles.photoPlaceholderIcon}>
                 <MaterialCommunityIcons name="image-search-outline" size={22} color={theme.accent} />
               </View>
-              <Text style={styles.photoPlaceholderTitle}>노트 사진을 선택하면 자동으로 글자를 읽습니다.</Text>
-              <Text style={styles.photoPlaceholderBody}>
-                왼쪽 단어와 오른쪽 뜻 사이 간격이 클수록 더 안정적으로 짝을 찾을 수 있습니다.
-              </Text>
+              <Text style={styles.photoPlaceholderTitle}>{t("save.photoPlaceholderTitle")}</Text>
+              <Text style={styles.photoPlaceholderBody}>{t("save.photoPlaceholderBody")}</Text>
             </View>
           )}
 
@@ -1633,17 +1684,17 @@ export default function App() {
 
           {photoPreviewPairs.length ? (
             <View style={styles.photoResultsCard}>
-              <Text style={styles.photoResultsTitle}>인식된 카드 미리보기</Text>
+              <Text style={styles.photoResultsTitle}>{t("save.photoPreviewTitle")}</Text>
               <View style={styles.libraryList}>
                 {photoPreviewPairs.map((entry, index) => (
                   <View key={`${entry.left}-${entry.right}-${index}`} style={[styles.previewRow, styles.previewRowLarge]}>
                     <View style={styles.previewColumn}>
-                      <Text style={styles.previewLabel}>앞면</Text>
+                      <Text style={styles.previewLabel}>{t("common.front")}</Text>
                       <Text style={styles.previewText}>{entry.left}</Text>
                     </View>
                     <Text style={styles.previewDivider}>↔</Text>
                     <View style={styles.previewColumn}>
-                      <Text style={styles.previewLabel}>뒷면</Text>
+                      <Text style={styles.previewLabel}>{t("common.back")}</Text>
                       <Text style={styles.previewText}>{entry.right}</Text>
                     </View>
                   </View>
@@ -1651,12 +1702,16 @@ export default function App() {
               </View>
               {photoImportedPairs.length > photoPreviewPairs.length ? (
                 <Text style={styles.photoImportMeta}>
-                  추가로 {photoImportedPairs.length - photoPreviewPairs.length}개의 카드가 더 있습니다.
+                  {t("save.photoPreviewMore", {
+                    count: photoImportedPairs.length - photoPreviewPairs.length,
+                  })}
                 </Text>
               ) : null}
               {photoInvalidRowIndexes.length ? (
                 <Text style={styles.photoImportMeta}>
-                  짝을 만들지 못한 줄: {photoInvalidRowIndexes.join(", ")}
+                  {t("save.photoPreviewInvalidRows", {
+                    rows: photoInvalidRowIndexes.join(", "),
+                  })}
                 </Text>
               ) : null}
             </View>
@@ -1678,7 +1733,7 @@ export default function App() {
                   photoImporting && styles.primaryButtonTextDisabled,
                 ]}
               >
-                {photoImporting ? "읽는 중..." : "사진 촬영"}
+                {photoImporting ? t("save.photoReading") : t("save.photoTake")}
               </Text>
             </Pressable>
             <Pressable
@@ -1696,7 +1751,7 @@ export default function App() {
                   photoImporting && styles.secondaryButtonTextDisabled,
                 ]}
               >
-                앨범에서 선택
+                {t("save.photoPick")}
               </Text>
             </Pressable>
           </View>
@@ -1718,7 +1773,7 @@ export default function App() {
                     styles.primaryButtonTextDisabled,
                 ]}
               >
-                인식한 카드 저장하기
+                {t("save.photoSave")}
               </Text>
             </Pressable>
             <Pressable
@@ -1742,7 +1797,7 @@ export default function App() {
                     styles.secondaryButtonTextDisabled,
                 ]}
               >
-                초기화
+                {t("save.reset")}
               </Text>
             </Pressable>
           </View>
@@ -1754,61 +1809,63 @@ export default function App() {
   const renderQuizTab = () => (
     <View style={styles.scene}>
       <View style={styles.heroStrip}>
-        <Text style={styles.heroEyebrow}>오늘의 암기</Text>
-        <Text style={styles.heroMeta}>{pairs.length ? `${pairs.length}장의 카드가 준비되어 있습니다.` : "저장된 카드가 아직 없습니다."}</Text>
+        <Text style={styles.heroEyebrow}>{t("quiz.heroTitle")}</Text>
+        <Text style={styles.heroMeta}>
+          {pairs.length ? t("quiz.heroReady", { count: pairs.length }) : t("quiz.heroEmpty")}
+        </Text>
       </View>
 
       <View style={styles.quizPanel}>
         <View style={styles.quizHeader}>
           <View style={styles.quizHeaderContent}>
-            <Text style={styles.panelTitle}>맞춤 암기</Text>
+            <Text style={styles.panelTitle}>{t("quiz.panelTitle")}</Text>
             <Text style={styles.panelBody}>
               {quizMode === "both"
-                ? "새로 추가한 카드와 자주 틀린 카드가 더 자주 섞여 출제됩니다."
-                : `${quizModeConfig.description} 새 카드와 오답 카드가 우선 반영됩니다.`}
+                ? t("quiz.panelBodyBoth")
+                : t("quiz.panelBodyMode", { description: t(quizModeConfig.descriptionKey) })}
             </Text>
           </View>
           <Pressable
             onPress={() => (deck.length ? resetQuizSession() : startQuiz())}
             style={({ pressed }) => [styles.quizStartButton, pressed && styles.pressed]}
           >
-            <Text style={styles.quizStartButtonText}>{deck.length ? "초기화" : "시작"}</Text>
+            <Text style={styles.quizStartButtonText}>{deck.length ? t("quiz.reset") : t("quiz.start")}</Text>
           </Pressable>
         </View>
 
         {roundComplete && deck.length ? (
           <View style={styles.quizSummaryCard}>
             <View style={styles.quizSummaryHeader}>
-              <Text style={styles.panelTitle}>라운드 완료</Text>
+              <Text style={styles.panelTitle}>{t("quiz.roundComplete")}</Text>
               <Text style={styles.panelBody}>
                 {roundIncorrectCards.length
-                  ? "틀린 문제만 다시 모아서 바로 한 번 더 풀 수 있습니다."
-                  : "이번 라운드는 모두 맞혔습니다. 같은 개수로 다시 맞춤 시작도 가능합니다."}
+                  ? t("quiz.roundBodyRetry")
+                  : t("quiz.roundBodyPerfect")}
               </Text>
             </View>
 
             <View style={styles.quizSummaryStats}>
               <View style={styles.quizSummaryStat}>
                 <Text style={styles.quizSummaryValue}>{deck.length}</Text>
-                <Text style={styles.quizSummaryLabel}>전체 문제</Text>
+                <Text style={styles.quizSummaryLabel}>{t("quiz.total")}</Text>
               </View>
               <View style={styles.quizSummaryStat}>
                 <Text style={[styles.quizSummaryValue, styles.quizSummaryValueGood]}>
                   {roundCorrectCount}
                 </Text>
-                <Text style={styles.quizSummaryLabel}>맞힌 문제</Text>
+                <Text style={styles.quizSummaryLabel}>{t("quiz.correct")}</Text>
               </View>
               <View style={styles.quizSummaryStat}>
                 <Text style={[styles.quizSummaryValue, styles.quizSummaryValueBad]}>
                   {roundIncorrectCards.length}
                 </Text>
-                <Text style={styles.quizSummaryLabel}>다시 풀 문제</Text>
+                <Text style={styles.quizSummaryLabel}>{t("quiz.retry")}</Text>
               </View>
             </View>
 
             <View style={styles.actionRow}>
               <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-                <Text style={styles.secondaryButtonText}>다시 암기 시작</Text>
+                <Text style={styles.secondaryButtonText}>{t("quiz.restartAdaptive")}</Text>
               </Pressable>
               <Pressable
                 disabled={!roundIncorrectCards.length}
@@ -1825,7 +1882,7 @@ export default function App() {
                     !roundIncorrectCards.length && styles.primaryButtonTextDisabled,
                   ]}
                 >
-                  오답만 다시풀기
+                  {t("quiz.retryIncorrect")}
                 </Text>
               </Pressable>
             </View>
@@ -1836,7 +1893,7 @@ export default function App() {
               <Text style={styles.quizProgress}>
                 {Math.min(quizIndex + 1, deck.length)} / {deck.length}
               </Text>
-              <Text style={styles.quizBadge}>{getDirectionLabel(current.direction)}</Text>
+              <Text style={styles.quizBadge}>{t(`directions.${current.direction}`)}</Text>
             </View>
 
             <Text style={styles.quizPrompt}>{current.prompt}</Text>
@@ -1851,7 +1908,7 @@ export default function App() {
                   setResult(null);
                 }
               }}
-              placeholder="정답 입력"
+              placeholder={t("quiz.answerPlaceholder")}
               placeholderTextColor={theme.textPlaceholder}
               autoCapitalize="none"
               style={styles.input}
@@ -1872,14 +1929,14 @@ export default function App() {
               </Text>
             ) : null}
 
-            {showAnswer ? <Text style={styles.answerText}>정답: {current.answer}</Text> : null}
+            {showAnswer ? <Text style={styles.answerText}>{t("quiz.answerPrefix", { answer: current.answer })}</Text> : null}
 
             <View style={styles.actionRow}>
               <Pressable onPress={submitAnswer} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-                <Text style={styles.primaryButtonText}>제출</Text>
+                <Text style={styles.primaryButtonText}>{t("quiz.submitAnswer")}</Text>
               </Pressable>
               <Pressable onPress={skipCurrentCard} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-                <Text style={styles.secondaryButtonText}>다음 카드로 넘어가기</Text>
+                <Text style={styles.secondaryButtonText}>{t("quiz.skipNext")}</Text>
               </Pressable>
             </View>
           </View>
@@ -1888,28 +1945,28 @@ export default function App() {
             <View style={styles.quizReadyIconWrap}>
               <MaterialCommunityIcons name="brain" size={22} color={theme.accent} />
             </View>
-            <Text style={styles.quizReadyTitle}>카드가 준비됐어요. 바로 암기를 시작할 수 있습니다.</Text>
-            <Text style={styles.quizReadyBody}>이번 라운드에서는 최대 {maxQuizCount}문제까지 출제할 수 있습니다.</Text>
+            <Text style={styles.quizReadyTitle}>{t("quiz.readyTitle")}</Text>
+            <Text style={styles.quizReadyBody}>{t("quiz.readyBody", { count: maxQuizCount })}</Text>
 
             <View style={styles.quizReadyStats}>
               <View style={styles.quizReadyStat}>
                 <Text style={styles.quizReadyStatValue}>{pairs.length}</Text>
-                <Text style={styles.quizReadyStatLabel}>저장 카드</Text>
+                <Text style={styles.quizReadyStatLabel}>{t("quiz.storedCards")}</Text>
               </View>
               <View style={styles.quizReadyStat}>
                 <Text style={styles.quizReadyStatValue}>{resolvedQuizCount}</Text>
-                <Text style={styles.quizReadyStatLabel}>이번 문제 수</Text>
+                <Text style={styles.quizReadyStatLabel}>{t("quiz.requestedCount")}</Text>
               </View>
               <View style={styles.quizReadyStat}>
                 <Text style={styles.quizReadyStatValue}>{maxQuizCount}</Text>
-                <Text style={styles.quizReadyStatLabel}>출제 가능</Text>
+                <Text style={styles.quizReadyStatLabel}>{t("quiz.availableCount")}</Text>
               </View>
             </View>
 
             <View style={styles.quizCountCard}>
               <View style={styles.quizCountCardHeader}>
-                <Text style={styles.quizSetupLabel}>문제 수</Text>
-                <Text style={styles.quizCountCompactCaption}>{pairs.length ? `최대 ${maxQuizCount}` : "대기"}</Text>
+                <Text style={styles.quizSetupLabel}>{t("quiz.countLabel")}</Text>
+                <Text style={styles.quizCountCompactCaption}>{pairs.length ? t("quiz.countMax", { count: maxQuizCount }) : t("quiz.countWaiting")}</Text>
               </View>
 
               <View style={styles.quizCountCompactRow}>
@@ -1926,15 +1983,15 @@ export default function App() {
                 />
                 <Text style={styles.quizCountCompactHint}>
                   {pairs.length
-                    ? "이번 라운드에서 풀 문제 수를 직접 적을 수 있습니다."
-                    : "카드를 저장하면 이곳에서 출제 문제 수를 정할 수 있습니다."}
+                    ? t("quiz.countHint")
+                    : t("quiz.countHintEmpty")}
                 </Text>
               </View>
             </View>
 
             <View style={[styles.quizModeCard, styles.quizModeCardEmbedded]}>
-              <Text style={styles.quizSetupLabel}>출제 방향</Text>
-              <Text style={styles.quizSetupHint}>{quizModeConfig.description}</Text>
+              <Text style={styles.quizSetupLabel}>{t("quiz.modeLabel")}</Text>
+              <Text style={styles.quizSetupHint}>{t(quizModeConfig.descriptionKey)}</Text>
               <View style={styles.quizModeRow}>
                 {QUIZ_MODE_OPTIONS.map((option) => {
                   const active = quizMode === option.key;
@@ -1949,9 +2006,7 @@ export default function App() {
                         pressed && styles.pressed,
                       ]}
                     >
-                      <Text style={[styles.quizModeChipText, active && styles.quizModeChipTextActive]}>
-                        {option.chipLabel}
-                      </Text>
+                      <Text style={[styles.quizModeChipText, active && styles.quizModeChipTextActive]}>{t(option.chipLabelKey)}</Text>
                     </Pressable>
                   );
                 })}
@@ -1960,10 +2015,10 @@ export default function App() {
 
             <View style={styles.actionRow}>
               <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-                <Text style={styles.primaryButtonText}>암기 시작</Text>
+                <Text style={styles.primaryButtonText}>{t("quiz.startButton")}</Text>
               </Pressable>
               <Pressable onPress={() => handleTabChange("manage")} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-                <Text style={styles.secondaryButtonText}>보관함 보기</Text>
+                <Text style={styles.secondaryButtonText}>{t("quiz.openLibrary")}</Text>
               </Pressable>
             </View>
           </View>
@@ -1972,9 +2027,9 @@ export default function App() {
             styles={styles}
             theme={theme}
             icon="cards-heart-outline"
-            title="지금은 퀴즈를 시작할 카드가 없습니다."
-            body="저장 탭에서 카드를 만들면 바로 이 화면에서 맞춤 암기를 시작할 수 있습니다."
-            actionLabel="저장 탭으로 이동"
+            title={t("quiz.emptyTitle")}
+            body={t("quiz.emptyBody")}
+            actionLabel={t("quiz.emptyAction")}
             onPress={() => handleTabChange("save")}
           />
         )}
@@ -1988,11 +2043,14 @@ export default function App() {
     return (
       <View style={styles.scene}>
         <View style={styles.heroStrip}>
-          <Text style={styles.heroEyebrow}>학습 기록</Text>
+          <Text style={styles.heroEyebrow}>{t("history.heroTitle")}</Text>
           <Text style={styles.heroMeta}>
             {hasStudyHistory
-              ? `오늘 ${todaySessionCount}번 암기했고, ${todayIncorrectCount}개의 오답이 기록되었습니다.`
-              : "암기를 시작하면 오늘의 학습 횟수와 자주 틀린 카드를 여기서 볼 수 있습니다."}
+              ? t("history.heroWithHistory", {
+                  sessions: todaySessionCount,
+                  incorrect: todayIncorrectCount,
+                })
+              : t("history.heroEmpty")}
           </Text>
         </View>
 
@@ -2000,31 +2058,31 @@ export default function App() {
           <>
             <View style={styles.historySummaryCard}>
               <View style={styles.historySummaryHeader}>
-                <Text style={styles.panelTitle}>오늘의 학습</Text>
-                <Text style={styles.panelBody}>오늘 몇 번 암기했는지와 현재 복습이 필요한 카드를 빠르게 확인할 수 있습니다.</Text>
+                <Text style={styles.panelTitle}>{t("history.todayTitle")}</Text>
+                <Text style={styles.panelBody}>{t("history.todayBody")}</Text>
               </View>
               <View style={styles.historySummaryGrid}>
                 <View style={styles.historyMetricCard}>
                   <Text style={styles.historyMetricValue}>{todaySessionCount}</Text>
-                  <Text style={styles.historyMetricLabel}>학습 횟수</Text>
+                  <Text style={styles.historyMetricLabel}>{t("history.sessions")}</Text>
                 </View>
                 <View style={styles.historyMetricCard}>
                   <Text style={styles.historyMetricValue}>{todaySolvedCount}</Text>
-                  <Text style={styles.historyMetricLabel}>푼 문제</Text>
+                  <Text style={styles.historyMetricLabel}>{t("history.solved")}</Text>
                 </View>
                 <View style={styles.historyMetricCard}>
                   <Text style={[styles.historyMetricValue, todayIncorrectCount > 0 && styles.historyMetricValueBad]}>
                     {todayIncorrectCount}
                   </Text>
-                  <Text style={styles.historyMetricLabel}>오늘 오답</Text>
+                  <Text style={styles.historyMetricLabel}>{t("history.incorrect")}</Text>
                 </View>
               </View>
             </View>
 
             <View style={styles.libraryPanel}>
               <View style={styles.panelHeader}>
-                <Text style={styles.panelTitle}>{todayMissedCards.length ? "오늘 틀린 카드" : "자주 틀린 카드"}</Text>
-                <Text style={styles.historyChipText}>{todayMissedCards.length ? "오늘 기준" : "누적 기준"}</Text>
+                <Text style={styles.panelTitle}>{todayMissedCards.length ? t("history.todayMissed") : t("history.topMissed")}</Text>
+                <Text style={styles.historyChipText}>{todayMissedCards.length ? t("history.todayBasis") : t("history.totalBasis")}</Text>
               </View>
               <View style={styles.historyList}>
                 {missedCards.length ? (
@@ -2036,39 +2094,46 @@ export default function App() {
                         </Text>
                         <Text style={styles.historyItemCaption}>
                           {todayMissedCards.length
-                            ? `오늘 ${card.count}번 틀렸습니다.`
-                            : `누적 ${card.incorrect}번 틀렸고 ${card.attempts}번 풀었습니다.`}
+                            ? t("history.todayMissedCaption", { count: card.count })
+                            : t("history.totalMissedCaption", {
+                                incorrect: card.incorrect,
+                                attempts: card.attempts,
+                              })}
                         </Text>
                       </View>
                       <View style={styles.historyBadge}>
                         <Text style={styles.historyBadgeText}>
-                          {todayMissedCards.length ? `${card.count}회` : `${card.incorrect}회`}
+                          {todayMissedCards.length ? `${card.count}` : `${card.incorrect}`}
                         </Text>
                       </View>
                     </View>
                   ))
                 ) : (
-                  <Text style={styles.historyEmptyText}>아직 틀린 카드가 없습니다.</Text>
+                  <Text style={styles.historyEmptyText}>{t("history.noMissed")}</Text>
                 )}
               </View>
             </View>
 
             <View style={styles.libraryPanel}>
               <View style={styles.panelHeader}>
-                <Text style={styles.panelTitle}>최근 암기 세션</Text>
+                <Text style={styles.panelTitle}>{t("history.recentSessions")}</Text>
               </View>
               <View style={styles.historyList}>
                 {recentSessions.map((item) => (
                   <View key={item.id} style={styles.historyItem}>
                     <View style={styles.historyItemBody}>
-                      <Text style={styles.historyItemTitle}>{formatSessionLabel(item.completedAt)}</Text>
+                      <Text style={styles.historyItemTitle}>{formatSessionLabelForLanguage(item.completedAt, language)}</Text>
                       <Text style={styles.historyItemCaption}>
-                        {item.source === "retry" ? "오답 다시풀기" : "맞춤 암기"} · {item.totalCards}문제 · {item.correctCount}개 정답
+                        {t("history.recentSessionCaption", {
+                          source: t(item.source === "retry" ? "quiz.sourceRetry" : "quiz.sourceAdaptive"),
+                          total: item.totalCards,
+                          correct: item.correctCount,
+                        })}
                       </Text>
                     </View>
                     <View style={[styles.historyBadge, item.incorrectCount > 0 && styles.historyBadgeBad]}>
                       <Text style={[styles.historyBadgeText, item.incorrectCount > 0 && styles.historyBadgeTextBad]}>
-                        오답 {item.incorrectCount}
+                        {t("history.incorrectBadge", { count: item.incorrectCount })}
                       </Text>
                     </View>
                   </View>
@@ -2081,9 +2146,9 @@ export default function App() {
             styles={styles}
             theme={theme}
             icon="chart-line"
-            title="학습 기록은 첫 라운드를 마치면 바로 채워집니다."
-            body="문제를 풀기 시작하면 오늘 몇 번 암기했는지와 자주 틀린 카드가 이 탭에 자동으로 쌓입니다."
-            actionLabel="암기하러 가기"
+            title={t("history.emptyTitle")}
+            body={t("history.emptyBody")}
+            actionLabel={t("history.emptyAction")}
             onPress={() => handleTabChange("quiz")}
           />
         )}
@@ -2094,34 +2159,68 @@ export default function App() {
   const renderManageTab = () => (
     <View style={styles.scene}>
       <View style={styles.heroStrip}>
-        <Text style={styles.heroEyebrow}>보관함</Text>
+        <Text style={styles.heroEyebrow}>{t("manage.heroTitle")}</Text>
         <Text style={styles.heroMeta}>
-          {pairs.length ? `${pairs.length}장의 카드를 수정하거나 삭제할 수 있습니다.` : "아직 저장된 카드가 없습니다."}
+          {pairs.length ? t("manage.heroWithCards", { count: pairs.length }) : t("manage.heroEmpty")}
         </Text>
       </View>
 
       {pairs.length ? (
-        <View style={styles.libraryPanel}>
-          {pairs.map((pair) => (
+        <>
+          <View style={styles.settingsCard}>
+            <View style={styles.settingsHeader}>
+              <Text style={styles.settingsTitle}>{t("manage.sortTitle")}</Text>
+              <Text style={styles.settingsBody}>{t("manage.sortBody")}</Text>
+            </View>
+            <View style={styles.supportCategoryRow}>
+              {MANAGE_SORT_OPTIONS.map((option) => {
+                const active = manageSort === option.key;
+
+                return (
+                  <Pressable
+                    key={option.key}
+                    onPress={() => setManageSort(option.key)}
+                    style={({ pressed }) => [
+                      styles.supportCategoryChip,
+                      active && styles.supportCategoryChipActive,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.supportCategoryChipText,
+                        active && styles.supportCategoryChipTextActive,
+                      ]}
+                    >
+                      {t(option.labelKey)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={styles.libraryPanel}>
+            {sortedManagePairs.map((pair) => (
             <View key={pair.id} style={styles.manageCard}>
               {editingId === pair.id ? (
                 <>
-                  <Text style={styles.inputLabel}>앞면</Text>
+                  <Text style={styles.inputLabel}>{t("common.front")}</Text>
                   <TextInput
                     value={editingLeft}
                     onChangeText={setEditingLeft}
-                    placeholder="앞면 입력"
+                    placeholder={t("common.front")}
                     placeholderTextColor={theme.textPlaceholder}
                     style={[styles.input, styles.multilineInput]}
                     multiline
                     textAlignVertical="top"
                   />
 
-                  <Text style={styles.inputLabel}>뒷면</Text>
+                  <Text style={styles.inputLabel}>{t("common.back")}</Text>
                   <TextInput
                     value={editingRight}
                     onChangeText={setEditingRight}
-                    placeholder="뒷면 입력"
+                    placeholder={t("common.back")}
                     placeholderTextColor={theme.textPlaceholder}
                     style={[styles.input, styles.multilineInput]}
                     multiline
@@ -2130,7 +2229,7 @@ export default function App() {
 
                   <View style={styles.manageActionRow}>
                     <Pressable onPress={() => void saveEdit()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-                      <Text style={styles.primaryButtonText}>수정 저장</Text>
+                      <Text style={styles.primaryButtonText}>{t("manage.saveEdit")}</Text>
                     </Pressable>
                     <Pressable
                       onPress={() => {
@@ -2140,7 +2239,7 @@ export default function App() {
                       }}
                       style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
                     >
-                      <Text style={styles.secondaryButtonText}>취소</Text>
+                      <Text style={styles.secondaryButtonText}>{t("common.cancel")}</Text>
                     </Pressable>
                   </View>
                 </>
@@ -2149,7 +2248,7 @@ export default function App() {
                   <View style={styles.manageDisplayStack}>
                     <View style={styles.manageDisplayRow}>
                       <View style={styles.manageTextBlock}>
-                        <Text style={styles.previewLabel}>앞면</Text>
+                        <Text style={styles.previewLabel}>{t("common.front")}</Text>
                         <Text style={styles.managePairText}>{pair.left}</Text>
                       </View>
                       <Pressable
@@ -2164,20 +2263,20 @@ export default function App() {
                           pressed && styles.pressed,
                         ]}
                       >
-                        <Text style={styles.secondaryButtonText}>수정</Text>
+                        <Text style={styles.secondaryButtonText}>{t("manage.edit")}</Text>
                       </Pressable>
                     </View>
                     <View style={styles.manageDisplayRow}>
                       <View style={styles.manageTextBlock}>
-                        <Text style={styles.previewLabel}>뒷면</Text>
+                        <Text style={styles.previewLabel}>{t("common.back")}</Text>
                         <Text style={styles.managePairText}>{pair.right}</Text>
                       </View>
                       <Pressable
                         onPress={() =>
-                          Alert.alert("카드 삭제", "이 카드를 보관함에서 삭제할까요?", [
-                            { text: "취소", style: "cancel" },
+                          Alert.alert(t("manage.deleteTitle"), t("manage.deleteBody"), [
+                            { text: t("common.cancel"), style: "cancel" },
                             {
-                              text: "삭제",
+                              text: t("common.delete"),
                               style: "destructive",
                               onPress: () => {
                                 void removePair(pair);
@@ -2191,23 +2290,24 @@ export default function App() {
                           pressed && styles.pressed,
                         ]}
                       >
-                        <Text style={styles.dangerButtonText}>삭제</Text>
+                        <Text style={styles.dangerButtonText}>{t("common.delete")}</Text>
                       </Pressable>
                     </View>
                   </View>
                 </>
               )}
             </View>
-          ))}
-        </View>
+            ))}
+          </View>
+        </>
       ) : (
         <EmptyPanel
           styles={styles}
           theme={theme}
           icon="playlist-remove"
-          title="보관함은 저장된 카드가 생기면 바로 채워집니다."
-          body="중앙 입력 패널에서 카드 하나를 저장한 뒤 다시 확인해 보세요."
-          actionLabel="카드 저장하러 가기"
+          title={t("manage.emptyTitle")}
+          body={t("manage.emptyBody")}
+          actionLabel={t("manage.emptyAction")}
           onPress={() => handleTabChange("save")}
         />
       )}
@@ -2217,10 +2317,8 @@ export default function App() {
   const renderAboutTab = () => (
     <View style={styles.scene}>
       <View style={styles.heroStrip}>
-        <Text style={styles.heroEyebrow}>앱 정보</Text>
-        <Text style={styles.heroMeta}>
-          계정 상태와 화면 모드를 간단하게 확인할 수 있습니다.
-        </Text>
+        <Text style={styles.heroEyebrow}>{t("about.heroTitle")}</Text>
+        <Text style={styles.heroMeta}>{t("about.heroBody")}</Text>
       </View>
 
       <View style={styles.aboutStack}>
@@ -2254,22 +2352,22 @@ export default function App() {
               ]}
             >
               {!isSupabaseConfigured
-                ? "설정 필요"
+                ? t("about.authSetupNeeded")
                 : session?.user
                   ? authBusy
-                    ? "처리 중"
-                    : "로그아웃"
+                    ? t("about.authWorking")
+                    : t("about.authLogout")
                   : authBusy
-                    ? "연결 중"
-                    : "Google 로그인"}
+                    ? t("about.authConnecting")
+                    : t("about.authGoogle")}
             </Text>
           </Pressable>
         </View>
 
         <View style={styles.settingsCard}>
           <View style={styles.settingsHeader}>
-            <Text style={styles.settingsTitle}>화면 모드</Text>
-            <Text style={styles.settingsBody}>원하는 분위기에 맞춰 다크/라이트 모드를 바로 전환할 수 있습니다.</Text>
+            <Text style={styles.settingsTitle}>{t("about.themeTitle")}</Text>
+            <Text style={styles.settingsBody}>{t("about.themeBody")}</Text>
           </View>
 
           <View style={styles.modeSwitchRow}>
@@ -2292,7 +2390,41 @@ export default function App() {
                     color={active ? theme.accentText : theme.textSecondary}
                   />
                   <Text style={[styles.modeChipText, active && styles.modeChipTextActive]}>
-                    {option.label}
+                    {t(option.labelKey)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={styles.settingsCard}>
+          <View style={styles.settingsHeader}>
+            <Text style={styles.settingsTitle}>{t("about.languageTitle")}</Text>
+            <Text style={styles.settingsBody}>{t("about.languageBody")}</Text>
+          </View>
+
+          <View style={styles.supportCategoryRow}>
+            {LANGUAGE_OPTIONS.map((option) => {
+              const active = language === option.key;
+
+              return (
+                <Pressable
+                  key={option.key}
+                  onPress={() => setLanguage(option.key)}
+                  style={({ pressed }) => [
+                    styles.supportCategoryChip,
+                    active && styles.supportCategoryChipActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.supportCategoryChipText,
+                      active && styles.supportCategoryChipTextActive,
+                    ]}
+                  >
+                    {option.nativeLabel}
                   </Text>
                 </Pressable>
               );
@@ -2302,25 +2434,21 @@ export default function App() {
 
         <View style={styles.appSummaryCard}>
           <Text style={styles.settingsTitle}>MEMORIA</Text>
-          <Text style={styles.settingsBody}>
-            앞면과 뒷면 한 쌍으로 카드를 저장하고, 자주 틀린 카드와 새 카드를 더 자주 복습하도록 설계된 암기 앱입니다.
-          </Text>
+          <Text style={styles.settingsBody}>{t("about.summaryBody")}</Text>
           <Pressable onPress={() => setTutorialVisible(true)} style={({ pressed }) => [styles.inlineActionButton, pressed && styles.pressed]}>
-            <Text style={styles.inlineActionButtonText}>튜토리얼 다시 보기</Text>
+            <Text style={styles.inlineActionButtonText}>{t("about.tutorialAgain")}</Text>
           </Pressable>
         </View>
 
         <View style={styles.settingsCard}>
           <View style={styles.settingsHeader}>
-            <Text style={styles.settingsTitle}>문의하기</Text>
-            <Text style={styles.settingsBody}>
-              오류 제보나 기능 제안이 있다면 앱 안에서 바로 내용을 남기고, 아래 최근 문의에서 접수 여부를 확인할 수 있습니다.
-            </Text>
+            <Text style={styles.settingsTitle}>{t("about.supportTitle")}</Text>
+            <Text style={styles.settingsBody}>{t("about.supportBody")}</Text>
           </View>
 
           <View style={styles.supportForm}>
             <View style={styles.supportField}>
-              <Text style={styles.supportLabel}>문의 분류</Text>
+              <Text style={styles.supportLabel}>{t("about.supportCategoryLabel")}</Text>
               <View style={styles.supportCategoryRow}>
                 {SUPPORT_CATEGORY_OPTIONS.map((option) => {
                   const active = supportCategory === option;
@@ -2341,7 +2469,7 @@ export default function App() {
                           active && styles.supportCategoryChipTextActive,
                         ]}
                       >
-                        {option}
+                        {t(`supportCategories.${option}`)}
                       </Text>
                     </Pressable>
                   );
@@ -2350,26 +2478,26 @@ export default function App() {
             </View>
 
             <View style={styles.supportField}>
-              <Text style={styles.supportLabel}>답변 받을 이메일</Text>
+              <Text style={styles.supportLabel}>{t("about.supportEmailLabel")}</Text>
               <TextInput
                 value={supportReplyEmail}
                 onChangeText={setSupportReplyEmail}
                 autoCapitalize="none"
                 keyboardType="email-address"
-                placeholder="답변 받을 이메일"
+                placeholder={t("about.supportEmailPlaceholder")}
                 placeholderTextColor={theme.textPlaceholder}
                 style={styles.input}
               />
             </View>
 
             <View style={styles.supportField}>
-              <Text style={styles.supportLabel}>문의 내용</Text>
+              <Text style={styles.supportLabel}>{t("about.supportMessageLabel")}</Text>
               <TextInput
                 value={supportMessage}
                 onChangeText={setSupportMessage}
                 multiline
                 textAlignVertical="top"
-                placeholder="오류 상황이나 원하는 기능을 적어 주세요."
+                placeholder={t("about.supportMessagePlaceholder")}
                 placeholderTextColor={theme.textPlaceholder}
                 style={[styles.input, styles.supportMessageInput]}
               />
@@ -2392,22 +2520,22 @@ export default function App() {
                   supportSending && styles.primaryButtonTextDisabled,
                 ]}
               >
-                {supportSending ? "전송 중..." : "전송"}
+                {supportSending ? t("about.supportSending") : t("about.supportSend")}
               </Text>
             </Pressable>
           </View>
 
           {latestSupportRequests.length ? (
             <View style={styles.supportHistory}>
-              <Text style={styles.supportHistoryTitle}>최근 문의</Text>
+              <Text style={styles.supportHistoryTitle}>{t("about.supportRecent")}</Text>
               {latestSupportRequests.map((item) => (
                 <View key={item.id} style={styles.supportHistoryItem}>
                   <View style={styles.supportHistoryMeta}>
                     <View style={styles.supportHistoryLead}>
-                      <Text style={styles.supportHistoryCategory}>{item.category}</Text>
-                      <Text style={styles.supportHistoryStatus}>{item.status}</Text>
+                      <Text style={styles.supportHistoryCategory}>{t(`supportCategories.${normalizeSupportCategory(item.category)}`)}</Text>
+                      <Text style={styles.supportHistoryStatus}>{t(`supportStatuses.${normalizeSupportStatus(item.status)}`)}</Text>
                     </View>
-                    <Text style={styles.supportHistoryDate}>{formatDateTime(item.createdAt)}</Text>
+                    <Text style={styles.supportHistoryDate}>{formatDateTimeForLanguage(item.createdAt, language)}</Text>
                   </View>
                   <Text style={styles.supportHistoryEmail}>{item.replyEmail}</Text>
                   <Text style={styles.supportHistoryMessage} numberOfLines={3}>
@@ -2484,7 +2612,7 @@ export default function App() {
                   size={22}
                   color={active ? theme.iconContrast : theme.textSecondary}
                 />
-                <Text style={[styles.tabText, active && styles.tabTextActive]}>{item.label}</Text>
+                <Text style={[styles.tabText, active && styles.tabTextActive]}>{t(item.labelKey)}</Text>
               </Pressable>
             );
           })}
@@ -2498,28 +2626,13 @@ export default function App() {
         <TutorialOverlay
           styles={styles}
           theme={theme}
+          t={t}
           onClose={() => closeTutorial()}
           onStart={() => closeTutorial("save")}
           onOpenHistory={() => closeTutorial("history")}
         />
       ) : null}
     </SafeAreaView>
-  );
-}
-
-function PreviewRow({ pair, large = false, styles }) {
-  return (
-    <View style={[styles.previewRow, large && styles.previewRowLarge]}>
-      <View style={styles.previewColumn}>
-        <Text style={styles.previewLabel}>앞면</Text>
-        <Text style={styles.previewText}>{pair.left}</Text>
-      </View>
-      <Text style={styles.previewDivider}>↔</Text>
-      <View style={styles.previewColumn}>
-        <Text style={styles.previewLabel}>뒷면</Text>
-        <Text style={styles.previewText}>{pair.right}</Text>
-      </View>
-    </View>
   );
 }
 
@@ -2540,7 +2653,7 @@ function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) 
   );
 }
 
-function TutorialOverlay({ styles, theme, onClose, onStart, onOpenHistory }) {
+function TutorialOverlay({ styles, theme, t, onClose, onStart, onOpenHistory }) {
   return (
     <View style={styles.tutorialOverlay}>
       <Pressable style={styles.tutorialBackdrop} onPress={onClose} />
@@ -2548,10 +2661,8 @@ function TutorialOverlay({ styles, theme, onClose, onStart, onOpenHistory }) {
         <View style={styles.tutorialBadge}>
           <MaterialCommunityIcons name="compass-rose" size={20} color={theme.accentText} />
         </View>
-        <Text style={styles.tutorialTitle}>MEMORIA 빠른 시작</Text>
-        <Text style={styles.tutorialBody}>
-          처음 보는 사람도 바로 감을 잡을 수 있도록, 이 앱이 하는 일을 3단계로 짧게 보여드릴게요.
-        </Text>
+        <Text style={styles.tutorialTitle}>{t("tutorial.title")}</Text>
+        <Text style={styles.tutorialBody}>{t("tutorial.body")}</Text>
 
         <View style={styles.tutorialStepList}>
           <View style={styles.tutorialStep}>
@@ -2559,8 +2670,8 @@ function TutorialOverlay({ styles, theme, onClose, onStart, onOpenHistory }) {
               <MaterialCommunityIcons name="cards-outline" size={18} color={theme.accent} />
             </View>
             <View style={styles.flex}>
-              <Text style={styles.tutorialStepTitle}>1. 카드 저장</Text>
-              <Text style={styles.tutorialStepBody}>앞면과 뒷면을 한 쌍으로 적거나, 텍스트 파일로 여러 장을 한 번에 불러옵니다.</Text>
+              <Text style={styles.tutorialStepTitle}>{t("tutorial.step1Title")}</Text>
+              <Text style={styles.tutorialStepBody}>{t("tutorial.step1Body")}</Text>
             </View>
           </View>
 
@@ -2569,8 +2680,8 @@ function TutorialOverlay({ styles, theme, onClose, onStart, onOpenHistory }) {
               <MaterialCommunityIcons name="brain" size={18} color={theme.accent} />
             </View>
             <View style={styles.flex}>
-              <Text style={styles.tutorialStepTitle}>2. 맞춤 암기</Text>
-              <Text style={styles.tutorialStepBody}>새 카드와 자주 틀린 카드가 더 자주 나오도록 자동으로 섞여 복습됩니다.</Text>
+              <Text style={styles.tutorialStepTitle}>{t("tutorial.step2Title")}</Text>
+              <Text style={styles.tutorialStepBody}>{t("tutorial.step2Body")}</Text>
             </View>
           </View>
 
@@ -2579,18 +2690,18 @@ function TutorialOverlay({ styles, theme, onClose, onStart, onOpenHistory }) {
               <MaterialCommunityIcons name="chart-timeline-variant" size={18} color={theme.accent} />
             </View>
             <View style={styles.flex}>
-              <Text style={styles.tutorialStepTitle}>3. 기록 확인</Text>
-              <Text style={styles.tutorialStepBody}>오늘 몇 번 암기했는지, 어떤 카드를 자주 틀렸는지 기록 탭에서 바로 볼 수 있습니다.</Text>
+              <Text style={styles.tutorialStepTitle}>{t("tutorial.step3Title")}</Text>
+              <Text style={styles.tutorialStepBody}>{t("tutorial.step3Body")}</Text>
             </View>
           </View>
         </View>
 
         <View style={styles.tutorialActionRow}>
           <Pressable onPress={onOpenHistory} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-            <Text style={styles.secondaryButtonText}>기록 먼저 보기</Text>
+            <Text style={styles.secondaryButtonText}>{t("tutorial.viewHistory")}</Text>
           </Pressable>
           <Pressable onPress={onStart} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-            <Text style={styles.primaryButtonText}>바로 시작하기</Text>
+            <Text style={styles.primaryButtonText}>{t("tutorial.startNow")}</Text>
           </Pressable>
         </View>
       </View>
@@ -2619,28 +2730,6 @@ function getLocalDayKey(timestamp) {
   const date = timestamp ? new Date(timestamp) : new Date();
 
   return [date.getFullYear(), date.getMonth() + 1, date.getDate()].join("-");
-}
-
-function formatDateTime(timestamp) {
-  const date = timestamp ? new Date(timestamp) : new Date();
-
-  if (Number.isNaN(date.getTime())) {
-    return "방금 전송";
-  }
-
-  return `${date.getMonth() + 1}.${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(
-    date.getMinutes()
-  ).padStart(2, "0")}`;
-}
-
-function formatSessionLabel(timestamp) {
-  const date = new Date(timestamp);
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-  const hours = `${date.getHours()}`.padStart(2, "0");
-  const minutes = `${date.getMinutes()}`.padStart(2, "0");
-
-  return `${month}월 ${day}일 ${hours}:${minutes}`;
 }
 
 const createStyles = (theme) => StyleSheet.create({
