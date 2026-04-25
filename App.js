@@ -1566,7 +1566,7 @@ export default function App() {
               <MaterialCommunityIcons
                 name={option.icon}
                 size={18}
-                color={active ? theme.accentText : theme.textSecondary}
+                color={active ? theme.accent : theme.textSecondary}
               />
               <Text style={[styles.saveModeChipText, active && styles.saveModeChipTextActive]}>
                 {t(option.labelKey)}
@@ -1578,9 +1578,17 @@ export default function App() {
 
       {saveInputMode === "single" ? (
         <View style={styles.composerPanel}>
-          <Text style={styles.composerTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.84}>
-            {t("save.title")}
-          </Text>
+          <View style={styles.importHeader}>
+            <View style={styles.importTitleRow}>
+              <View style={styles.importIconWrap}>
+                <MaterialCommunityIcons name="cards-outline" size={18} color={theme.accent} />
+              </View>
+              <Text style={styles.importTitle}>{t("save.title")}</Text>
+            </View>
+            <Text style={styles.importBody}>{t("save.singleBody")}</Text>
+          </View>
+
+          <View style={styles.subtleDivider} />
 
           <Text style={styles.inputLabel}>{t("common.front")}</Text>
           <TextInput
@@ -1620,6 +1628,8 @@ export default function App() {
               </View>
               <Text style={styles.importTitle}>{t("save.textImportTitle")}</Text>
             </View>
+            <Text style={styles.importBody}>{t("save.textImportBody")}</Text>
+            <View style={styles.subtleDivider} />
             <View style={styles.importPreviewCard}>
               <View style={styles.importPreviewTopBar}>
                 <View style={styles.importPreviewDots}>
@@ -2295,6 +2305,7 @@ export default function App() {
                             <Text style={styles.secondaryButtonText}>{t("manage.edit")}</Text>
                           </Pressable>
                         </View>
+                        <View style={styles.manageRowDivider} />
                         <View style={styles.manageDisplayRow}>
                           <View style={styles.manageTextBlock}>
                             <Text style={styles.previewLabel}>{t("common.back")}</Text>
@@ -2819,32 +2830,34 @@ const createStyles = (theme) => StyleSheet.create({
   },
   saveModeRow: {
     flexDirection: "row",
-    gap: 10,
+    flexWrap: "wrap",
+    gap: 8,
   },
   saveModeChip: {
-    flex: 1,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    minHeight: 62,
-    borderRadius: 20,
-    backgroundColor: theme.accentSoft,
+    minHeight: 38,
+    borderRadius: 999,
+    backgroundColor: theme.surface,
     borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-    paddingHorizontal: 10,
+    borderColor: theme.surfaceBorderSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   saveModeChipActive: {
-    backgroundColor: theme.accent,
+    backgroundColor: theme.accentSoft,
     borderColor: theme.accent,
   },
   saveModeChipText: {
     fontSize: 13,
-    fontWeight: "800",
+    fontWeight: "700",
     textAlign: "center",
-    color: theme.textStrong,
+    color: theme.textSecondary,
   },
   saveModeChipTextActive: {
-    color: theme.accentText,
+    color: theme.accent,
   },
   heroStrip: {
     paddingTop: 8,
@@ -2923,12 +2936,6 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
-  },
-  composerTitle: {
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "800",
-    color: theme.textPrimary,
   },
   inputLabel: {
     fontSize: 13,
@@ -3027,10 +3034,13 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textPrimary,
   },
   importBody: {
-    marginTop: 4,
     fontSize: 13,
     lineHeight: 21,
     color: theme.textSecondary,
+  },
+  subtleDivider: {
+    height: 1,
+    backgroundColor: theme.surfaceBorderSoft,
   },
   importPreviewCard: {
     gap: 10,
@@ -3569,35 +3579,50 @@ const createStyles = (theme) => StyleSheet.create({
   },
   manageCard: {
     gap: 10,
-    padding: 16,
+    padding: 14,
     borderRadius: 22,
     backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
   },
   manageDisplayStack: {
-    gap: 14,
+    gap: 10,
   },
   manageDisplayRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
+    alignItems: "stretch",
+    gap: 10,
   },
   manageTextBlock: {
-    flex: 1,
+    flexGrow: 1,
+    flexShrink: 1,
+    maxWidth: "74%",
     minWidth: 0,
     gap: 4,
-    paddingVertical: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: theme.surfaceCard,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
   },
   managePairText: {
-    fontSize: 16,
-    lineHeight: 24,
+    fontSize: 15,
+    lineHeight: 22,
     fontWeight: "700",
     color: theme.textPrimary,
   },
+  manageRowDivider: {
+    height: 1,
+    marginHorizontal: 4,
+    backgroundColor: theme.surfaceBorderSoft,
+  },
   manageSideButton: {
     flex: 0,
-    width: 108,
-    minHeight: 58,
+    width: 86,
+    minHeight: 46,
     paddingVertical: 0,
+    borderRadius: 14,
   },
   aboutStack: {
     gap: 12,
@@ -3679,30 +3704,31 @@ const createStyles = (theme) => StyleSheet.create({
   },
   supportCategoryRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   supportCategoryChip: {
-    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 44,
-    borderRadius: 16,
-    backgroundColor: theme.surfaceMuted,
+    minHeight: 34,
+    borderRadius: 999,
+    backgroundColor: theme.surface,
     borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-    paddingHorizontal: 10,
+    borderColor: theme.surfaceBorderSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
   supportCategoryChipActive: {
-    backgroundColor: theme.accent,
+    backgroundColor: theme.accentSoft,
     borderColor: theme.accent,
   },
   supportCategoryChipText: {
     fontSize: 13,
-    fontWeight: "800",
-    color: theme.textStrong,
+    fontWeight: "700",
+    color: theme.textSecondary,
   },
   supportCategoryChipTextActive: {
-    color: theme.accentText,
+    color: theme.accent,
   },
   supportField: {
     gap: 6,
