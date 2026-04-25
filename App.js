@@ -1608,14 +1608,12 @@ export default function App() {
             textAlignVertical="top"
           />
 
-          <View style={styles.actionRow}>
-            <Pressable onPress={() => void saveCard()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-              <Text style={styles.primaryButtonText}>{t("save.saveButton")}</Text>
-            </Pressable>
-            <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-              <Text style={styles.secondaryButtonText}>{t("save.memorizeNow")}</Text>
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={() => void saveCard()}
+            style={({ pressed }) => [styles.primaryButton, styles.savePrimaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.primaryButtonText}>{t("save.saveButton")}</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -2288,7 +2286,9 @@ export default function App() {
                         <View style={styles.manageDisplayRow}>
                           <View style={styles.manageTextBlock}>
                             <Text style={styles.previewLabel}>{t("common.front")}</Text>
-                            <Text style={styles.managePairText}>{pair.left}</Text>
+                            <Text style={styles.managePairText} numberOfLines={2} ellipsizeMode="tail">
+                              {pair.left}
+                            </Text>
                           </View>
                           <Pressable
                             onPress={() => {
@@ -2309,7 +2309,9 @@ export default function App() {
                         <View style={styles.manageDisplayRow}>
                           <View style={styles.manageTextBlock}>
                             <Text style={styles.previewLabel}>{t("common.back")}</Text>
-                            <Text style={styles.managePairText}>{pair.right}</Text>
+                            <Text style={styles.managePairText} numberOfLines={2} ellipsizeMode="tail">
+                              {pair.right}
+                            </Text>
                           </View>
                           <Pressable
                             onPress={() =>
@@ -2971,6 +2973,10 @@ const createStyles = (theme) => StyleSheet.create({
     paddingVertical: 15,
     backgroundColor: theme.accent,
   },
+  savePrimaryButton: {
+    flex: 0,
+    marginTop: 8,
+  },
   primaryButtonDisabled: {
     backgroundColor: theme.mutedBg,
   },
@@ -3586,12 +3592,13 @@ const createStyles = (theme) => StyleSheet.create({
     borderColor: theme.surfaceBorderSoft,
   },
   manageDisplayStack: {
-    gap: 10,
+    gap: 8,
   },
   manageDisplayRow: {
     flexDirection: "row",
-    alignItems: "stretch",
-    gap: 10,
+    alignItems: "center",
+    gap: 8,
+    minHeight: 106,
   },
   manageTextBlock: {
     flexGrow: 1,
@@ -3601,6 +3608,8 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 4,
     paddingHorizontal: 14,
     paddingVertical: 12,
+    height: 106,
+    justifyContent: "center",
     borderRadius: 18,
     backgroundColor: theme.surfaceCard,
     borderWidth: 1,
@@ -3614,15 +3623,18 @@ const createStyles = (theme) => StyleSheet.create({
   },
   manageRowDivider: {
     height: 1,
-    marginHorizontal: 4,
+    marginLeft: 14,
+    marginRight: 104,
     backgroundColor: theme.surfaceBorderSoft,
   },
   manageSideButton: {
     flex: 0,
     width: 86,
-    minHeight: 46,
+    height: 72,
+    minHeight: 72,
     paddingVertical: 0,
     borderRadius: 14,
+    alignSelf: "center",
   },
   aboutStack: {
     gap: 12,
