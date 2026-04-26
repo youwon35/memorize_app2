@@ -84,7 +84,7 @@ Rebuild the dev build only when native config changes, for example:
 
 ## Admin role setup on Supabase
 
-The app keeps normal user cards private. The admin role opens an inquiry-management panel plus basic usage metrics for signed-in cloud users.
+The app keeps normal user cards private. The admin role opens an inquiry-management panel plus basic usage metrics for signed-in cloud users, including return rate and recent inquiry volume.
 
 1. Run the updated [supabase/schema.sql](./supabase/schema.sql) in your Supabase SQL editor.
 2. Sign in to the app at least once so your `user_profiles` row is created.

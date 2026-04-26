@@ -107,6 +107,8 @@ returns table (
   monthly_app_opens_30d bigint,
   avg_cards_per_user numeric,
   avg_opens_per_active_user numeric,
+  return_rate_7d numeric,
+  inquiries_last_24h bigint,
   received_inquiries bigint,
   reviewing_inquiries bigint,
   resolved_inquiries bigint,
@@ -137,6 +139,14 @@ begin
     from public.app_usage_events events
     where events.created_at >= timezone('utc', now()) - interval '30 days'
   ),
+  active_users_7d as (
+    select
+      events.user_id,
+      count(distinct timezone('utc', events.created_at)::date)::numeric as active_days
+    from public.app_usage_events events
+    where events.created_at >= timezone('utc', now()) - interval '7 days'
+    group by events.user_id
+  ),
   open_counts as (
     select
       events.user_id,
@@ -155,6 +165,23 @@ begin
     )::bigint as monthly_app_opens_30d,
     round(coalesce((select avg(card_count) from card_counts), 0), 2) as avg_cards_per_user,
     round(coalesce((select avg(open_count) from open_counts), 0), 2) as avg_opens_per_active_user,
+    round(
+      coalesce(
+        (
+          select
+            100 * count(*)::numeric / nullif((select count(*) from active_users_7d), 0)
+          from active_users_7d
+          where active_days >= 2
+        ),
+        0
+      ),
+      1
+    ) as return_rate_7d,
+    (
+      select count(*)
+      from public.support_inquiries inquiries
+      where inquiries.created_at >= timezone('utc', now()) - interval '24 hours'
+    )::bigint as inquiries_last_24h,
     (
       select count(*)
       from public.support_inquiries inquiries

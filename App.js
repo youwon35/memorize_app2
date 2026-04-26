@@ -212,6 +212,8 @@ const mapAdminDashboardMetrics = (record = {}) => ({
   monthlyAppOpens30d: Number(record.monthly_app_opens_30d ?? 0),
   avgCardsPerUser: Number(record.avg_cards_per_user ?? 0),
   avgOpensPerActiveUser: Number(record.avg_opens_per_active_user ?? 0),
+  returnRate7d: Number(record.return_rate_7d ?? 0),
+  inquiriesLast24h: Number(record.inquiries_last_24h ?? 0),
   receivedInquiries: Number(record.received_inquiries ?? 0),
   reviewingInquiries: Number(record.reviewing_inquiries ?? 0),
   resolvedInquiries: Number(record.resolved_inquiries ?? 0),
@@ -228,6 +230,7 @@ const formatMetricValue = (value) => {
     ? `${Math.round(numericValue)}`
     : numericValue.toFixed(1);
 };
+const formatMetricPercent = (value) => `${formatMetricValue(value)}%`;
 const createLocalSupportRequest = ({ replyEmail, message, category, session }) => ({
   id: `support-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   category: normalizeSupportCategory(category),
@@ -431,6 +434,16 @@ export default function App() {
         key: "opensPerUser",
         label: t("about.adminAvgOpens"),
         value: formatMetricValue(adminMetrics?.avgOpensPerActiveUser ?? 0),
+      },
+      {
+        key: "returnRate7d",
+        label: t("about.adminReturnRate7d"),
+        value: formatMetricPercent(adminMetrics?.returnRate7d ?? 0),
+      },
+      {
+        key: "inquiries24h",
+        label: t("about.adminInquiries24h"),
+        value: formatMetricValue(adminMetrics?.inquiriesLast24h ?? 0),
       },
     ],
     [adminMetrics, t]
