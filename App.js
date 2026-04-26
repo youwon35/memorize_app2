@@ -24,6 +24,7 @@ import { makeRedirectUri } from "expo-auth-session";
 import { File } from "expo-file-system";
 import * as WebBrowser from "expo-web-browser";
 
+import { APP_FEATURES } from "./src/config/features";
 import { recognizePhotoCardPairs } from "./src/lib/photo-ocr";
 import { isSupabaseConfigured, supabase } from "./src/lib/supabase";
 import {
@@ -110,7 +111,7 @@ const SAVE_INPUT_OPTIONS = [
   { key: "single", labelKey: "saveModes.single", icon: "cards-outline" },
   { key: "text", labelKey: "saveModes.text", icon: "file-document-plus-outline" },
   { key: "photo", labelKey: "saveModes.photo", icon: "camera-outline" },
-];
+].filter((option) => APP_FEATURES.photoImport || option.key !== "photo");
 const STAR_FIELD = [
   { top: 34, left: 28, size: 4, opacity: 0.45 },
   { top: 112, right: 44, size: 6, opacity: 0.32 },
@@ -1030,6 +1031,13 @@ export default function App() {
     setPhotoImportNotice("");
   };
 
+  useEffect(() => {
+    if (!APP_FEATURES.photoImport && saveInputMode === "photo") {
+      setSaveInputMode("single");
+      resetPhotoImportState();
+    }
+  }, [saveInputMode]);
+
   const readPairsFromPhotoAsset = async (asset) => {
     if (!asset?.uri) {
       throw new Error(t("alerts.photoUnreadable"));
@@ -1757,7 +1765,7 @@ export default function App() {
         </View>
       ) : null}
 
-      {saveInputMode === "photo" ? (
+      {APP_FEATURES.photoImport && saveInputMode === "photo" ? (
         <View style={styles.importPanel}>
           <View style={styles.importHeader}>
             <View style={styles.importTitleRow}>

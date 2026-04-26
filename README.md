@@ -84,6 +84,9 @@ Rebuild the dev build only when native config changes, for example:
 
 ## Cloud OCR setup for Korean / Japanese / English handwriting
 
+The photo import scaffold is currently kept in the codebase but hidden from the app UI.
+To bring it back later, flip `photoImport` to `true` in [src/config/features.js](./src/config/features.js).
+
 The app now tries `Google Cloud Vision OCR` first for photo card import, and falls back to on-device OCR only if the cloud function is not available.
 
 1. In Google Cloud Console, create or choose a project.
