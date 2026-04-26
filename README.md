@@ -82,6 +82,25 @@ Rebuild the dev build only when native config changes, for example:
 6. Add `memoria://auth/callback` to the Supabase redirect allow list.
 7. Add the same redirect URI to your Google / Supabase auth setup before testing a dev build or APK.
 
+## Admin role setup on Supabase
+
+The app keeps normal user cards private. The admin role currently opens an inquiry-management panel only.
+
+1. Run the updated [supabase/schema.sql](./supabase/schema.sql) in your Supabase SQL editor.
+2. Sign in to the app at least once so your `user_profiles` row is created.
+3. In Supabase SQL editor, promote your own account:
+
+```sql
+insert into public.user_profiles (id, email, role)
+values ('YOUR_AUTH_USER_UUID', 'your-email@example.com', 'admin')
+on conflict (id) do update
+set role = 'admin',
+    email = excluded.email,
+    updated_at = timezone('utc', now());
+```
+
+4. Reopen the app. The `앱 정보` tab will show the admin inquiry inbox, where you can review all support requests and update their status.
+
 ## Cloud OCR setup for Korean / Japanese / English handwriting
 
 The photo import scaffold is currently kept in the codebase but hidden from the app UI.

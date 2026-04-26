@@ -71,6 +71,8 @@ const DEFAULT_QUIZ_COUNT = 10;
 const MAX_SESSION_HISTORY = 60;
 const SUPPORT_EMAIL = ["youwon35", "naver.com"].join("@");
 const SUPPORT_CATEGORY_OPTIONS = ["bug", "feature", "other"];
+const SUPPORT_STATUS_OPTIONS = ["received", "reviewing", "resolved"];
+const ADMIN_SUPPORT_PREVIEW_LIMIT = 12;
 const MANAGE_SORT_OPTIONS = [
   { key: "recent", labelKey: "manage.sortRecent" },
   { key: "alphabetical", labelKey: "manage.sortAlphabetical" },
@@ -210,13 +212,16 @@ const calculateMissRate = (cardStats = {}) => {
 
   return (cardStats?.incorrect ?? 0) / attempts;
 };
+const normalizeUserRole = (value) => (value === "admin" ? "admin" : "user");
 const createLocalSupportRequest = ({ replyEmail, message, category, session }) => ({
   id: `support-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   category: normalizeSupportCategory(category),
   replyEmail: replyEmail.trim(),
   message: message.trim(),
   userEmail: session?.user?.email ?? null,
+  userId: session?.user?.id ?? null,
   createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
   status: "received",
   source: "local",
 });
@@ -226,7 +231,9 @@ const mapSupportInquiryRecord = (record) => ({
   replyEmail: record.reply_email ?? "",
   message: record.message ?? "",
   userEmail: record.sender_email ?? null,
+  userId: record.user_id ?? null,
   createdAt: record.created_at ?? new Date().toISOString(),
+  updatedAt: record.updated_at ?? record.created_at ?? new Date().toISOString(),
   status: normalizeSupportStatus(record.status),
   source: "cloud",
 });
@@ -268,6 +275,7 @@ export default function App() {
   const [tutorialReady, setTutorialReady] = useState(false);
   const [tutorialVisible, setTutorialVisible] = useState(false);
   const [session, setSession] = useState(null);
+  const [userRole, setUserRole] = useState("user");
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
   const [authBusy, setAuthBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -300,6 +308,10 @@ export default function App() {
   const [supportRequests, setSupportRequests] = useState([]);
   const [supportSending, setSupportSending] = useState(false);
   const [supportNotice, setSupportNotice] = useState("");
+  const [adminSupportRequests, setAdminSupportRequests] = useState([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminUpdatingId, setAdminUpdatingId] = useState(null);
+  const [adminNotice, setAdminNotice] = useState("");
   const [launchVisible, setLaunchVisible] = useState(true);
 
   const timerRef = useRef(null);
@@ -326,6 +338,7 @@ export default function App() {
       ? t("about.authRemoteTitle")
       : t("about.authLocalTitle");
   const authCaption = syncing ? t("notes.syncing") : note;
+  const isAdmin = userRole === "admin";
   const hasSavedCards = pairs.length > 0;
   const quizModeConfig = getQuizModeConfig(quizMode);
   const maxQuizCount = pairs.length ? pairs.length * (quizMode === "both" ? 2 : 1) : 0;
@@ -363,6 +376,20 @@ export default function App() {
   }, [deck, roundIncorrectIds]);
   const roundCorrectCount = deck.length - roundIncorrectCards.length;
   const latestSupportRequests = useMemo(() => supportRequests.slice(0, 3), [supportRequests]);
+  const latestAdminSupportRequests = useMemo(
+    () => adminSupportRequests.slice(0, ADMIN_SUPPORT_PREVIEW_LIMIT),
+    [adminSupportRequests]
+  );
+  const adminSupportCounts = useMemo(
+    () =>
+      SUPPORT_STATUS_OPTIONS.reduce((counts, status) => {
+        counts[status] = adminSupportRequests.filter(
+          (item) => normalizeSupportStatus(item.status) === status
+        ).length;
+        return counts;
+      }, {}),
+    [adminSupportRequests]
+  );
   const photoPreviewPairs = useMemo(() => photoImportedPairs.slice(0, 6), [photoImportedPairs]);
   const todayKey = getLocalDayKey(new Date());
   const todaySessions = useMemo(
@@ -661,6 +688,57 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
+    if (!session?.user?.id) {
+      setUserRole("user");
+      setAdminSupportRequests([]);
+      setAdminNotice("");
+      return;
+    }
+
+    let active = true;
+
+    const syncProfile = async () => {
+      try {
+        const response = await supabase
+          .from("user_profiles")
+          .upsert(
+            {
+              id: session.user.id,
+              email: session.user.email ?? null,
+            },
+            { onConflict: "id" }
+          )
+          .select("role")
+          .single();
+
+        if (!active) {
+          return;
+        }
+
+        if (response.error) {
+          throw response.error;
+        }
+
+        setUserRole(normalizeUserRole(response.data?.role));
+      } catch {
+        if (active) {
+          setUserRole("user");
+        }
+      }
+    };
+
+    void syncProfile();
+
+    return () => {
+      active = false;
+    };
+  }, [session?.user?.email, session?.user?.id]);
+
+  useEffect(() => {
     if (!storageReady || !session?.user?.id || !supabase) {
       return;
     }
@@ -743,6 +821,7 @@ export default function App() {
         const response = await supabase
           .from("support_inquiries")
           .select("*")
+          .eq("user_id", session.user.id)
           .order("created_at", { ascending: false });
 
         if (response.error) {
@@ -767,6 +846,54 @@ export default function App() {
       active = false;
     };
   }, [storageReady, session?.user?.id]);
+
+  useEffect(() => {
+    if (!storageReady || !session?.user?.id || !supabase || !isAdmin) {
+      setAdminSupportRequests([]);
+      setAdminLoading(false);
+      setAdminNotice("");
+      return;
+    }
+
+    let active = true;
+
+    const syncAdminSupportRequests = async () => {
+      setAdminLoading(true);
+      setAdminNotice("");
+
+      try {
+        const response = await supabase
+          .from("support_inquiries")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(ADMIN_SUPPORT_PREVIEW_LIMIT);
+
+        if (response.error) {
+          throw response.error;
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setAdminSupportRequests((response.data ?? []).map(mapSupportInquiryRecord));
+      } catch (error) {
+        if (active) {
+          setAdminNotice(error?.message || t("about.adminLoadFail"));
+        }
+      } finally {
+        if (active) {
+          setAdminLoading(false);
+        }
+      }
+    };
+
+    void syncAdminSupportRequests();
+
+    return () => {
+      active = false;
+    };
+  }, [isAdmin, storageReady, session?.user?.id, t]);
 
   useEffect(() => {
     const pulse = Animated.loop(
@@ -861,6 +988,33 @@ export default function App() {
 
   const addSupportRequest = (nextRequest) => {
     setSupportRequests((currentRequests) => mergeSupportRequests([nextRequest], currentRequests));
+  };
+
+  const refreshAdminSupportRequests = async () => {
+    if (!supabase || !session?.user?.id || !isAdmin) {
+      return;
+    }
+
+    setAdminLoading(true);
+    setAdminNotice("");
+
+    try {
+      const response = await supabase
+        .from("support_inquiries")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(ADMIN_SUPPORT_PREVIEW_LIMIT);
+
+      if (response.error) {
+        throw response.error;
+      }
+
+      setAdminSupportRequests((response.data ?? []).map(mapSupportInquiryRecord));
+    } catch (error) {
+      setAdminNotice(error?.message || t("about.adminLoadFail"));
+    } finally {
+      setAdminLoading(false);
+    }
   };
 
   const closeTutorial = (nextTab = null) => {
@@ -1307,6 +1461,11 @@ export default function App() {
       }
 
       addSupportRequest(nextRequest);
+      if (cloudSaved && isAdmin) {
+        setAdminSupportRequests((currentRequests) =>
+          mergeSupportRequests([nextRequest], currentRequests)
+        );
+      }
       setSupportMessage("");
       setSupportNotice(
         cloudSaved
@@ -1317,6 +1476,46 @@ export default function App() {
       setSupportNotice(error?.message || t("about.supportFail"));
     } finally {
       setSupportSending(false);
+    }
+  };
+
+  const updateAdminSupportStatus = async (requestId, nextStatus) => {
+    if (!supabase || !session?.user?.id || !isAdmin) {
+      return;
+    }
+
+    setAdminUpdatingId(requestId);
+    setAdminNotice("");
+
+    try {
+      const response = await supabase
+        .from("support_inquiries")
+        .update({ status: nextStatus })
+        .eq("id", requestId)
+        .select()
+        .single();
+
+      if (response.error) {
+        throw response.error;
+      }
+
+      const updatedRequest = mapSupportInquiryRecord(response.data);
+
+      setAdminSupportRequests((currentRequests) =>
+        mergeSupportRequests([updatedRequest], currentRequests)
+      );
+
+      if (updatedRequest.userId === session.user.id) {
+        setSupportRequests((currentRequests) =>
+          mergeSupportRequests([updatedRequest], currentRequests)
+        );
+      }
+
+      setAdminNotice(t("about.adminStateChanged"));
+    } catch (error) {
+      setAdminNotice(error?.message || t("about.adminStateChangeFail"));
+    } finally {
+      setAdminUpdatingId(null);
     }
   };
 
@@ -2525,6 +2724,11 @@ export default function App() {
             <View style={styles.flex}>
               <Text style={styles.syncTitle}>{authTitle}</Text>
               <Text style={styles.syncCaption}>{authCaption}</Text>
+              {isAdmin ? (
+                <View style={styles.adminRoleBadge}>
+                  <Text style={styles.adminRoleBadgeText}>{t("about.roleAdmin")}</Text>
+                </View>
+              ) : null}
             </View>
           </View>
           <Pressable
@@ -2737,6 +2941,113 @@ export default function App() {
             </View>
           ) : null}
         </View>
+
+        {isAdmin ? (
+          <View style={styles.settingsCard}>
+            <View style={styles.settingsHeaderRow}>
+              <View style={styles.flex}>
+                <Text style={styles.settingsTitle}>{t("about.adminTitle")}</Text>
+                <Text style={styles.settingsBody}>{t("about.adminBody")}</Text>
+              </View>
+
+              <Pressable
+                disabled={adminLoading}
+                onPress={() => void refreshAdminSupportRequests()}
+                style={({ pressed }) => [
+                  styles.inlineActionButton,
+                  adminLoading && styles.primaryButtonDisabled,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.inlineActionButtonText}>
+                  {adminLoading ? t("about.adminLoadingShort") : t("about.adminRefresh")}
+                </Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.supportCategoryRow}>
+              {SUPPORT_STATUS_OPTIONS.map((status) => (
+                <View key={status} style={styles.adminSummaryChip}>
+                  <Text style={styles.adminSummaryLabel}>{t(`supportStatuses.${status}`)}</Text>
+                  <Text style={styles.adminSummaryValue}>{adminSupportCounts[status] ?? 0}</Text>
+                </View>
+              ))}
+            </View>
+
+            {adminNotice ? <Text style={styles.supportNotice}>{adminNotice}</Text> : null}
+
+            {latestAdminSupportRequests.length ? (
+              <View style={styles.supportHistory}>
+                {latestAdminSupportRequests.map((item) => {
+                  const currentStatus = normalizeSupportStatus(item.status);
+
+                  return (
+                    <View key={item.id} style={styles.supportHistoryItem}>
+                      <View style={styles.supportHistoryMeta}>
+                        <View style={styles.supportHistoryLead}>
+                          <Text style={styles.supportHistoryCategory}>
+                            {t(`supportCategories.${normalizeSupportCategory(item.category)}`)}
+                          </Text>
+                          <Text style={styles.supportHistoryStatus}>
+                            {t(`supportStatuses.${currentStatus}`)}
+                          </Text>
+                        </View>
+                        <Text style={styles.supportHistoryDate}>
+                          {formatDateTimeForLanguage(item.createdAt, language)}
+                        </Text>
+                      </View>
+
+                      <Text style={styles.supportHistoryEmail}>
+                        {t("about.adminReplyEmail")}: {item.replyEmail}
+                      </Text>
+                      {item.userEmail ? (
+                        <Text style={styles.supportHistorySubtle}>
+                          {t("about.adminAccount")}: {item.userEmail}
+                        </Text>
+                      ) : null}
+                      <Text style={styles.supportHistoryMessage} numberOfLines={4}>
+                        {item.message}
+                      </Text>
+
+                      <View style={styles.supportCategoryRow}>
+                        {SUPPORT_STATUS_OPTIONS.map((status) => {
+                          const active = currentStatus === status;
+
+                          return (
+                            <Pressable
+                              key={`${item.id}-${status}`}
+                              disabled={adminUpdatingId === item.id}
+                              onPress={() => void updateAdminSupportStatus(item.id, status)}
+                              style={({ pressed }) => [
+                                styles.supportCategoryChip,
+                                active && styles.supportCategoryChipActive,
+                                adminUpdatingId === item.id && styles.primaryButtonDisabled,
+                                pressed && styles.pressed,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.supportCategoryChipText,
+                                  active && styles.supportCategoryChipTextActive,
+                                ]}
+                              >
+                                {t(`supportStatuses.${status}`)}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : (
+              <Text style={styles.settingsBody}>
+                {adminLoading ? t("about.adminLoading") : t("about.adminEmpty")}
+              </Text>
+            )}
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -3836,6 +4147,12 @@ const createStyles = (theme) => StyleSheet.create({
   settingsHeader: {
     gap: 6,
   },
+  settingsHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
   settingsTitle: {
     fontSize: 17,
     fontWeight: "800",
@@ -3958,6 +4275,41 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  adminRoleBadge: {
+    alignSelf: "flex-start",
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: theme.accentSoft,
+    borderWidth: 1,
+    borderColor: theme.accent,
+  },
+  adminRoleBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: theme.accent,
+  },
+  adminSummaryChip: {
+    minWidth: 82,
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  adminSummaryLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: theme.textSecondary,
+  },
+  adminSummaryValue: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
   supportForm: {
     gap: 12,
   },
@@ -4056,6 +4408,10 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     color: theme.textPrimary,
+  },
+  supportHistorySubtle: {
+    fontSize: 12,
+    color: theme.textMuted,
   },
   supportHistoryMessage: {
     fontSize: 13,
