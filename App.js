@@ -123,13 +123,6 @@ const STAR_FIELD = [
   { top: 520, left: 24, size: 3, opacity: 0.24 },
   { top: 640, right: 26, size: 4, opacity: 0.2 },
 ];
-const IMPORT_PREVIEW_LINES = [
-  { no: "1", text: "sun", tone: "front" },
-  { no: "2", text: "해", tone: "back" },
-  { no: "3", text: "", tone: "blank" },
-  { no: "4", text: "moon", tone: "front" },
-  { no: "5", text: "달", tone: "back" },
-];
 const DARK_THEME = {
   mode: "dark",
   appBg: "#070B16",
@@ -213,6 +206,28 @@ const calculateMissRate = (cardStats = {}) => {
   return (cardStats?.incorrect ?? 0) / attempts;
 };
 const normalizeUserRole = (value) => (value === "admin" ? "admin" : "user");
+const mapAdminDashboardMetrics = (record = {}) => ({
+  totalUsers: Number(record.total_users ?? 0),
+  activeUsers30d: Number(record.active_users_30d ?? 0),
+  monthlyAppOpens30d: Number(record.monthly_app_opens_30d ?? 0),
+  avgCardsPerUser: Number(record.avg_cards_per_user ?? 0),
+  avgOpensPerActiveUser: Number(record.avg_opens_per_active_user ?? 0),
+  receivedInquiries: Number(record.received_inquiries ?? 0),
+  reviewingInquiries: Number(record.reviewing_inquiries ?? 0),
+  resolvedInquiries: Number(record.resolved_inquiries ?? 0),
+  unresolvedInquiries: Number(record.unresolved_inquiries ?? 0),
+});
+const formatMetricValue = (value) => {
+  const numericValue = Number(value ?? 0);
+
+  if (!Number.isFinite(numericValue)) {
+    return "0";
+  }
+
+  return Math.abs(numericValue - Math.round(numericValue)) < 0.05
+    ? `${Math.round(numericValue)}`
+    : numericValue.toFixed(1);
+};
 const createLocalSupportRequest = ({ replyEmail, message, category, session }) => ({
   id: `support-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   category: normalizeSupportCategory(category),
@@ -293,7 +308,6 @@ export default function App() {
   const [answer, setAnswer] = useState("");
   const [feedback, setFeedback] = useState("");
   const [result, setResult] = useState(null);
-  const [showAnswer, setShowAnswer] = useState(false);
   const [importing, setImporting] = useState(false);
   const [photoImporting, setPhotoImporting] = useState(false);
   const [photoAsset, setPhotoAsset] = useState(null);
@@ -309,6 +323,8 @@ export default function App() {
   const [supportSending, setSupportSending] = useState(false);
   const [supportNotice, setSupportNotice] = useState("");
   const [adminSupportRequests, setAdminSupportRequests] = useState([]);
+  const [adminMetrics, setAdminMetrics] = useState(null);
+  const [adminOnlyUnresolved, setAdminOnlyUnresolved] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminUpdatingId, setAdminUpdatingId] = useState(null);
   const [adminNotice, setAdminNotice] = useState("");
@@ -318,7 +334,7 @@ export default function App() {
   const scrollRef = useRef(null);
   const pairsRef = useRef(pairs);
   const studyStatsRef = useRef(studyStats);
-  const supportRequestsRef = useRef([]);
+  const appOpenTrackedUserRef = useRef(null);
   const roundMetaRef = useRef(null);
   const roundSnapshotRef = useRef(null);
   const bootStartedAt = useRef(Date.now());
@@ -381,14 +397,53 @@ export default function App() {
     [adminSupportRequests]
   );
   const adminSupportCounts = useMemo(
-    () =>
-      SUPPORT_STATUS_OPTIONS.reduce((counts, status) => {
-        counts[status] = adminSupportRequests.filter(
-          (item) => normalizeSupportStatus(item.status) === status
-        ).length;
-        return counts;
-      }, {}),
-    [adminSupportRequests]
+    () => ({
+      received: adminMetrics?.receivedInquiries ?? 0,
+      reviewing: adminMetrics?.reviewingInquiries ?? 0,
+      resolved: adminMetrics?.resolvedInquiries ?? 0,
+      unresolved: adminMetrics?.unresolvedInquiries ?? 0,
+    }),
+    [adminMetrics]
+  );
+  const adminMetricCards = useMemo(
+    () => [
+      {
+        key: "users",
+        label: t("about.adminUsers"),
+        value: formatMetricValue(adminMetrics?.totalUsers ?? 0),
+      },
+      {
+        key: "active",
+        label: t("about.adminActiveUsers"),
+        value: formatMetricValue(adminMetrics?.activeUsers30d ?? 0),
+      },
+      {
+        key: "opens",
+        label: t("about.adminMonthlyOpens"),
+        value: formatMetricValue(adminMetrics?.monthlyAppOpens30d ?? 0),
+      },
+      {
+        key: "cards",
+        label: t("about.adminAvgCards"),
+        value: formatMetricValue(adminMetrics?.avgCardsPerUser ?? 0),
+      },
+      {
+        key: "opensPerUser",
+        label: t("about.adminAvgOpens"),
+        value: formatMetricValue(adminMetrics?.avgOpensPerActiveUser ?? 0),
+      },
+    ],
+    [adminMetrics, t]
+  );
+  const importPreviewLines = useMemo(
+    () => [
+      { no: "1", text: t("save.textImportExampleFrontOne"), tone: "front" },
+      { no: "2", text: t("save.textImportExampleBackOne"), tone: "back" },
+      { no: "3", text: "", tone: "blank" },
+      { no: "4", text: t("save.textImportExampleFrontTwo"), tone: "front" },
+      { no: "5", text: t("save.textImportExampleBackTwo"), tone: "back" },
+    ],
+    [t]
   );
   const photoPreviewPairs = useMemo(() => photoImportedPairs.slice(0, 6), [photoImportedPairs]);
   const todayKey = getLocalDayKey(new Date());
@@ -510,6 +565,57 @@ export default function App() {
     studyStats.sessions.length > 0 ||
     Object.values(studyStats.cards).some((item) => (item.attempts ?? 0) > 0);
 
+  async function refreshAdminDashboard({
+    openOnly = adminOnlyUnresolved,
+    preserveNotice = false,
+  } = {}) {
+    if (!supabase || !session?.user?.id || !isAdmin) {
+      return;
+    }
+
+    setAdminLoading(true);
+
+    if (!preserveNotice) {
+      setAdminNotice("");
+    }
+
+    try {
+      let inquiryQuery = supabase
+        .from("support_inquiries")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(ADMIN_SUPPORT_PREVIEW_LIMIT);
+
+      if (openOnly) {
+        inquiryQuery = inquiryQuery.neq("status", "resolved");
+      }
+
+      const [metricsResponse, inquiriesResponse] = await Promise.all([
+        supabase.rpc("get_admin_dashboard_metrics"),
+        inquiryQuery,
+      ]);
+
+      if (metricsResponse.error) {
+        throw metricsResponse.error;
+      }
+
+      if (inquiriesResponse.error) {
+        throw inquiriesResponse.error;
+      }
+
+      const metricRecord = Array.isArray(metricsResponse.data)
+        ? metricsResponse.data[0]
+        : metricsResponse.data;
+
+      setAdminMetrics(mapAdminDashboardMetrics(metricRecord));
+      setAdminSupportRequests((inquiriesResponse.data ?? []).map(mapSupportInquiryRecord));
+    } catch (error) {
+      setAdminNotice(error?.message || t("about.adminLoadFail"));
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
   useEffect(() => {
     pairsRef.current = pairs;
   }, [pairs]);
@@ -517,10 +623,6 @@ export default function App() {
   useEffect(() => {
     studyStatsRef.current = studyStats;
   }, [studyStats]);
-
-  useEffect(() => {
-    supportRequestsRef.current = supportRequests;
-  }, [supportRequests]);
 
   useEffect(() => {
     if (session?.user?.email) {
@@ -743,6 +845,47 @@ export default function App() {
       return;
     }
 
+    if (__DEV__) {
+      return;
+    }
+
+    if (appOpenTrackedUserRef.current === session.user.id) {
+      return;
+    }
+
+    let active = true;
+
+    const trackAppOpen = async () => {
+      try {
+        const response = await supabase.from("app_usage_events").insert({
+          user_id: session.user.id,
+          event_type: "app_open",
+        });
+
+        if (response.error) {
+          throw response.error;
+        }
+      } catch {
+        // Metrics should never block the main app flow.
+      } finally {
+        if (active) {
+          appOpenTrackedUserRef.current = session.user.id;
+        }
+      }
+    };
+
+    void trackAppOpen();
+
+    return () => {
+      active = false;
+    };
+  }, [storageReady, session?.user?.id]);
+
+  useEffect(() => {
+    if (!storageReady || !session?.user?.id || !supabase) {
+      return;
+    }
+
     let active = true;
 
     const sync = async () => {
@@ -849,51 +992,15 @@ export default function App() {
 
   useEffect(() => {
     if (!storageReady || !session?.user?.id || !supabase || !isAdmin) {
+      setAdminMetrics(null);
       setAdminSupportRequests([]);
       setAdminLoading(false);
       setAdminNotice("");
       return;
     }
 
-    let active = true;
-
-    const syncAdminSupportRequests = async () => {
-      setAdminLoading(true);
-      setAdminNotice("");
-
-      try {
-        const response = await supabase
-          .from("support_inquiries")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(ADMIN_SUPPORT_PREVIEW_LIMIT);
-
-        if (response.error) {
-          throw response.error;
-        }
-
-        if (!active) {
-          return;
-        }
-
-        setAdminSupportRequests((response.data ?? []).map(mapSupportInquiryRecord));
-      } catch (error) {
-        if (active) {
-          setAdminNotice(error?.message || t("about.adminLoadFail"));
-        }
-      } finally {
-        if (active) {
-          setAdminLoading(false);
-        }
-      }
-    };
-
-    void syncAdminSupportRequests();
-
-    return () => {
-      active = false;
-    };
-  }, [isAdmin, storageReady, session?.user?.id, t]);
+    void refreshAdminDashboard({ openOnly: adminOnlyUnresolved });
+  }, [adminOnlyUnresolved, isAdmin, storageReady, session?.user?.id, t]);
 
   useEffect(() => {
     const pulse = Animated.loop(
@@ -965,7 +1072,6 @@ export default function App() {
     setAnswer("");
     setFeedback("");
     setResult(null);
-    setShowAnswer(false);
     setRoundComplete(false);
     setRoundIncorrectIds([]);
     roundMetaRef.current = null;
@@ -988,33 +1094,6 @@ export default function App() {
 
   const addSupportRequest = (nextRequest) => {
     setSupportRequests((currentRequests) => mergeSupportRequests([nextRequest], currentRequests));
-  };
-
-  const refreshAdminSupportRequests = async () => {
-    if (!supabase || !session?.user?.id || !isAdmin) {
-      return;
-    }
-
-    setAdminLoading(true);
-    setAdminNotice("");
-
-    try {
-      const response = await supabase
-        .from("support_inquiries")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(ADMIN_SUPPORT_PREVIEW_LIMIT);
-
-      if (response.error) {
-        throw response.error;
-      }
-
-      setAdminSupportRequests((response.data ?? []).map(mapSupportInquiryRecord));
-    } catch (error) {
-      setAdminNotice(error?.message || t("about.adminLoadFail"));
-    } finally {
-      setAdminLoading(false);
-    }
   };
 
   const closeTutorial = (nextTab = null) => {
@@ -1352,7 +1431,6 @@ export default function App() {
     setAnswer("");
     setFeedback("");
     setResult(null);
-    setShowAnswer(false);
     setRoundComplete(false);
     setRoundIncorrectIds([]);
     roundMetaRef.current = {
@@ -1410,7 +1488,6 @@ export default function App() {
     setAnswer("");
     setFeedback("");
     setResult(null);
-    setShowAnswer(false);
     setRoundComplete(false);
     setRoundIncorrectIds([]);
   };
@@ -1462,9 +1539,10 @@ export default function App() {
 
       addSupportRequest(nextRequest);
       if (cloudSaved && isAdmin) {
-        setAdminSupportRequests((currentRequests) =>
-          mergeSupportRequests([nextRequest], currentRequests)
-        );
+        void refreshAdminDashboard({
+          openOnly: adminOnlyUnresolved,
+          preserveNotice: true,
+        });
       }
       setSupportMessage("");
       setSupportNotice(
@@ -1512,6 +1590,10 @@ export default function App() {
       }
 
       setAdminNotice(t("about.adminStateChanged"));
+      await refreshAdminDashboard({
+        openOnly: adminOnlyUnresolved,
+        preserveNotice: true,
+      });
     } catch (error) {
       setAdminNotice(error?.message || t("about.adminStateChangeFail"));
     } finally {
@@ -1618,7 +1700,6 @@ export default function App() {
     setAnswer("");
     setFeedback("");
     setResult(null);
-    setShowAnswer(false);
 
     if (quizIndex + 1 >= deck.length) {
       finalizeRound(incorrectIds);
@@ -1659,7 +1740,6 @@ export default function App() {
       clearTimeout(timerRef.current);
       setResult("warning");
       setFeedback(t("quiz.feedbackEmpty"));
-      setShowAnswer(false);
       return;
     }
 
@@ -1675,7 +1755,6 @@ export default function App() {
     updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, false));
     setResult("incorrect");
     setFeedback(t("quiz.feedbackIncorrect"));
-    setShowAnswer(false);
     setRoundIncorrectIds(nextIncorrectIds);
     timerRef.current = setTimeout(() => goNext(nextIncorrectIds), 900);
   };
@@ -1934,7 +2013,7 @@ export default function App() {
                 <Text style={styles.importPreviewFileName}>cards-example.txt</Text>
               </View>
               <View style={styles.importPreviewSheet}>
-                {IMPORT_PREVIEW_LINES.map((line) => (
+                {importPreviewLines.map((line) => (
                   <View key={`${line.no}-${line.text || "blank"}`} style={styles.importPreviewLine}>
                     <Text style={styles.importPreviewLineNo}>{line.no}</Text>
                     <Text
@@ -2248,7 +2327,9 @@ export default function App() {
               </Text>
             ) : null}
 
-            {showAnswer ? <Text style={styles.answerText}>{t("quiz.answerPrefix", { answer: current.answer })}</Text> : null}
+            {result === "incorrect" ? (
+              <Text style={styles.answerText}>{t("quiz.answerPrefix", { answer: current.answer })}</Text>
+            ) : null}
 
             <View style={styles.actionRow}>
               <Pressable onPress={submitAnswer} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
@@ -2943,110 +3024,176 @@ export default function App() {
         </View>
 
         {isAdmin ? (
-          <View style={styles.settingsCard}>
-            <View style={styles.settingsHeaderRow}>
-              <View style={styles.flex}>
-                <Text style={styles.settingsTitle}>{t("about.adminTitle")}</Text>
-                <Text style={styles.settingsBody}>{t("about.adminBody")}</Text>
+          <>
+            <View style={styles.settingsCard}>
+              <View style={styles.settingsHeader}>
+                <Text style={styles.settingsTitle}>{t("about.adminMetricsTitle")}</Text>
+                <Text style={styles.settingsBody}>{t("about.adminMetricsBody")}</Text>
               </View>
 
-              <Pressable
-                disabled={adminLoading}
-                onPress={() => void refreshAdminSupportRequests()}
-                style={({ pressed }) => [
-                  styles.inlineActionButton,
-                  adminLoading && styles.primaryButtonDisabled,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={styles.inlineActionButtonText}>
-                  {adminLoading ? t("about.adminLoadingShort") : t("about.adminRefresh")}
-                </Text>
-              </Pressable>
+              <View style={styles.adminMetricsGrid}>
+                {adminMetricCards.map((item) => (
+                  <View key={item.key} style={styles.adminMetricCard}>
+                    <Text style={styles.adminMetricValue}>{item.value}</Text>
+                    <Text style={styles.adminMetricLabel}>{item.label}</Text>
+                  </View>
+                ))}
+              </View>
             </View>
 
-            <View style={styles.supportCategoryRow}>
-              {SUPPORT_STATUS_OPTIONS.map((status) => (
-                <View key={status} style={styles.adminSummaryChip}>
-                  <Text style={styles.adminSummaryLabel}>{t(`supportStatuses.${status}`)}</Text>
-                  <Text style={styles.adminSummaryValue}>{adminSupportCounts[status] ?? 0}</Text>
+            <View style={styles.settingsCard}>
+              <View style={styles.settingsHeaderRow}>
+                <View style={styles.flex}>
+                  <Text style={styles.settingsTitle}>{t("about.adminTitle")}</Text>
+                  <Text style={styles.settingsBody}>{t("about.adminBody")}</Text>
                 </View>
-              ))}
-            </View>
 
-            {adminNotice ? <Text style={styles.supportNotice}>{adminNotice}</Text> : null}
+                <Pressable
+                  disabled={adminLoading}
+                  onPress={() =>
+                    void refreshAdminDashboard({
+                      openOnly: adminOnlyUnresolved,
+                    })
+                  }
+                  style={({ pressed }) => [
+                    styles.inlineActionButton,
+                    adminLoading && styles.primaryButtonDisabled,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.inlineActionButtonText}>
+                    {adminLoading ? t("about.adminLoadingShort") : t("about.adminRefresh")}
+                  </Text>
+                </Pressable>
+              </View>
 
-            {latestAdminSupportRequests.length ? (
-              <View style={styles.supportHistory}>
-                {latestAdminSupportRequests.map((item) => {
-                  const currentStatus = normalizeSupportStatus(item.status);
+              <View style={styles.supportCategoryRow}>
+                {[
+                  { key: "received", label: t("supportStatuses.received") },
+                  { key: "reviewing", label: t("supportStatuses.reviewing") },
+                  { key: "unresolved", label: t("about.adminFilterUnresolved") },
+                ].map((status) => (
+                  <View key={status.key} style={styles.adminSummaryChip}>
+                    <Text style={styles.adminSummaryLabel}>{status.label}</Text>
+                    <Text style={styles.adminSummaryValue}>{adminSupportCounts[status.key] ?? 0}</Text>
+                  </View>
+                ))}
+              </View>
 
-                  return (
-                    <View key={item.id} style={styles.supportHistoryItem}>
-                      <View style={styles.supportHistoryMeta}>
-                        <View style={styles.supportHistoryLead}>
-                          <Text style={styles.supportHistoryCategory}>
-                            {t(`supportCategories.${normalizeSupportCategory(item.category)}`)}
-                          </Text>
-                          <Text style={styles.supportHistoryStatus}>
-                            {t(`supportStatuses.${currentStatus}`)}
+              <View style={styles.supportField}>
+                <Text style={styles.supportLabel}>{t("about.adminFilterTitle")}</Text>
+                <View style={styles.supportCategoryRow}>
+                  <Pressable
+                    onPress={() => setAdminOnlyUnresolved(false)}
+                    style={({ pressed }) => [
+                      styles.supportCategoryChip,
+                      !adminOnlyUnresolved && styles.supportCategoryChipActive,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.supportCategoryChipText,
+                        !adminOnlyUnresolved && styles.supportCategoryChipTextActive,
+                      ]}
+                    >
+                      {t("about.adminFilterAll")}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setAdminOnlyUnresolved(true)}
+                    style={({ pressed }) => [
+                      styles.supportCategoryChip,
+                      adminOnlyUnresolved && styles.supportCategoryChipActive,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.supportCategoryChipText,
+                        adminOnlyUnresolved && styles.supportCategoryChipTextActive,
+                      ]}
+                    >
+                      {t("about.adminFilterUnresolved")}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {adminNotice ? <Text style={styles.supportNotice}>{adminNotice}</Text> : null}
+
+              {latestAdminSupportRequests.length ? (
+                <View style={styles.supportHistory}>
+                  {latestAdminSupportRequests.map((item) => {
+                    const currentStatus = normalizeSupportStatus(item.status);
+
+                    return (
+                      <View key={item.id} style={styles.supportHistoryItem}>
+                        <View style={styles.supportHistoryMeta}>
+                          <View style={styles.supportHistoryLead}>
+                            <Text style={styles.supportHistoryCategory}>
+                              {t(`supportCategories.${normalizeSupportCategory(item.category)}`)}
+                            </Text>
+                            <Text style={styles.supportHistoryStatus}>
+                              {t(`supportStatuses.${currentStatus}`)}
+                            </Text>
+                          </View>
+                          <Text style={styles.supportHistoryDate}>
+                            {formatDateTimeForLanguage(item.createdAt, language)}
                           </Text>
                         </View>
-                        <Text style={styles.supportHistoryDate}>
-                          {formatDateTimeForLanguage(item.createdAt, language)}
+
+                        <Text style={styles.supportHistoryEmail}>
+                          {t("about.adminReplyEmail")}: {item.replyEmail}
                         </Text>
-                      </View>
-
-                      <Text style={styles.supportHistoryEmail}>
-                        {t("about.adminReplyEmail")}: {item.replyEmail}
-                      </Text>
-                      {item.userEmail ? (
-                        <Text style={styles.supportHistorySubtle}>
-                          {t("about.adminAccount")}: {item.userEmail}
+                        {item.userEmail ? (
+                          <Text style={styles.supportHistorySubtle}>
+                            {t("about.adminAccount")}: {item.userEmail}
+                          </Text>
+                        ) : null}
+                        <Text style={styles.supportHistoryMessage} numberOfLines={4}>
+                          {item.message}
                         </Text>
-                      ) : null}
-                      <Text style={styles.supportHistoryMessage} numberOfLines={4}>
-                        {item.message}
-                      </Text>
 
-                      <View style={styles.supportCategoryRow}>
-                        {SUPPORT_STATUS_OPTIONS.map((status) => {
-                          const active = currentStatus === status;
+                        <View style={styles.supportCategoryRow}>
+                          {SUPPORT_STATUS_OPTIONS.map((status) => {
+                            const active = currentStatus === status;
 
-                          return (
-                            <Pressable
-                              key={`${item.id}-${status}`}
-                              disabled={adminUpdatingId === item.id}
-                              onPress={() => void updateAdminSupportStatus(item.id, status)}
-                              style={({ pressed }) => [
-                                styles.supportCategoryChip,
-                                active && styles.supportCategoryChipActive,
-                                adminUpdatingId === item.id && styles.primaryButtonDisabled,
-                                pressed && styles.pressed,
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.supportCategoryChipText,
-                                  active && styles.supportCategoryChipTextActive,
+                            return (
+                              <Pressable
+                                key={`${item.id}-${status}`}
+                                disabled={adminUpdatingId === item.id}
+                                onPress={() => void updateAdminSupportStatus(item.id, status)}
+                                style={({ pressed }) => [
+                                  styles.supportCategoryChip,
+                                  active && styles.supportCategoryChipActive,
+                                  adminUpdatingId === item.id && styles.primaryButtonDisabled,
+                                  pressed && styles.pressed,
                                 ]}
                               >
-                                {t(`supportStatuses.${status}`)}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
+                                <Text
+                                  style={[
+                                    styles.supportCategoryChipText,
+                                    active && styles.supportCategoryChipTextActive,
+                                  ]}
+                                >
+                                  {t(`supportStatuses.${status}`)}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
                       </View>
-                    </View>
-                  );
-                })}
-              </View>
-            ) : (
-              <Text style={styles.settingsBody}>
-                {adminLoading ? t("about.adminLoading") : t("about.adminEmpty")}
-              </Text>
-            )}
-          </View>
+                    );
+                  })}
+                </View>
+              ) : (
+                <Text style={styles.settingsBody}>
+                  {adminLoading ? t("about.adminLoading") : t("about.adminEmpty")}
+                </Text>
+              )}
+            </View>
+          </>
         ) : null}
       </View>
     </View>
@@ -4289,6 +4436,32 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
     color: theme.accent,
+  },
+  adminMetricsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  adminMetricCard: {
+    flexGrow: 1,
+    flexBasis: "47%",
+    minWidth: 132,
+    gap: 6,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  adminMetricValue: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  adminMetricLabel: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: theme.textSecondary,
   },
   adminSummaryChip: {
     minWidth: 82,

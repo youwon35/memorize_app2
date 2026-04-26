@@ -84,7 +84,7 @@ Rebuild the dev build only when native config changes, for example:
 
 ## Admin role setup on Supabase
 
-The app keeps normal user cards private. The admin role currently opens an inquiry-management panel only.
+The app keeps normal user cards private. The admin role opens an inquiry-management panel plus basic usage metrics for signed-in cloud users.
 
 1. Run the updated [supabase/schema.sql](./supabase/schema.sql) in your Supabase SQL editor.
 2. Sign in to the app at least once so your `user_profiles` row is created.
@@ -100,6 +100,7 @@ set role = 'admin',
 ```
 
 4. Reopen the app. The `앱 정보` tab will show the admin inquiry inbox, where you can review all support requests and update their status.
+5. If you pull newer backend changes later, rerun `supabase/schema.sql` so the latest policies, triggers, and metrics tables are applied.
 
 ## Cloud OCR setup for Korean / Japanese / English handwriting
 
