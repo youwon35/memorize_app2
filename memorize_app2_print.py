@@ -1070,4 +1070,97 @@
    - `npx expo export --platform android`도 성공했다.
    - 즉 이번 사진 OCR 개선과 기록/보관함 업데이트는
      Expo SDK 54 기준 현재 앱 구조에서 번들링까지 문제없이 되는 상태다.
+2026년 4월 26일, 사진 OCR을 로컬 기기 인식만으로는 한계가 있다고 판단해
+Google Cloud Vision 기반의 서버 OCR 경로를 추가했다.
+
+1. 먼저 사용자가 보낸 새 사진과 앱 화면을 다시 비교해 보니,
+   문제는 단순히 `가운데 간격이 좁아서`가 아니었다.
+   - 사진 자체에는 세로선이 분명히 있고,
+     왼쪽에는 한국어, 오른쪽에는 영어가 표처럼 배치되어 있었다.
+   - 그런데 앱 결과는 `Today's ↔ plan ?`처럼
+     영어 오른쪽 덩어리만 쪼개서 카드쌍으로 만든 상태였다.
+   - 즉 현재 실패의 핵심은 `세로선 인식 실패`라기보다,
+     애초에 한글 손글씨가 제대로 OCR되지 않아서
+     오른쪽 영문만 남는 경우가 반복된다는 점이었다.
+
+2. 그래서 이번에는 OCR 경로를 두 단계로 바꿨다.
+   - 이제 사진 인식은 기본적으로
+     `Google Cloud Vision OCR -> 실패 시 로컬 ML Kit OCR fallback`
+     순서로 시도한다.
+   - 클라우드 OCR이 켜져 있으면 한국어 / 일본어 / 영어 손글씨 인식률을
+     지금보다 훨씬 올릴 수 있고,
+     아직 연결되지 않았으면 기존 로컬 OCR로라도 계속 동작한다.
+   - 사용자는 앱 화면의 안내 문구에서
+     `Google Cloud OCR로 읽었습니다` 또는
+     `클라우드 OCR이 아직 연결되지 않아 기기 OCR로 다시 시도했습니다`
+     같은 식으로 현재 어떤 경로가 쓰였는지 바로 알 수 있다.
+
+3. 앱 쪽에는 새 파일 `src/lib/photo-ocr.js`를 추가했다.
+   - 이 파일은 먼저 Supabase Edge Function `ocr-photo-cards`를 호출해
+     클라우드 OCR을 시도한다.
+   - 함수 호출에는 사진을 base64로 읽어 보내기 위해
+     `expo-file-system/legacy`의 `readAsStringAsync(..., { encoding: Base64 })`
+     를 사용했다.
+   - 클라우드 OCR이 실패하거나 아직 함수가 배포되지 않았으면
+     기존 `@infinitered/react-native-mlkit-text-recognition` 로컬 경로로 자동 fallback 한다.
+
+4. 서버 쪽에는 `supabase/functions/ocr-photo-cards/index.ts`를 새로 만들었다.
+   - 이 함수는 Supabase Edge Function으로 동작한다.
+   - 클라이언트에서 받은 base64 이미지를
+     Google Cloud Vision `images:annotate`에 `DOCUMENT_TEXT_DETECTION`으로 보내고,
+     응답의 `fullTextAnnotation`을
+     기존 앱이 이해할 수 있는 `{ blocks -> lines -> elements }` 구조로 다시 정규화해 돌려준다.
+   - 언어 힌트는 현재 `ko`, `ja`, `en` 세 가지로 보내게 해 두었다.
+   - 즉 사진 OCR 품질은 Google Cloud Vision이 책임지고,
+     카드쌍으로 묶는 규칙은 앱의 기존 로직을 계속 재사용하는 구조다.
+
+5. 사용자가 왜 `콴다`나 `네이버` 쪽에서는 잘 되는데 앱에서는 안 되냐고 물은 부분도
+   이번에 원인 정리가 가능해졌다.
+   - 기존 앱은 기기 안에서 돌아가는 상대적으로 가벼운 OCR + 라틴 중심 설정이었고,
+     서버형 손글씨 OCR처럼 강한 보정이 없었다.
+   - 반면 콴다나 네이버 계열은 보통 서버에서 더 큰 OCR 모델,
+     언어 보정, 후처리, 사전 보정을 같이 쓰기 때문에
+     한글/일본어/영문 혼합 손글씨에서 훨씬 잘 읽히는 경우가 많다.
+   - 그래서 이번에는 앱도 같은 방향으로,
+     클라우드 OCR을 연결할 수 있는 구조를 마련한 것이다.
+
+6. 세로선 기준 짝짓기 원칙도 유지했다.
+   - 사진 소개 문구는 계속 `세로선으로 좌우를 나눈 표 형태` 기준으로 안내하고 있다.
+   - 앱 안 짝짓기 로직은 사진 폭과 좌우 열 구조를 먼저 보고 묶는다.
+   - 다만 OCR이 한 줄 전체를 한 덩어리 문자열로 뱉는 극단적인 경우에는
+     완전히 버리지 않기 위해 문자열 fallback이 남아 있다.
+   - 즉 기본 원칙은 여전히 `세로선/좌우 열 기준`이고,
+     공백 기반 분리는 마지막 보험 역할만 하도록 유지했다.
+
+7. 사진 촬영 후 크롭 UI도 사용자 요청대로 바꿨다.
+   - 이전에는 `launchCameraAsync`에서 `aspect: [4, 3]`를 강제로 주고 있어서
+     카메라 촬영 후 편집 화면이 고정 비율로만 잘리게 되어 있었다.
+   - 이번에는 이 `aspect` 설정을 제거해서,
+     앨범 선택 편집처럼 더 자유롭게 영역을 조정할 수 있게 바꿨다.
+   - 추가로 앱 안 미리보기는 `cover`가 아니라 `contain`으로 바꿔
+     실제 사진 전체가 덜 잘려 보이도록 정리했다.
+
+8. 사용자가 요청했던 `최근 암기 세션의 오답만 다시풀기` 흐름은 현재 코드에 유지된 상태다.
+   - 기록 탭의 각 세션 카드 오른쪽에는
+     오답 개수 배지 아래에 `오답만 다시풀기` 버튼이 있고,
+     누르면 그 세션의 오답 카드들만 새 deck으로 바로 시작하게 되어 있다.
+   - 이번 턴에서는 이 구조를 다시 확인했고,
+     클라우드 OCR 추가와 함께 그대로 유지되도록 했다.
+
+9. 실제로 사용자가 앞으로 해야 할 일도 명확해졌다.
+   - Google Cloud Console에서 `Cloud Vision API`를 켜고
+     Vision API 전용 API key를 만든다.
+   - Supabase CLI로 현재 프로젝트를 link 한다.
+   - `supabase secrets set GOOGLE_CLOUD_VISION_API_KEY=...`
+     로 키를 Edge Function secret에 저장한다.
+   - `supabase functions deploy ocr-photo-cards`
+     로 함수를 배포하면,
+     앱은 추가 설정 없이 자동으로 cloud OCR을 먼저 시도한다.
+   - 이 절차는 README에도 따로 정리해 두었다.
+
+10. 마지막으로 검증도 다시 했다.
+   - `npx expo-doctor`는 `17/17 checks passed`.
+   - `npx expo export --platform android`도 성공했다.
+   - 따라서 이번 클라우드 OCR 연결 구조, 사진 자유 크롭, 안내 문구 보강은
+     Expo SDK 54 기준 현재 앱 번들링에 반영 가능한 상태다.
 """

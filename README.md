@@ -82,6 +82,40 @@ Rebuild the dev build only when native config changes, for example:
 6. Add `memoria://auth/callback` to the Supabase redirect allow list.
 7. Add the same redirect URI to your Google / Supabase auth setup before testing a dev build or APK.
 
+## Cloud OCR setup for Korean / Japanese / English handwriting
+
+The app now tries `Google Cloud Vision OCR` first for photo card import, and falls back to on-device OCR only if the cloud function is not available.
+
+1. In Google Cloud Console, create or choose a project.
+2. Enable the `Cloud Vision API`.
+3. Create an API key and restrict it to `Cloud Vision API`.
+4. Install and log in to the Supabase CLI if needed.
+5. Link the local project to your Supabase project:
+
+```bash
+supabase link --project-ref your-project-ref
+```
+
+6. Save the Vision API key as a Supabase function secret:
+
+```bash
+supabase secrets set GOOGLE_CLOUD_VISION_API_KEY=your_google_cloud_vision_api_key
+```
+
+7. Deploy the included OCR function:
+
+```bash
+supabase functions deploy ocr-photo-cards
+```
+
+8. Keep the existing `.env` values for Supabase in the app. Once the function is deployed, the photo import flow will automatically try cloud OCR first.
+
+Files involved:
+
+- `supabase/functions/ocr-photo-cards/index.ts`: server OCR proxy for Google Cloud Vision
+- `src/lib/photo-ocr.js`: app-side cloud-first OCR flow with local fallback
+- `src/utils/memory.js`: turns recognized text blocks into left/right card pairs
+
 ## Android release path
 
 1. Replace `com.memoria.app` in `app.json` with your final package name if needed.

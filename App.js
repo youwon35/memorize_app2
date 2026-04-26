@@ -24,6 +24,7 @@ import { makeRedirectUri } from "expo-auth-session";
 import { File } from "expo-file-system";
 import * as WebBrowser from "expo-web-browser";
 
+import { recognizePhotoCardPairs } from "./src/lib/photo-ocr";
 import { isSupabaseConfigured, supabase } from "./src/lib/supabase";
 import {
   appendStudySession,
@@ -33,7 +34,6 @@ import {
   createLocalPair,
   createPersistableStudyStats,
   createSignature,
-  extractPairsFromRecognizedText,
   migrateStudyStatsEntry,
   mapPairRecord,
   mergePairsBySignature,
@@ -1026,20 +1026,15 @@ export default function App() {
       throw new Error(t("alerts.photoUnreadable"));
     }
 
-    let recognizeText;
-
     try {
-      ({ recognizeText } = require("@infinitered/react-native-mlkit-text-recognition"));
+      return await recognizePhotoCardPairs(asset);
     } catch (error) {
-      throw new Error(t("alerts.devBuildOnly"));
+      if (error?.message === "LOCAL_OCR_UNAVAILABLE") {
+        throw new Error(t("alerts.devBuildOnly"));
+      }
+
+      throw error;
     }
-
-    const recognitionResult = await recognizeText(asset.uri);
-
-    return extractPairsFromRecognizedText(recognitionResult, {
-      width: asset.width,
-      height: asset.height,
-    });
   };
 
   const handlePickedPhotoForImport = async (asset) => {
@@ -1054,16 +1049,18 @@ export default function App() {
     setPhotoImportNotice(t("save.photoScanning"));
 
     try {
-      const { entries, invalidRowIndexes } = await readPairsFromPhotoAsset(asset);
+      const { entries, invalidRowIndexes, providerNoticeKey } = await readPairsFromPhotoAsset(asset);
 
       setPhotoImportedPairs(entries);
       setPhotoInvalidRowIndexes(invalidRowIndexes);
 
       if (!entries.length) {
+        const baseNotice = invalidRowIndexes.length
+          ? t("save.photoPairNotGrouped")
+          : t("save.photoNoText");
+
         setPhotoImportNotice(
-          invalidRowIndexes.length
-            ? t("save.photoPairNotGrouped")
-            : t("save.photoNoText")
+          providerNoticeKey ? `${t(providerNoticeKey)} ${baseNotice}` : baseNotice
         );
         return;
       }
@@ -1072,6 +1069,10 @@ export default function App() {
 
       if (invalidRowIndexes.length) {
         messages.push(t("save.photoPairInvalid", { count: invalidRowIndexes.length }));
+      }
+
+      if (providerNoticeKey) {
+        messages.unshift(t(providerNoticeKey));
       }
 
       setPhotoImportNotice(messages.join(" "));
@@ -1114,7 +1115,6 @@ export default function App() {
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ["images"],
       allowsEditing: true,
-      aspect: [4, 3],
       quality: 1,
       cameraType: ImagePicker.CameraType.back,
     });
@@ -1762,7 +1762,7 @@ export default function App() {
 
           {photoAsset?.uri ? (
             <View style={styles.photoPreviewFrame}>
-              <Image source={{ uri: photoAsset.uri }} style={styles.photoPreviewImage} resizeMode="cover" />
+              <Image source={{ uri: photoAsset.uri }} style={styles.photoPreviewImage} resizeMode="contain" />
             </View>
           ) : (
             <View style={styles.photoPlaceholderCard}>
