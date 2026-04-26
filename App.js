@@ -249,6 +249,7 @@ export default function App() {
   const [themeMode, setThemeMode] = useState("light");
   const [saveInputMode, setSaveInputMode] = useState("single");
   const [manageSort, setManageSort] = useState("recent");
+  const [manageSortMenuOpen, setManageSortMenuOpen] = useState(false);
   const [manageSearch, setManageSearch] = useState("");
   const [pairs, setPairs] = useState([]);
   const [studyStats, setStudyStats] = useState(createEmptyStudyStats());
@@ -329,6 +330,7 @@ export default function App() {
 
   const handleTabChange = (nextTab) => {
     setTab(nextTab);
+    setManageSortMenuOpen(false);
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo?.({ y: 0, animated: false });
     });
@@ -358,6 +360,8 @@ export default function App() {
   const todayIncorrectCount = todaySessions.reduce((sum, item) => sum + (item.incorrectCount ?? 0), 0);
   const recentSessions = useMemo(() => studyStats.sessions.slice(0, 6), [studyStats.sessions]);
   const normalizedManageSearch = manageSearch.trim().toLocaleLowerCase(language);
+  const activeManageSortOption =
+    MANAGE_SORT_OPTIONS.find((option) => option.key === manageSort) ?? MANAGE_SORT_OPTIONS[0];
   const sortedManagePairs = useMemo(() => {
     if (manageSort === "alphabetical") {
       return [...pairs].sort((leftPair, rightPair) => {
@@ -1585,7 +1589,7 @@ export default function App() {
               </View>
               <Text style={styles.importTitle}>{t("save.title")}</Text>
             </View>
-            <Text style={styles.importBody}>{t("save.singleBody")}</Text>
+            <Text style={styles.importBodyCompact}>{t("save.singleBody")}</Text>
           </View>
 
           <View style={styles.subtleDivider} />
@@ -1963,11 +1967,15 @@ export default function App() {
           </View>
         ) : hasSavedCards ? (
           <View style={styles.quizReadyCard}>
-            <View style={styles.quizReadyIconWrap}>
-              <MaterialCommunityIcons name="brain" size={22} color={theme.accent} />
+            <View style={styles.importHeader}>
+              <View style={styles.importTitleRow}>
+                <View style={styles.importIconWrap}>
+                  <MaterialCommunityIcons name="brain" size={18} color={theme.accent} />
+                </View>
+                <Text style={styles.importTitle}>{t("quiz.readyTitle")}</Text>
+              </View>
+              <Text style={styles.importBodyCompact}>{t("quiz.readyBody", { count: maxQuizCount })}</Text>
             </View>
-            <Text style={styles.quizReadyTitle}>{t("quiz.readyTitle")}</Text>
-            <Text style={styles.quizReadyBody}>{t("quiz.readyBody", { count: maxQuizCount })}</Text>
 
             <View style={styles.quizReadyStats}>
               <View style={styles.quizReadyStat}>
@@ -1975,22 +1983,6 @@ export default function App() {
                 <Text style={styles.quizReadyStatLabel}>{t("quiz.storedCards")}</Text>
               </View>
               <View style={styles.quizReadyStat}>
-                <Text style={styles.quizReadyStatValue}>{resolvedQuizCount}</Text>
-                <Text style={styles.quizReadyStatLabel}>{t("quiz.requestedCount")}</Text>
-              </View>
-              <View style={styles.quizReadyStat}>
-                <Text style={styles.quizReadyStatValue}>{maxQuizCount}</Text>
-                <Text style={styles.quizReadyStatLabel}>{t("quiz.availableCount")}</Text>
-              </View>
-            </View>
-
-            <View style={styles.quizCountCard}>
-              <View style={styles.quizCountCardHeader}>
-                <Text style={styles.quizSetupLabel}>{t("quiz.countLabel")}</Text>
-                <Text style={styles.quizCountCompactCaption}>{pairs.length ? t("quiz.countMax", { count: maxQuizCount }) : t("quiz.countWaiting")}</Text>
-              </View>
-
-              <View style={styles.quizCountCompactRow}>
                 <TextInput
                   value={pairs.length ? quizCountInput : ""}
                   onBlur={normalizeQuizCountInput}
@@ -2000,13 +1992,13 @@ export default function App() {
                   maxLength={3}
                   placeholder="-"
                   placeholderTextColor={theme.textPlaceholder}
-                  style={[styles.quizCountCompactInput, !pairs.length && styles.quizCountInputDisabled]}
+                  style={[styles.quizReadyStatInput, !pairs.length && styles.quizCountInputDisabled]}
                 />
-                <Text style={styles.quizCountCompactHint}>
-                  {pairs.length
-                    ? t("quiz.countHint")
-                    : t("quiz.countHintEmpty")}
-                </Text>
+                <Text style={styles.quizReadyStatLabel}>{t("quiz.requestedCount")}</Text>
+              </View>
+              <View style={styles.quizReadyStat}>
+                <Text style={styles.quizReadyStatValue}>{maxQuizCount}</Text>
+                <Text style={styles.quizReadyStatLabel}>{t("quiz.availableCount")}</Text>
               </View>
             </View>
 
@@ -2204,35 +2196,57 @@ export default function App() {
               returnKeyType="search"
             />
 
-            <View style={styles.settingsHeader}>
-              <Text style={styles.settingsTitle}>{t("manage.sortTitle")}</Text>
-              <Text style={styles.settingsBody}>{t("manage.sortBody")}</Text>
-            </View>
-            <View style={styles.supportCategoryRow}>
-              {MANAGE_SORT_OPTIONS.map((option) => {
-                const active = manageSort === option.key;
+            <View style={styles.subtleDivider} />
+            <View style={styles.compactSelectRow}>
+              <Text style={styles.compactSelectLabel}>{t("manage.sortTitle")}</Text>
+              <View style={styles.compactSelectWrap}>
+                <Pressable
+                  onPress={() => setManageSortMenuOpen((currentValue) => !currentValue)}
+                  style={({ pressed }) => [styles.compactSelectTrigger, pressed && styles.pressed]}
+                >
+                  <Text style={styles.compactSelectValue}>{t(activeManageSortOption.labelKey)}</Text>
+                  <MaterialCommunityIcons
+                    name={manageSortMenuOpen ? "chevron-up" : "chevron-down"}
+                    size={18}
+                    color={theme.textSecondary}
+                  />
+                </Pressable>
 
-                return (
-                  <Pressable
-                    key={option.key}
-                    onPress={() => setManageSort(option.key)}
-                    style={({ pressed }) => [
-                      styles.supportCategoryChip,
-                      active && styles.supportCategoryChipActive,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.supportCategoryChipText,
-                        active && styles.supportCategoryChipTextActive,
-                      ]}
-                    >
-                      {t(option.labelKey)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
+                {manageSortMenuOpen ? (
+                  <View style={styles.compactSelectMenu}>
+                    {MANAGE_SORT_OPTIONS.map((option) => {
+                      const active = manageSort === option.key;
+
+                      return (
+                        <Pressable
+                          key={option.key}
+                          onPress={() => {
+                            setManageSort(option.key);
+                            setManageSortMenuOpen(false);
+                          }}
+                          style={({ pressed }) => [
+                            styles.compactSelectOption,
+                            active && styles.compactSelectOptionActive,
+                            pressed && styles.pressed,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.compactSelectOptionText,
+                              active && styles.compactSelectOptionTextActive,
+                            ]}
+                          >
+                            {t(option.labelKey)}
+                          </Text>
+                          {active ? (
+                            <MaterialCommunityIcons name="check" size={18} color={theme.accent} />
+                          ) : null}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </View>
             </View>
           </View>
 
@@ -2286,7 +2300,7 @@ export default function App() {
                         <View style={styles.manageDisplayRow}>
                           <View style={styles.manageTextBlock}>
                             <Text style={styles.previewLabel}>{t("common.front")}</Text>
-                            <Text style={styles.managePairText} numberOfLines={2} ellipsizeMode="tail">
+                            <Text style={styles.managePairText} numberOfLines={1} ellipsizeMode="tail">
                               {pair.left}
                             </Text>
                           </View>
@@ -2309,7 +2323,7 @@ export default function App() {
                         <View style={styles.manageDisplayRow}>
                           <View style={styles.manageTextBlock}>
                             <Text style={styles.previewLabel}>{t("common.back")}</Text>
-                            <Text style={styles.managePairText} numberOfLines={2} ellipsizeMode="tail">
+                            <Text style={styles.managePairText} numberOfLines={1} ellipsizeMode="tail">
                               {pair.right}
                             </Text>
                           </View>
@@ -3044,6 +3058,11 @@ const createStyles = (theme) => StyleSheet.create({
     lineHeight: 21,
     color: theme.textSecondary,
   },
+  importBodyCompact: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: theme.textSecondary,
+  },
   subtleDivider: {
     height: 1,
     backgroundColor: theme.surfaceBorderSoft,
@@ -3489,12 +3508,14 @@ const createStyles = (theme) => StyleSheet.create({
   },
   quizReadyStats: {
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
   },
   quizReadyStat: {
     flex: 1,
+    alignItems: "center",
     gap: 6,
-    padding: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 14,
     borderRadius: 18,
     backgroundColor: theme.surfaceCard,
     borderWidth: 1,
@@ -3505,8 +3526,18 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "800",
     color: theme.textPrimary,
   },
+  quizReadyStatInput: {
+    width: "100%",
+    paddingVertical: 0,
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "800",
+    textAlign: "center",
+    color: theme.textPrimary,
+  },
   quizReadyStatLabel: {
     fontSize: 12,
+    textAlign: "center",
     color: theme.textSecondary,
   },
   quizSummaryHeader: {
@@ -3584,57 +3615,57 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textPrimary,
   },
   manageCard: {
-    gap: 10,
-    padding: 14,
-    borderRadius: 22,
+    gap: 8,
+    padding: 12,
+    borderRadius: 20,
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
   manageDisplayStack: {
-    gap: 8,
+    gap: 6,
   },
   manageDisplayRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    minHeight: 106,
+    gap: 6,
+    minHeight: 84,
   },
   manageTextBlock: {
     flexGrow: 1,
     flexShrink: 1,
-    maxWidth: "74%",
+    maxWidth: "75%",
     minWidth: 0,
-    gap: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    height: 106,
+    gap: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    height: 84,
     justifyContent: "center",
-    borderRadius: 18,
+    borderRadius: 16,
     backgroundColor: theme.surfaceCard,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
   managePairText: {
     fontSize: 15,
-    lineHeight: 22,
+    lineHeight: 20,
     fontWeight: "700",
     color: theme.textPrimary,
   },
   manageRowDivider: {
     height: 1,
-    marginLeft: 14,
-    marginRight: 104,
+    marginLeft: 12,
+    marginRight: 92,
     backgroundColor: theme.surfaceBorderSoft,
   },
   manageSideButton: {
     flex: 0,
     width: 86,
-    height: 72,
-    minHeight: 72,
+    height: 84,
+    minHeight: 84,
     paddingVertical: 0,
     borderRadius: 14,
-    alignSelf: "center",
+    alignSelf: "stretch",
   },
   aboutStack: {
     gap: 12,
@@ -3659,6 +3690,67 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     color: theme.textSecondary,
+  },
+  compactSelectRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  compactSelectLabel: {
+    flex: 1,
+    paddingTop: 12,
+    fontSize: 15,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  compactSelectWrap: {
+    width: 168,
+    gap: 8,
+  },
+  compactSelectTrigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    minHeight: 48,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: theme.surfaceMuted,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  compactSelectValue: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "700",
+    color: theme.textPrimary,
+  },
+  compactSelectMenu: {
+    overflow: "hidden",
+    borderRadius: 18,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  compactSelectOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  compactSelectOptionActive: {
+    backgroundColor: theme.surfaceCard,
+  },
+  compactSelectOptionText: {
+    flex: 1,
+    fontSize: 14,
+    color: theme.textPrimary,
+  },
+  compactSelectOptionTextActive: {
+    fontWeight: "800",
   },
   modeSwitchRow: {
     flexDirection: "row",
