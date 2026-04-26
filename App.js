@@ -435,14 +435,19 @@ export default function App() {
     const counter = new Map();
 
     todaySessions.forEach((item) => {
-      (item.incorrectCards ?? []).forEach((card) => {
-        const currentCount = counter.get(card.signature) ?? {
+      (item.incorrectCards ?? []).forEach((card, index) => {
+        const signature =
+          (typeof card?.signature === "string" && card.signature) ||
+          createSignature(card?.left ?? "", card?.right ?? "") ||
+          `missed-${item.id}-${index}`;
+        const currentCount = counter.get(signature) ?? {
           ...card,
+          signature,
           count: 0,
         };
 
         currentCount.count += 1;
-        counter.set(card.signature, currentCount);
+        counter.set(signature, currentCount);
       });
     });
 
@@ -450,7 +455,11 @@ export default function App() {
   }, [todaySessions]);
   const topMissedCards = useMemo(
     () =>
-      Object.values(studyStats.cards)
+      Object.entries(studyStats.cards)
+        .map(([signature, item]) => ({
+          ...item,
+          signature,
+        }))
         .filter((item) => (item.incorrect ?? 0) > 0)
         .sort((a, b) => {
           if ((b.incorrect ?? 0) !== (a.incorrect ?? 0)) {
@@ -1919,12 +1928,14 @@ export default function App() {
                 : t("quiz.panelBodyMode", { description: t(quizModeConfig.descriptionKey) })}
             </Text>
           </View>
-          <Pressable
-            onPress={() => (deck.length ? resetQuizSession() : startQuiz())}
-            style={({ pressed }) => [styles.quizStartButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.quizStartButtonText}>{deck.length ? t("quiz.reset") : t("quiz.start")}</Text>
-          </Pressable>
+          {deck.length ? (
+            <Pressable
+              onPress={resetQuizSession}
+              style={({ pressed }) => [styles.quizStartButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.quizStartButtonText}>{t("quiz.reset")}</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         {roundComplete && deck.length ? (
@@ -2051,7 +2062,12 @@ export default function App() {
                 <Text style={styles.quizReadyStatValue}>{pairs.length}</Text>
                 <Text style={styles.quizReadyStatLabel}>{t("quiz.storedCards")}</Text>
               </View>
-              <View style={styles.quizReadyStat}>
+              <View
+                style={[
+                  styles.quizReadyStat,
+                  pairs.length > 0 && styles.quizReadyStatEditable,
+                ]}
+              >
                 <TextInput
                   value={pairs.length ? quizCountInput : ""}
                   onBlur={normalizeQuizCountInput}
@@ -2061,9 +2077,20 @@ export default function App() {
                   maxLength={3}
                   placeholder="-"
                   placeholderTextColor={theme.textPlaceholder}
-                  style={[styles.quizReadyStatInput, !pairs.length && styles.quizCountInputDisabled]}
+                  style={[
+                    styles.quizReadyStatInput,
+                    pairs.length > 0 && styles.quizReadyStatInputEditable,
+                    !pairs.length && styles.quizCountInputDisabled,
+                  ]}
                 />
-                <Text style={styles.quizReadyStatLabel}>{t("quiz.requestedCount")}</Text>
+                <Text
+                  style={[
+                    styles.quizReadyStatLabel,
+                    pairs.length > 0 && styles.quizReadyStatLabelEditable,
+                  ]}
+                >
+                  {t("quiz.requestedCount")}
+                </Text>
               </View>
               <View style={styles.quizReadyStat}>
                 <Text style={styles.quizReadyStatValue}>{maxQuizCount}</Text>
@@ -3605,6 +3632,10 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
+  quizReadyStatEditable: {
+    backgroundColor: theme.accentSoft,
+    borderColor: theme.accent,
+  },
   quizReadyStatValue: {
     fontSize: 24,
     fontWeight: "800",
@@ -3619,10 +3650,17 @@ const createStyles = (theme) => StyleSheet.create({
     textAlign: "center",
     color: theme.textPrimary,
   },
+  quizReadyStatInputEditable: {
+    color: theme.accent,
+  },
   quizReadyStatLabel: {
     fontSize: 12,
     textAlign: "center",
     color: theme.textSecondary,
+  },
+  quizReadyStatLabelEditable: {
+    color: theme.accent,
+    fontWeight: "800",
   },
   quizSummaryHeader: {
     gap: 6,

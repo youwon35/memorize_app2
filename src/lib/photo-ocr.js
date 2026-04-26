@@ -6,6 +6,8 @@ import { isSupabaseConfigured, supabase } from "./supabase";
 const OCR_FUNCTION_NAME = "ocr-photo-cards";
 const CLOUD_OCR_LANGUAGES = ["ko", "ja", "en"];
 
+const CJK_CHARACTER_PATTERN = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/g;
+
 const getAssetMimeType = (asset = {}) => {
   if (asset?.mimeType && typeof asset.mimeType === "string") {
     return asset.mimeType;
@@ -164,7 +166,7 @@ const runLocalOcr = async (asset) => {
   };
 };
 
-const runCloudOcr = async (asset) => {
+const runCloudOcr = async (asset, languages = []) => {
   if (!isSupabaseConfigured || !supabase) {
     return null;
   }
@@ -177,7 +179,7 @@ const runCloudOcr = async (asset) => {
     body: {
       imageBase64,
       mimeType: getAssetMimeType(asset),
-      languages: CLOUD_OCR_LANGUAGES,
+      languages,
     },
   });
 
@@ -201,32 +203,111 @@ const runCloudOcr = async (asset) => {
   };
 };
 
+const getOcrResultText = (result) => {
+  if (!result) {
+    return "";
+  }
+
+  const rowText = Array.isArray(result.rows)
+    ? result.rows
+        .map((row) => `${row?.left ?? ""} ${row?.right ?? ""} ${row?.rawText ?? ""}`.trim())
+        .join(" ")
+    : "";
+
+  return `${rowText} ${result.fullText ?? ""}`.replace(/\s+/g, " ").trim();
+};
+
+const countCjkCharacters = (value = "") => {
+  const matches = `${value}`.match(CJK_CHARACTER_PATTERN);
+  return matches ? matches.length : 0;
+};
+
+const getOcrResultScore = (result) => {
+  if (!result) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const extractedText = getOcrResultText(result);
+
+  return (
+    (result.entries?.length ?? 0) * 1000 -
+    (result.invalidRowIndexes?.length ?? 0) * 150 +
+    extractedText.length +
+    countCjkCharacters(extractedText) * 12
+  );
+};
+
+const chooseBetterOcrResult = (leftResult, rightResult) => {
+  if (!leftResult) {
+    return rightResult ?? null;
+  }
+
+  if (!rightResult) {
+    return leftResult;
+  }
+
+  return getOcrResultScore(rightResult) > getOcrResultScore(leftResult)
+    ? rightResult
+    : leftResult;
+};
+
+const shouldRetryCloudWithHints = (result) => {
+  if (!result) {
+    return true;
+  }
+
+  const extractedText = getOcrResultText(result);
+
+  return (result.entries?.length ?? 0) === 0 || countCjkCharacters(extractedText) === 0;
+};
+
 export const recognizePhotoCardPairs = async (asset) => {
   let cloudError = null;
+  let bestCloudResult = null;
 
   if (isSupabaseConfigured && supabase) {
     try {
-      const cloudResult = await runCloudOcr(asset);
+      const cloudResult = await runCloudOcr(asset, []);
+      bestCloudResult = chooseBetterOcrResult(bestCloudResult, cloudResult);
 
-      if (cloudResult) {
-        return {
-          ...cloudResult,
-          providerNoticeKey: "save.photoCloudUsed",
-        };
+      if (shouldRetryCloudWithHints(cloudResult)) {
+        const hintedCloudResult = await runCloudOcr(asset, CLOUD_OCR_LANGUAGES);
+        bestCloudResult = chooseBetterOcrResult(bestCloudResult, hintedCloudResult);
       }
     } catch (error) {
       cloudError = error;
     }
   }
 
-  const localResult = await runLocalOcr(asset);
+  let localResult = null;
+
+  try {
+    localResult = await runLocalOcr(asset);
+  } catch (error) {
+    if (error?.message === "LOCAL_OCR_UNAVAILABLE") {
+      if (!bestCloudResult) {
+        throw error;
+      }
+    } else {
+      throw error;
+    }
+  }
+
+  const bestResult = chooseBetterOcrResult(bestCloudResult, localResult);
+
+  if (!bestResult) {
+    throw cloudError ?? new Error("PHOTO_OCR_UNAVAILABLE");
+  }
 
   return {
-    ...localResult,
-    providerNoticeKey: cloudError
-      ? classifyCloudFailure(cloudError) === "unavailable"
-        ? "save.photoCloudUnavailableFallback"
-        : "save.photoCloudFailedFallback"
-      : "save.photoLocalUsed",
+    ...bestResult,
+    providerNoticeKey:
+      bestResult.provider === "cloud"
+        ? "save.photoCloudUsed"
+        : cloudError
+          ? classifyCloudFailure(cloudError) === "unavailable"
+            ? "save.photoCloudUnavailableFallback"
+            : "save.photoCloudFailedFallback"
+          : "save.photoLocalUsed",
   };
 };
