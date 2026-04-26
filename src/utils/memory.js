@@ -287,6 +287,7 @@ export const extractPairsFromRecognizedText = (recognizedText) => {
 
   const medianHeight = getMedian(segments.map((segment) => segment.height));
   const rowThreshold = Math.max(18, medianHeight * 0.72);
+  const columnSplitX = inferColumnSplitX(segments, rowThreshold);
   const rows = [];
 
   segments
@@ -305,7 +306,7 @@ export const extractPairsFromRecognizedText = (recognizedText) => {
   const entries = [];
   const invalidRowIndexes = [];
   const parsedRows = rows.map((row, index) => {
-    const parsed = parseRecognizedRow(row.segments, rowThreshold);
+    const parsed = parseRecognizedRow(row.segments, rowThreshold, columnSplitX);
 
     if (!parsed) {
       invalidRowIndexes.push(index + 1);
@@ -383,7 +384,9 @@ function collectRecognizedSegments(recognizedText) {
           return {
             text,
             ...frame,
+            centerX: (frame.left + frame.right) / 2,
             centerY: (frame.top + frame.bottom) / 2,
+            width: Math.max(1, frame.right - frame.left),
             height: Math.max(1, frame.bottom - frame.top),
           };
         })
@@ -461,7 +464,43 @@ function appendSegmentToRow(row, segment) {
   row.centerY = (row.top + row.bottom) / 2;
 }
 
-function parseRecognizedRow(segments, rowThreshold) {
+function inferColumnSplitX(segments, rowThreshold) {
+  const sortedSegments = [...segments].sort((left, right) => left.left - right.left);
+
+  if (sortedSegments.length < 2) {
+    return null;
+  }
+
+  const pageWidth = Math.max(
+    1,
+    sortedSegments[sortedSegments.length - 1].right - sortedSegments[0].left
+  );
+  const gaps = sortedSegments.slice(0, -1).map((segment, index) => ({
+    index,
+    gap: sortedSegments[index + 1].left - segment.right,
+    splitX: (segment.right + sortedSegments[index + 1].left) / 2,
+  }));
+  const largestGap = gaps.reduce(
+    (currentLargest, gap) => (gap.gap > currentLargest.gap ? gap : currentLargest),
+    { index: -1, gap: -Infinity, splitX: null }
+  );
+  const gapThreshold = Math.max(12, pageWidth * 0.045, rowThreshold * 0.65);
+
+  if (largestGap.index < 0 || largestGap.gap < gapThreshold) {
+    return null;
+  }
+
+  const leftSegments = sortedSegments.filter((segment) => segment.centerX <= largestGap.splitX);
+  const rightSegments = sortedSegments.filter((segment) => segment.centerX > largestGap.splitX);
+
+  if (!leftSegments.length || !rightSegments.length) {
+    return null;
+  }
+
+  return largestGap.splitX;
+}
+
+function parseRecognizedRow(segments, rowThreshold, columnSplitX = null) {
   const sortedSegments = [...segments].sort((left, right) => left.left - right.left);
 
   if (!sortedSegments.length) {
@@ -470,6 +509,19 @@ function parseRecognizedRow(segments, rowThreshold) {
 
   if (sortedSegments.length === 1) {
     return splitMergedRecognizedText(sortedSegments[0].text);
+  }
+
+  if (Number.isFinite(columnSplitX)) {
+    const leftSegments = sortedSegments.filter((segment) => segment.centerX <= columnSplitX);
+    const rightSegments = sortedSegments.filter((segment) => segment.centerX > columnSplitX);
+
+    if (leftSegments.length && rightSegments.length) {
+      const pairedByGlobalSplit = buildPairFromRecognizedClusters(leftSegments, rightSegments);
+
+      if (pairedByGlobalSplit) {
+        return pairedByGlobalSplit;
+      }
+    }
   }
 
   const rowWidth = Math.max(
@@ -484,12 +536,11 @@ function parseRecognizedRow(segments, rowThreshold) {
     (currentLargest, gap) => (gap.gap > currentLargest.gap ? gap : currentLargest),
     { index: -1, gap: -Infinity }
   );
-  const gapThreshold = Math.max(28, rowWidth * 0.08, rowThreshold * 1.15);
+  const gapThreshold = Math.max(12, rowWidth * 0.045, rowThreshold * 0.65);
 
   if (
     largestGap.index >= 0 &&
-    (largestGap.gap >= gapThreshold ||
-      (sortedSegments.length === 2 && largestGap.gap >= Math.max(18, rowThreshold)))
+    largestGap.gap >= gapThreshold
   ) {
     return buildPairFromRecognizedClusters(
       sortedSegments.slice(0, largestGap.index + 1),
@@ -554,7 +605,62 @@ function splitMergedRecognizedText(text) {
     }
   }
 
+  const mixedScriptPair = splitMixedScriptTokens(normalized);
+
+  if (mixedScriptPair) {
+    return mixedScriptPair;
+  }
+
   return null;
+}
+
+function splitMixedScriptTokens(text) {
+  const tokens = text.split(/\s+/).filter(Boolean);
+
+  if (tokens.length < 2) {
+    return null;
+  }
+
+  const firstScriptIndex = tokens.findIndex((token) => getTokenScript(token) !== "other");
+
+  if (firstScriptIndex < 0) {
+    return null;
+  }
+
+  const baseScript = getTokenScript(tokens[firstScriptIndex]);
+
+  for (let index = firstScriptIndex + 1; index < tokens.length; index += 1) {
+    const script = getTokenScript(tokens[index]);
+
+    if (script === "other") {
+      continue;
+    }
+
+    if (script !== baseScript) {
+      const left = tokens.slice(0, index).join(" ").trim();
+      const right = tokens.slice(index).join(" ").trim();
+
+      if (left && right) {
+        return { left, right };
+      }
+
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function getTokenScript(token) {
+  if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/.test(token)) {
+    return "cjk";
+  }
+
+  if (/[A-Za-z]/.test(token)) {
+    return "latin";
+  }
+
+  return "other";
 }
 
 function ensureStudyStats(studyStats) {
