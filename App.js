@@ -14,6 +14,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -251,6 +252,7 @@ const mergeSupportRequests = (...collections) => {
 };
 
 export default function App() {
+  const { width: screenWidth } = useWindowDimensions();
   const [tab, setTab] = useState("save");
   const [language, setLanguage] = useState(getPreferredLanguage());
   const [themeMode, setThemeMode] = useState("light");
@@ -328,6 +330,11 @@ export default function App() {
   const quizModeConfig = getQuizModeConfig(quizMode);
   const maxQuizCount = pairs.length ? pairs.length * (quizMode === "both" ? 2 : 1) : 0;
   const contentTopPadding = 18 + (Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0);
+  const isTabletLayout = screenWidth >= 768;
+  const contentMaxWidth = isTabletLayout ? 820 : null;
+  const tutorialMaxWidth = isTabletLayout ? 560 : null;
+  const tabBarWidth = isTabletLayout ? Math.min(screenWidth - 28, 820) : null;
+  const tabBarLeft = tabBarWidth ? Math.max(14, (screenWidth - tabBarWidth) / 2) : null;
   const parsedQuizCount = Number.parseInt(quizCountInput, 10);
   const resolvedQuizCount = !maxQuizCount
     ? 0
@@ -2770,14 +2777,27 @@ export default function App() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {tab === "save" ? renderSaveTab() : null}
-          {tab === "quiz" ? renderQuizTab() : null}
-          {tab === "history" ? renderHistoryTab() : null}
-          {tab === "manage" ? renderManageTab() : null}
-          {tab === "about" ? renderAboutTab() : null}
+          <View style={[styles.contentShell, contentMaxWidth ? { maxWidth: contentMaxWidth } : null]}>
+            {tab === "save" ? renderSaveTab() : null}
+            {tab === "quiz" ? renderQuizTab() : null}
+            {tab === "history" ? renderHistoryTab() : null}
+            {tab === "manage" ? renderManageTab() : null}
+            {tab === "about" ? renderAboutTab() : null}
+          </View>
         </ScrollView>
 
-        <View style={styles.tabs}>
+        <View
+          style={[
+            styles.tabs,
+            tabBarWidth
+              ? {
+                  width: tabBarWidth,
+                  left: tabBarLeft,
+                  right: undefined,
+                }
+              : null,
+          ]}
+        >
           {TABS.map((item) => {
             const active = tab === item.key;
 
@@ -2811,6 +2831,7 @@ export default function App() {
           styles={styles}
           theme={theme}
           t={t}
+          maxWidth={tutorialMaxWidth}
           onClose={() => closeTutorial()}
           onStart={() => closeTutorial("save")}
           onOpenHistory={() => closeTutorial("history")}
@@ -2837,11 +2858,11 @@ function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) 
   );
 }
 
-function TutorialOverlay({ styles, theme, t, onClose, onStart, onOpenHistory }) {
+function TutorialOverlay({ styles, theme, t, onClose, onStart, onOpenHistory, maxWidth }) {
   return (
     <View style={styles.tutorialOverlay}>
       <Pressable style={styles.tutorialBackdrop} onPress={onClose} />
-      <View style={styles.tutorialCard}>
+      <View style={[styles.tutorialCard, maxWidth ? { maxWidth, alignSelf: "center" } : null]}>
         <View style={styles.tutorialBadge}>
           <MaterialCommunityIcons name="compass-rose" size={20} color={theme.accentText} />
         </View>
@@ -2954,6 +2975,10 @@ const createStyles = (theme) => StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 18,
     paddingBottom: Platform.OS === "android" ? 188 : 144,
+  },
+  contentShell: {
+    width: "100%",
+    alignSelf: "center",
   },
   scene: {
     gap: 16,
