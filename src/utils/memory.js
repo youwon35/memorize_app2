@@ -278,16 +278,37 @@ export const parseImportedPairs = (text) => {
   return { entries, invalidEntryIndexes };
 };
 
-export const extractPairsFromRecognizedText = (recognizedText) => {
-  const segments = collectRecognizedSegments(recognizedText);
+export const extractPairsFromRecognizedText = (recognizedText, imageLayout = null) => {
+  const candidates = ["elements", "lines"]
+    .map((granularity) => {
+      const segments = collectRecognizedSegments(recognizedText, granularity);
 
-  if (!segments.length) {
+      if (!segments.length) {
+        return null;
+      }
+
+      return {
+        granularity,
+        result: extractPairsFromRecognizedSegments(segments, imageLayout),
+      };
+    })
+    .filter(Boolean);
+
+  if (!candidates.length) {
     return { entries: [], invalidRowIndexes: [], rows: [] };
   }
 
+  const bestCandidate = candidates.reduce((currentBest, candidate) =>
+    compareRecognitionCandidates(currentBest, candidate) >= 0 ? currentBest : candidate
+  );
+
+  return bestCandidate.result;
+};
+
+function extractPairsFromRecognizedSegments(segments, imageLayout = null) {
   const medianHeight = getMedian(segments.map((segment) => segment.height));
   const rowThreshold = Math.max(18, medianHeight * 0.72);
-  const columnSplitX = inferColumnSplitX(segments, rowThreshold);
+  const columnSplitX = inferColumnSplitX(segments, rowThreshold, imageLayout);
   const rows = [];
 
   segments
@@ -333,7 +354,7 @@ export const extractPairsFromRecognizedText = (recognizedText) => {
   });
 
   return { entries, invalidRowIndexes, rows: parsedRows };
-};
+}
 
 export const mapPairRecord = (record) => ({
   id: record.id,
@@ -362,11 +383,15 @@ function shuffle(items) {
   return cloned;
 }
 
-function collectRecognizedSegments(recognizedText) {
+function collectRecognizedSegments(recognizedText, granularity = "elements") {
   return (recognizedText?.blocks ?? []).flatMap((block) =>
     (block?.lines ?? []).flatMap((line) => {
+      const useElements =
+        granularity === "elements" &&
+        Array.isArray(line?.elements) &&
+        line.elements.length;
       const units =
-        Array.isArray(line?.elements) && line.elements.length
+        useElements
           ? line.elements
           : line?.text
             ? [line]
@@ -392,6 +417,38 @@ function collectRecognizedSegments(recognizedText) {
         })
         .filter(Boolean);
     })
+  );
+}
+
+function compareRecognitionCandidates(leftCandidate, rightCandidate) {
+  const leftScore = getRecognitionScore(leftCandidate?.result);
+  const rightScore = getRecognitionScore(rightCandidate?.result);
+
+  if (leftScore !== rightScore) {
+    return leftScore - rightScore;
+  }
+
+  if (leftCandidate?.granularity === rightCandidate?.granularity) {
+    return 0;
+  }
+
+  return leftCandidate?.granularity === "elements" ? 1 : -1;
+}
+
+function getRecognitionScore(result) {
+  if (!result) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const textVolume = result.rows.reduce(
+    (sum, row) => sum + `${row.left ?? ""}${row.right ?? ""}${row.rawText ?? ""}`.length,
+    0
+  );
+
+  return (
+    result.entries.length * 1000 -
+    result.invalidRowIndexes.length * 180 +
+    textVolume
   );
 }
 
@@ -464,7 +521,117 @@ function appendSegmentToRow(row, segment) {
   row.centerY = (row.top + row.bottom) / 2;
 }
 
-function inferColumnSplitX(segments, rowThreshold) {
+function inferColumnSplitX(segments, rowThreshold, imageLayout = null) {
+  const clusteredSplit = inferColumnSplitByClusters(segments, rowThreshold, imageLayout);
+
+  if (Number.isFinite(clusteredSplit)) {
+    return clusteredSplit;
+  }
+
+  return inferColumnSplitByLargestGap(segments, rowThreshold, imageLayout);
+}
+
+function inferColumnSplitByClusters(segments, rowThreshold, imageLayout = null) {
+  if (segments.length < 2) {
+    return null;
+  }
+
+  const imageWidth = Number.isFinite(imageLayout?.width) ? imageLayout.width : null;
+  const imageMidX = imageWidth ? imageWidth / 2 : null;
+  const pageLeft = Math.min(...segments.map((segment) => segment.left));
+  const pageRight = Math.max(...segments.map((segment) => segment.right));
+  const pageWidth = Math.max(1, pageRight - pageLeft);
+  let leftCenter = Math.min(...segments.map((segment) => segment.centerX));
+  let rightCenter = Math.max(...segments.map((segment) => segment.centerX));
+
+  if (!Number.isFinite(leftCenter) || !Number.isFinite(rightCenter) || leftCenter === rightCenter) {
+    return null;
+  }
+
+  let leftCluster = [];
+  let rightCluster = [];
+
+  for (let index = 0; index < 8; index += 1) {
+    leftCluster = [];
+    rightCluster = [];
+
+    segments.forEach((segment) => {
+      const leftDistance = Math.abs(segment.centerX - leftCenter);
+      const rightDistance = Math.abs(segment.centerX - rightCenter);
+
+      if (leftDistance <= rightDistance) {
+        leftCluster.push(segment);
+      } else {
+        rightCluster.push(segment);
+      }
+    });
+
+    if (!leftCluster.length || !rightCluster.length) {
+      return null;
+    }
+
+    const nextLeftCenter =
+      leftCluster.reduce((sum, segment) => sum + segment.centerX, 0) / leftCluster.length;
+    const nextRightCenter =
+      rightCluster.reduce((sum, segment) => sum + segment.centerX, 0) / rightCluster.length;
+
+    if (
+      Math.abs(nextLeftCenter - leftCenter) < 0.5 &&
+      Math.abs(nextRightCenter - rightCenter) < 0.5
+    ) {
+      leftCenter = nextLeftCenter;
+      rightCenter = nextRightCenter;
+      break;
+    }
+
+    leftCenter = nextLeftCenter;
+    rightCenter = nextRightCenter;
+  }
+
+  if (!leftCluster.length || !rightCluster.length) {
+    return null;
+  }
+
+  if (leftCenter > rightCenter) {
+    [leftCenter, rightCenter] = [rightCenter, leftCenter];
+    [leftCluster, rightCluster] = [rightCluster, leftCluster];
+  }
+
+  const clusterDistance = rightCenter - leftCenter;
+  const minimumClusterDistance = Math.max(40, pageWidth * 0.16, rowThreshold * 1.8);
+
+  if (clusterDistance < minimumClusterDistance) {
+    return null;
+  }
+
+  if (Number.isFinite(imageMidX)) {
+    const leftTouchesLeftSide = leftCluster.some((segment) => segment.centerX < imageMidX);
+    const rightTouchesRightSide = rightCluster.some((segment) => segment.centerX > imageMidX);
+
+    if (!leftTouchesLeftSide || !rightTouchesRightSide) {
+      return null;
+    }
+  }
+
+  const leftMaxRight = Math.max(...leftCluster.map((segment) => segment.right));
+  const rightMinLeft = Math.min(...rightCluster.map((segment) => segment.left));
+
+  if (
+    Number.isFinite(imageMidX) &&
+    imageMidX > leftMaxRight &&
+    imageMidX < rightMinLeft
+  ) {
+    return imageMidX;
+  }
+
+  if (Number.isFinite(leftMaxRight) && Number.isFinite(rightMinLeft) && rightMinLeft > leftMaxRight) {
+    return (leftMaxRight + rightMinLeft) / 2;
+  }
+
+  return (leftCenter + rightCenter) / 2;
+}
+
+function inferColumnSplitByLargestGap(segments, rowThreshold, imageLayout = null) {
   const sortedSegments = [...segments].sort((left, right) => left.left - right.left);
 
   if (sortedSegments.length < 2) {
@@ -495,6 +662,15 @@ function inferColumnSplitX(segments, rowThreshold) {
 
   if (!leftSegments.length || !rightSegments.length) {
     return null;
+  }
+
+  if (Number.isFinite(imageLayout?.width)) {
+    const imageMidX = imageLayout.width / 2;
+    const tolerance = Math.max(48, imageLayout.width * 0.22);
+
+    if (Math.abs(largestGap.splitX - imageMidX) > tolerance) {
+      return null;
+    }
   }
 
   return largestGap.splitX;

@@ -73,6 +73,7 @@ const MANAGE_SORT_OPTIONS = [
   { key: "recent", labelKey: "manage.sortRecent" },
   { key: "alphabetical", labelKey: "manage.sortAlphabetical" },
   { key: "missed", labelKey: "manage.sortMissed" },
+  { key: "incorrectCount", labelKey: "manage.sortIncorrectCount" },
 ];
 const THEME_OPTIONS = [
   { key: "light", labelKey: "theme.light", icon: "white-balance-sunny" },
@@ -202,6 +203,11 @@ const getQuizModeConfig = (mode) =>
   QUIZ_MODE_OPTIONS.find((option) => option.key === mode) ?? QUIZ_MODE_OPTIONS[0];
 const appendUniqueId = (items, nextId) => (items.includes(nextId) ? items : [...items, nextId]);
 const isValidEmail = (value) => /\S+@\S+\.\S+/.test(value.trim());
+const calculateMissRate = (cardStats = {}) => {
+  const attempts = Math.max(1, cardStats?.attempts ?? 0);
+
+  return (cardStats?.incorrect ?? 0) / attempts;
+};
 const createLocalSupportRequest = ({ replyEmail, message, category, session }) => ({
   id: `support-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   category: normalizeSupportCategory(category),
@@ -376,6 +382,12 @@ export default function App() {
       return [...pairs].sort((leftPair, rightPair) => {
         const leftStats = studyStats.cards[createSignature(leftPair.left, leftPair.right)] ?? {};
         const rightStats = studyStats.cards[createSignature(rightPair.left, rightPair.right)] ?? {};
+        const missRateGap = calculateMissRate(rightStats) - calculateMissRate(leftStats);
+
+        if (Math.abs(missRateGap) > 0.0001) {
+          return missRateGap;
+        }
+
         const incorrectGap = (rightStats.incorrect ?? 0) - (leftStats.incorrect ?? 0);
 
         if (incorrectGap !== 0) {
@@ -386,6 +398,20 @@ export default function App() {
 
         if (attemptsGap !== 0) {
           return attemptsGap;
+        }
+
+        return new Date(rightPair.updatedAt || rightPair.createdAt || 0) - new Date(leftPair.updatedAt || leftPair.createdAt || 0);
+      });
+    }
+
+    if (manageSort === "incorrectCount") {
+      return [...pairs].sort((leftPair, rightPair) => {
+        const leftStats = studyStats.cards[createSignature(leftPair.left, leftPair.right)] ?? {};
+        const rightStats = studyStats.cards[createSignature(rightPair.left, rightPair.right)] ?? {};
+        const incorrectGap = (rightStats.incorrect ?? 0) - (leftStats.incorrect ?? 0);
+
+        if (incorrectGap !== 0) {
+          return incorrectGap;
         }
 
         return new Date(rightPair.updatedAt || rightPair.createdAt || 0) - new Date(leftPair.updatedAt || leftPair.createdAt || 0);
@@ -1010,7 +1036,10 @@ export default function App() {
 
     const recognitionResult = await recognizeText(asset.uri);
 
-    return extractPairsFromRecognizedText(recognitionResult);
+    return extractPairsFromRecognizedText(recognitionResult, {
+      width: asset.width,
+      height: asset.height,
+    });
   };
 
   const handlePickedPhotoForImport = async (asset) => {
@@ -1313,6 +1342,46 @@ export default function App() {
     beginQuizRound(shuffleItems(roundIncorrectCards), {
       requestedCount: roundIncorrectCards.length,
       mode: quizMode,
+      source: "retry",
+    });
+  };
+
+  const retryIncorrectCardsFromSession = (sessionItem) => {
+    const retryDeck = shuffleItems(
+      (sessionItem?.incorrectCards ?? [])
+        .map((card, index) => {
+          const currentPair = pairsRef.current.find((pair) => createSignature(pair.left, pair.right) === card.signature);
+          const left = currentPair?.left ?? card.left;
+          const right = currentPair?.right ?? card.right;
+          const direction = card.direction === "B_TO_A" ? "B_TO_A" : "A_TO_B";
+
+          if (!left || !right) {
+            return null;
+          }
+
+          return {
+            id: `history-retry-${sessionItem.id}-${index}-${direction}`,
+            pairId: currentPair?.id ?? `history-${sessionItem.id}-${index}`,
+            left,
+            right,
+            signature: createSignature(left, right),
+            createdAt: currentPair?.createdAt ?? sessionItem.completedAt ?? new Date().toISOString(),
+            prompt: direction === "B_TO_A" ? right : left,
+            answer: direction === "B_TO_A" ? left : right,
+            direction,
+          };
+        })
+        .filter(Boolean)
+    );
+
+    if (!retryDeck.length) {
+      Alert.alert(t("quiz.noRetryTitle"), t("quiz.noRetryBody"));
+      return;
+    }
+
+    beginQuizRound(retryDeck, {
+      requestedCount: retryDeck.length,
+      mode: sessionItem?.mode ?? quizMode,
       source: "retry",
     });
   };
@@ -2144,10 +2213,23 @@ export default function App() {
                         })}
                       </Text>
                     </View>
-                    <View style={[styles.historyBadge, item.incorrectCount > 0 && styles.historyBadgeBad]}>
-                      <Text style={[styles.historyBadgeText, item.incorrectCount > 0 && styles.historyBadgeTextBad]}>
-                        {t("history.incorrectBadge", { count: item.incorrectCount })}
-                      </Text>
+                    <View style={styles.historyItemSide}>
+                      <View style={[styles.historyBadge, item.incorrectCount > 0 && styles.historyBadgeBad]}>
+                        <Text style={[styles.historyBadgeText, item.incorrectCount > 0 && styles.historyBadgeTextBad]}>
+                          {t("history.incorrectBadge", { count: item.incorrectCount })}
+                        </Text>
+                      </View>
+                      {item.incorrectCount > 0 ? (
+                        <Pressable
+                          onPress={() => retryIncorrectCardsFromSession(item)}
+                          style={({ pressed }) => [
+                            styles.historyRetryButton,
+                            pressed && styles.pressed,
+                          ]}
+                        >
+                          <Text style={styles.historyRetryButtonText}>{t("history.retrySession")}</Text>
+                        </Pressable>
+                      ) : null}
                     </View>
                   </View>
                 ))}
@@ -2978,6 +3060,8 @@ const createStyles = (theme) => StyleSheet.create({
   manageActionRow: {
     flexDirection: "row",
     gap: 10,
+    marginTop: 12,
+    paddingTop: 4,
   },
   primaryButton: {
     flex: 1,
@@ -3705,7 +3789,7 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textPrimary,
   },
   compactSelectWrap: {
-    width: 168,
+    width: 184,
     gap: 8,
   },
   compactSelectTrigger: {
@@ -3949,13 +4033,14 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textSecondary,
   },
   historyList: {
-    gap: 10,
+    gap: 12,
   },
   historyItem: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 12,
-    padding: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 18,
     borderRadius: 18,
     backgroundColor: theme.surface,
     borderWidth: 1,
@@ -3963,7 +4048,11 @@ const createStyles = (theme) => StyleSheet.create({
   },
   historyItemBody: {
     flex: 1,
-    gap: 4,
+    gap: 6,
+  },
+  historyItemSide: {
+    alignItems: "flex-end",
+    gap: 8,
   },
   historyItemTitle: {
     fontSize: 14,
@@ -3991,6 +4080,19 @@ const createStyles = (theme) => StyleSheet.create({
   },
   historyBadgeTextBad: {
     color: theme.danger,
+  },
+  historyRetryButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: theme.accentSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  historyRetryButtonText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.accent,
   },
   historyChipText: {
     fontSize: 12,
