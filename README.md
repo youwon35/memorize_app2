@@ -5,6 +5,7 @@ MEMORIA is a mobile memorization app built with Expo React Native. It lets users
 ## What is included
 
 - A centered one-card composer for quick save flow
+- File import for `txt`, `csv`, `xls`, `xlsx`, and `docx` card sets
 - Local persistence with `AsyncStorage`
 - Random quiz mode that can ask `front -> back` or `back -> front`
 - Case-insensitive answer checking

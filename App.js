@@ -23,11 +23,19 @@ import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { makeRedirectUri } from "expo-auth-session";
 import { File } from "expo-file-system";
+import { EncodingType, readAsStringAsync } from "expo-file-system/legacy";
 import * as WebBrowser from "expo-web-browser";
 
 import { APP_FEATURES } from "./src/config/features";
 import { recognizePhotoCardPairs } from "./src/lib/photo-ocr";
 import { isSupabaseConfigured, supabase } from "./src/lib/supabase";
+import {
+  extractDocxTextFromBase64,
+  getImportAssetExtension,
+  isSupportedImportExtension,
+  parseSpreadsheetPairsFromText,
+  parseSpreadsheetPairsFromBase64,
+} from "./src/utils/import-files";
 import {
   appendStudySession,
   buildPracticeDeck,
@@ -1209,12 +1217,12 @@ export default function App() {
     }
   };
 
-  const importCardsFromTextFile = async () => {
+  const importCardsFromFile = async () => {
     setImporting(true);
 
     try {
       const picked = await DocumentPicker.getDocumentAsync({
-        type: ["text/plain", "text/*"],
+        type: "*/*",
         copyToCacheDirectory: true,
       });
 
@@ -1228,9 +1236,39 @@ export default function App() {
         throw new Error(t("alerts.fileUnreadable"));
       }
 
-      const file = new File(asset.uri);
-      const text = await file.text();
-      const { entries, invalidEntryIndexes } = parseImportedPairs(text);
+      const extension = getImportAssetExtension(asset);
+
+      if (!isSupportedImportExtension(extension)) {
+        Alert.alert(
+          t("alerts.importUnsupportedTypeTitle"),
+          t("alerts.importUnsupportedTypeBody")
+        );
+        return;
+      }
+
+      let entries = [];
+      let invalidEntryIndexes = [];
+
+      if (extension === "txt") {
+        const file = new File(asset.uri);
+        const text = await file.text();
+        ({ entries, invalidEntryIndexes } = parseImportedPairs(text));
+      } else if (extension === "csv") {
+        const file = new File(asset.uri);
+        const text = await file.text();
+        ({ entries, invalidEntryIndexes } = parseSpreadsheetPairsFromText(text));
+      } else if (extension === "xls" || extension === "xlsx") {
+        const base64 = await readAsStringAsync(asset.uri, {
+          encoding: EncodingType.Base64,
+        });
+        ({ entries, invalidEntryIndexes } = parseSpreadsheetPairsFromBase64(base64));
+      } else if (extension === "docx") {
+        const base64 = await readAsStringAsync(asset.uri, {
+          encoding: EncodingType.Base64,
+        });
+        const extractedText = await extractDocxTextFromBase64(base64);
+        ({ entries, invalidEntryIndexes } = parseImportedPairs(extractedText));
+      }
 
       if (!entries.length) {
         Alert.alert(
@@ -2051,7 +2089,7 @@ export default function App() {
 
           <Pressable
             disabled={importing}
-            onPress={() => void importCardsFromTextFile()}
+            onPress={() => void importCardsFromFile()}
             style={({ pressed }) => [
               styles.importButton,
               importing && styles.importButtonDisabled,
