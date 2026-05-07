@@ -127,12 +127,11 @@ const TUTORIAL_STEPS = [
   },
   {
     key: "save-single",
-    type: "coach",
+    type: "save-demo",
     tab: "save",
     icon: "cards-outline",
     titleKey: "tutorial.saveSingleTitle",
     bodyKey: "tutorial.saveSingleBody",
-    actionKey: "tutorial.nextFile",
   },
   {
     key: "save-file",
@@ -1260,9 +1259,35 @@ export default function App() {
     setTutorialStep(nextStep.key);
     applyTutorialStepSideEffects(nextStep);
 
-    if (nextStep.type === "coach" && nextStep.tab && tab !== nextStep.tab) {
+    if (
+      (nextStep.type === "coach" || nextStep.type === "save-demo") &&
+      nextStep.tab &&
+      tab !== nextStep.tab
+    ) {
       selectTab(nextStep.tab);
     }
+  };
+
+  const saveTutorialCard = async ({ left, right }) => {
+    const front = left.trim();
+    const back = right.trim();
+
+    if (!front || !back) {
+      Alert.alert(t("alerts.inputNeededTitle"), t("alerts.inputNeededBody"));
+      return false;
+    }
+
+    const saveResult = await saveEntryBatch([{ left: front, right: back }]);
+
+    if (!saveResult.savedCount) {
+      Alert.alert(t("alerts.duplicateSavedTitle"), t("alerts.duplicateSavedBody"));
+      return false;
+    }
+
+    setTranslatedNote(
+      saveResult.cloudSaved ? "notes.cardSavedCloud" : "notes.cardSavedLocal"
+    );
+    return true;
   };
 
   const saveEntryBatch = async (entries) => {
@@ -3428,6 +3453,7 @@ export default function App() {
             return (
               <Pressable
                 key={item.key}
+                disabled={guidedTutorialActive && !tutorialTarget}
                 onPress={() => handleTabChange(item.key)}
                 style={({ pressed }) => [
                   styles.tab,
@@ -3476,8 +3502,12 @@ export default function App() {
           theme={theme}
           t={t}
           maxWidth={tutorialMaxWidth}
+          tabBarWidth={tabBarWidth}
+          tabBarLeft={tabBarLeft}
           onClose={() => closeTutorial()}
           onNext={advanceTutorial}
+          onSaveDemo={saveTutorialCard}
+          onTargetTabPress={handleTabChange}
         />
       ) : null}
     </SafeAreaView>
@@ -3569,6 +3599,7 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
             <Text
               style={[
                 styles.secondaryButtonText,
+                styles.tutorialChoiceText,
                 !choicesReady && styles.secondaryButtonTextDisabled,
               ]}
             >
@@ -3588,6 +3619,7 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
             <Text
               style={[
                 styles.primaryButtonText,
+                styles.tutorialChoiceText,
                 !choicesReady && styles.primaryButtonTextDisabled,
               ]}
             >
@@ -3600,16 +3632,57 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
   );
 }
 
-function TutorialCoach({ step, styles, theme, t, onClose, onNext, maxWidth }) {
+function TutorialCoach({
+  step,
+  styles,
+  theme,
+  t,
+  onClose,
+  onNext,
+  onSaveDemo,
+  onTargetTabPress,
+  maxWidth,
+  tabBarWidth,
+  tabBarLeft,
+}) {
   const isTabStep = step.type === "tab";
+  const isSaveDemo = step.type === "save-demo";
   const tabLabel = t(`tabs.${step.tab}`);
+  const [demoFront, setDemoFront] = useState("");
+  const [demoBack, setDemoBack] = useState("");
+  const [savingDemo, setSavingDemo] = useState(false);
+
+  const saveDemoCard = async () => {
+    if (!onSaveDemo || savingDemo) {
+      return;
+    }
+
+    setSavingDemo(true);
+
+    try {
+      const saved = await onSaveDemo({ left: demoFront, right: demoBack });
+
+      if (saved) {
+        setDemoFront("");
+        setDemoBack("");
+        onNext();
+      }
+    } finally {
+      setSavingDemo(false);
+    }
+  };
 
   return (
-    <View pointerEvents="box-none" style={styles.tutorialCoachLayer}>
+    <View
+      pointerEvents="auto"
+      style={[styles.tutorialCoachLayer, isSaveDemo && styles.tutorialCoachLayerCentered]}
+    >
+      <Pressable style={styles.tutorialScrim} onPress={() => {}} />
       <View
         pointerEvents="auto"
         style={[
           styles.tutorialCoachBubble,
+          isSaveDemo && styles.tutorialCoachBubbleWide,
           maxWidth ? { maxWidth, alignSelf: "center", width: "100%" } : null,
         ]}
       >
@@ -3629,20 +3702,51 @@ function TutorialCoach({ step, styles, theme, t, onClose, onNext, maxWidth }) {
           </View>
         </View>
 
+        {isSaveDemo ? (
+          <View style={styles.tutorialDemoForm}>
+            <Text style={styles.tutorialDemoLabel}>{t("common.front")}</Text>
+            <TextInput
+              value={demoFront}
+              onChangeText={setDemoFront}
+              placeholder={t("tutorial.demoFrontPlaceholder")}
+              placeholderTextColor={theme.textPlaceholder}
+              style={styles.tutorialDemoInput}
+            />
+            <Text style={styles.tutorialDemoLabel}>{t("common.back")}</Text>
+            <TextInput
+              value={demoBack}
+              onChangeText={setDemoBack}
+              placeholder={t("tutorial.demoBackPlaceholder")}
+              placeholderTextColor={theme.textPlaceholder}
+              style={styles.tutorialDemoInput}
+            />
+          </View>
+        ) : null}
+
         <View style={styles.tutorialCoachActions}>
-          <Pressable
-            onPress={onClose}
-            style={({ pressed }) => [
-              styles.tutorialCoachSkipButton,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={styles.tutorialCoachSkipText}>{t("tutorial.stop")}</Text>
-          </Pressable>
           {isTabStep ? (
             <View style={styles.tutorialCoachWaitingPill}>
               <Text style={styles.tutorialCoachWaitingText}>{t("tutorial.waitingTap")}</Text>
             </View>
+          ) : isSaveDemo ? (
+            <Pressable
+              disabled={savingDemo}
+              onPress={() => void saveDemoCard()}
+              style={({ pressed }) => [
+                styles.tutorialCoachNextButton,
+                savingDemo && styles.primaryButtonDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.tutorialCoachNextText,
+                  savingDemo && styles.primaryButtonTextDisabled,
+                ]}
+              >
+                {savingDemo ? t("tutorial.demoSaving") : t("tutorial.demoSave")}
+              </Text>
+            </Pressable>
           ) : (
             <Pressable
               onPress={onNext}
@@ -3656,6 +3760,49 @@ function TutorialCoach({ step, styles, theme, t, onClose, onNext, maxWidth }) {
           )}
         </View>
       </View>
+      {isTabStep ? (
+        <View
+          pointerEvents="auto"
+          style={[
+            styles.tutorialSpotlightTabs,
+            tabBarWidth
+              ? {
+                  width: tabBarWidth,
+                  left: tabBarLeft,
+                  right: undefined,
+                }
+              : null,
+          ]}
+        >
+          {TABS.map((item) => {
+            const target = item.key === step.tab;
+
+            if (!target) {
+              return (
+                <View key={item.key} style={[styles.tutorialSpotlightTab, styles.tutorialSpotlightTabMuted]}>
+                  <MaterialCommunityIcons name={item.icon} size={22} color={theme.textSecondary} />
+                  <Text style={styles.tutorialSpotlightTabText}>{t(item.labelKey)}</Text>
+                </View>
+              );
+            }
+
+            return (
+              <Pressable
+                key={item.key}
+                onPress={() => onTargetTabPress?.(item.key)}
+                style={({ pressed }) => [
+                  styles.tutorialSpotlightTab,
+                  styles.tutorialSpotlightTabTarget,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <MaterialCommunityIcons name={item.icon} size={22} color={theme.accentText} />
+                <Text style={styles.tutorialSpotlightTabTextTarget}>{t(item.labelKey)}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -5178,12 +5325,14 @@ const createStyles = (theme) => StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
-    bottom: 0,
+    bottom: Platform.OS === "android" ? 42 : 0,
     paddingHorizontal: 20,
     paddingTop: 18,
-    paddingBottom: Platform.OS === "android" ? 34 : 28,
+    paddingBottom: Platform.OS === "android" ? 20 : 28,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
+    borderBottomLeftRadius: Platform.OS === "android" ? 28 : 0,
+    borderBottomRightRadius: Platform.OS === "android" ? 28 : 0,
     backgroundColor: theme.surfaceStrong,
   },
   tutorialActionRow: {
@@ -5191,14 +5340,27 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 12,
   },
   tutorialActionButton: {
-    minHeight: 56,
+    minHeight: 64,
     borderRadius: 18,
+    paddingHorizontal: 10,
+  },
+  tutorialChoiceText: {
+    textAlign: "center",
+    lineHeight: 20,
   },
   tutorialCoachLayer: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "flex-end",
     paddingHorizontal: 20,
     paddingBottom: Platform.OS === "android" ? 128 : 114,
+  },
+  tutorialCoachLayerCentered: {
+    justifyContent: "center",
+    paddingBottom: 0,
+  },
+  tutorialScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: theme.mode === "dark" ? "rgba(0, 0, 0, 0.68)" : "rgba(8, 13, 28, 0.58)",
   },
   tutorialCoachBubble: {
     position: "relative",
@@ -5208,6 +5370,9 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.surfaceStrong,
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
+  },
+  tutorialCoachBubbleWide: {
+    gap: 12,
   },
   tutorialCoachTail: {
     position: "absolute",
@@ -5263,21 +5428,6 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
-  tutorialCoachSkipButton: {
-    minHeight: 44,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.surfaceMuted,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
-  tutorialCoachSkipText: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: theme.textSecondary,
-  },
   tutorialCoachNextButton: {
     flex: 1,
     minHeight: 44,
@@ -5291,6 +5441,26 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 14,
     fontWeight: "900",
     color: theme.accentText,
+  },
+  tutorialDemoForm: {
+    gap: 8,
+  },
+  tutorialDemoLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.textSecondary,
+  },
+  tutorialDemoInput: {
+    minHeight: 46,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 15,
+    backgroundColor: theme.surfaceCard,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+    color: theme.textPrimary,
+    fontSize: 15,
+    fontWeight: "700",
   },
   tutorialCoachWaitingPill: {
     flex: 1,
@@ -5307,5 +5477,48 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 13,
     fontWeight: "800",
     color: theme.accent,
+  },
+  tutorialSpotlightTabs: {
+    position: "absolute",
+    left: 14,
+    right: 14,
+    bottom: Platform.OS === "android" ? 28 : 14,
+    flexDirection: "row",
+    gap: 8,
+    paddingTop: 10,
+    paddingHorizontal: 10,
+    paddingBottom: Platform.OS === "android" ? 18 : 10,
+    borderRadius: 28,
+    backgroundColor: theme.surfaceStrong,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  tutorialSpotlightTab: {
+    flex: 1,
+    minHeight: Platform.OS === "android" ? 74 : 66,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  tutorialSpotlightTabMuted: {
+    opacity: 0.38,
+  },
+  tutorialSpotlightTabTarget: {
+    backgroundColor: theme.accent,
+    borderWidth: 2,
+    borderColor: theme.surfaceStrong,
+  },
+  tutorialSpotlightTabText: {
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 16,
+    color: theme.tabText,
+  },
+  tutorialSpotlightTabTextTarget: {
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 16,
+    color: theme.accentText,
   },
 });
