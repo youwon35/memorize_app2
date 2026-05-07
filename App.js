@@ -5,7 +5,6 @@ import {
   Easing,
   Image,
   KeyboardAvoidingView,
-  Linking,
   Platform,
   Pressable,
   SafeAreaView,
@@ -77,7 +76,6 @@ const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
 const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
 const DEFAULT_QUIZ_COUNT = 10;
 const MAX_SESSION_HISTORY = 60;
-const SUPPORT_EMAIL = ["youwon35", "naver.com"].join("@");
 const SUPPORT_CATEGORY_OPTIONS = ["bug", "feature", "other"];
 const SUPPORT_STATUS_OPTIONS = ["received", "reviewing", "resolved"];
 const ADMIN_SUPPORT_PREVIEW_LIMIT = 12;
@@ -118,6 +116,86 @@ const TABS = [
   { key: "manage", labelKey: "tabs.manage", icon: "playlist-edit" },
   { key: "about", labelKey: "tabs.about", icon: "information-outline" },
 ];
+const TUTORIAL_STEPS = [
+  {
+    key: "save-tab",
+    type: "tab",
+    tab: "save",
+    icon: "cards-outline",
+    titleKey: "tutorial.saveTabTitle",
+    bodyKey: "tutorial.saveTabBody",
+  },
+  {
+    key: "save-single",
+    type: "coach",
+    tab: "save",
+    icon: "cards-outline",
+    titleKey: "tutorial.saveSingleTitle",
+    bodyKey: "tutorial.saveSingleBody",
+    actionKey: "tutorial.nextFile",
+  },
+  {
+    key: "save-file",
+    type: "coach",
+    tab: "save",
+    icon: "file-document-plus-outline",
+    titleKey: "tutorial.saveFileTitle",
+    bodyKey: "tutorial.saveFileBody",
+    actionKey: "tutorial.nextQuiz",
+  },
+  {
+    key: "quiz-tab",
+    type: "tab",
+    tab: "quiz",
+    icon: "brain",
+    titleKey: "tutorial.quizTabTitle",
+    bodyKey: "tutorial.quizTabBody",
+  },
+  {
+    key: "quiz-use",
+    type: "coach",
+    tab: "quiz",
+    icon: "brain",
+    titleKey: "tutorial.quizUseTitle",
+    bodyKey: "tutorial.quizUseBody",
+    actionKey: "tutorial.nextHistory",
+  },
+  {
+    key: "history-tab",
+    type: "tab",
+    tab: "history",
+    icon: "chart-timeline-variant",
+    titleKey: "tutorial.historyTabTitle",
+    bodyKey: "tutorial.historyTabBody",
+  },
+  {
+    key: "history-use",
+    type: "coach",
+    tab: "history",
+    icon: "chart-timeline-variant",
+    titleKey: "tutorial.historyUseTitle",
+    bodyKey: "tutorial.historyUseBody",
+    actionKey: "tutorial.nextManage",
+  },
+  {
+    key: "manage-tab",
+    type: "tab",
+    tab: "manage",
+    icon: "playlist-edit",
+    titleKey: "tutorial.manageTabTitle",
+    bodyKey: "tutorial.manageTabBody",
+  },
+  {
+    key: "manage-use",
+    type: "coach",
+    tab: "manage",
+    icon: "playlist-edit",
+    titleKey: "tutorial.manageUseTitle",
+    bodyKey: "tutorial.manageUseBody",
+    actionKey: "tutorial.finish",
+  },
+];
+const TUTORIAL_STEP_MAP = Object.fromEntries(TUTORIAL_STEPS.map((step) => [step.key, step]));
 const SAVE_INPUT_OPTIONS = [
   { key: "single", labelKey: "saveModes.single", icon: "cards-outline" },
   { key: "text", labelKey: "saveModes.text", icon: "file-document-plus-outline" },
@@ -206,6 +284,15 @@ const LIGHT_THEME = {
 
 const getQuizModeConfig = (mode) =>
   QUIZ_MODE_OPTIONS.find((option) => option.key === mode) ?? QUIZ_MODE_OPTIONS[0];
+const getNextTutorialStep = (currentKey) => {
+  const currentIndex = TUTORIAL_STEPS.findIndex((step) => step.key === currentKey);
+
+  if (currentIndex < 0) {
+    return TUTORIAL_STEPS[0];
+  }
+
+  return TUTORIAL_STEPS[currentIndex + 1] ?? null;
+};
 const appendUniqueId = (items, nextId) => (items.includes(nextId) ? items : [...items, nextId]);
 const isValidEmail = (value) => /\S+@\S+\.\S+/.test(value.trim());
 const calculateMissRate = (cardStats = {}) => {
@@ -300,6 +387,7 @@ export default function App() {
   const [tutorialSeen, setTutorialSeen] = useState(true);
   const [tutorialReady, setTutorialReady] = useState(false);
   const [tutorialVisible, setTutorialVisible] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState("intro");
   const [session, setSession] = useState(null);
   const [userRole, setUserRole] = useState("user");
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
@@ -381,13 +469,42 @@ export default function App() {
     : Number.isFinite(parsedQuizCount) && parsedQuizCount > 0
       ? Math.min(parsedQuizCount, maxQuizCount)
       : Math.min(DEFAULT_QUIZ_COUNT, maxQuizCount);
+  const guidedTutorialActive = tutorialVisible && tutorialStep !== "intro";
+  const currentTutorialStep = guidedTutorialActive ? TUTORIAL_STEP_MAP[tutorialStep] : null;
 
-  const handleTabChange = (nextTab) => {
+  const selectTab = (nextTab) => {
     setTab(nextTab);
     setManageSortMenuOpen(false);
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo?.({ y: 0, animated: false });
     });
+  };
+
+  const applyTutorialStepSideEffects = (step) => {
+    if (step?.key === "save-single") {
+      setSaveInputMode("single");
+    }
+
+    if (step?.key === "save-file") {
+      setSaveInputMode("text");
+    }
+  };
+
+  const handleTabChange = (nextTab) => {
+    selectTab(nextTab);
+
+    if (
+      guidedTutorialActive &&
+      currentTutorialStep?.type === "tab" &&
+      currentTutorialStep.tab === nextTab
+    ) {
+      const nextStep = getNextTutorialStep(tutorialStep);
+
+      if (nextStep) {
+        setTutorialStep(nextStep.key);
+        applyTutorialStepSideEffects(nextStep);
+      }
+    }
   };
   const setTranslatedNote = (key, params = {}) => {
     setNoteState({ key, params });
@@ -646,12 +763,6 @@ export default function App() {
   }, [studyStats]);
 
   useEffect(() => {
-    if (session?.user?.email) {
-      setSupportReplyEmail((currentValue) => currentValue || session.user.email);
-    }
-  }, [session?.user?.email]);
-
-  useEffect(() => {
     if (!maxQuizCount) {
       return;
     }
@@ -777,6 +888,7 @@ export default function App() {
       return;
     }
 
+    setTutorialStep("intro");
     setTutorialVisible(true);
   }, [launchVisible, storageReady, tutorialReady, tutorialSeen]);
 
@@ -1119,11 +1231,37 @@ export default function App() {
 
   const closeTutorial = (nextTab = null) => {
     setTutorialVisible(false);
+    setTutorialStep("intro");
     setTutorialSeen(true);
     void AsyncStorage.setItem(TUTORIAL_SEEN_KEY, "1");
 
     if (nextTab) {
-      handleTabChange(nextTab);
+      selectTab(nextTab);
+    }
+  };
+
+  const openTutorial = () => {
+    setTutorialStep("intro");
+    setTutorialVisible(true);
+  };
+
+  const startGuidedTutorial = () => {
+    setTutorialStep(TUTORIAL_STEPS[0].key);
+  };
+
+  const advanceTutorial = () => {
+    const nextStep = getNextTutorialStep(tutorialStep);
+
+    if (!nextStep) {
+      closeTutorial();
+      return;
+    }
+
+    setTutorialStep(nextStep.key);
+    applyTutorialStepSideEffects(nextStep);
+
+    if (nextStep.type === "coach" && nextStep.tab && tab !== nextStep.tab) {
+      selectTab(nextStep.tab);
     }
   };
 
@@ -1891,37 +2029,6 @@ export default function App() {
     }
   };
 
-  const openSupportEmail = async () => {
-    try {
-      const subject = `${APP_NAME} ${t("about.supportTitle")}`;
-      const body = [
-        t("about.supportMessagePlaceholder"),
-        "",
-        session?.user?.email ? `${t("common.sender")}: ${session.user.email}` : null,
-        `${t("common.app")}: ${APP_NAME}`,
-        `${t("common.platform")}: ${Platform.OS}`,
-      ]
-        .filter(Boolean)
-        .join("\n");
-      const encodedSubject = encodeURIComponent(subject);
-      const encodedBody = encodeURIComponent(body);
-      const emailUrl = `mailto:${SUPPORT_EMAIL}?subject=${encodedSubject}&body=${encodedBody}`;
-      const browserComposeUrl =
-        `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(SUPPORT_EMAIL)}` +
-        `&su=${encodedSubject}&body=${encodedBody}`;
-      const canOpen = await Linking.canOpenURL(emailUrl);
-
-      if (canOpen) {
-        await Linking.openURL(emailUrl);
-        return;
-      }
-
-      await WebBrowser.openBrowserAsync(browserComposeUrl);
-    } catch (error) {
-      Alert.alert(t("about.openSupportFail"), error?.message || t("common.retryLater"));
-    }
-  };
-
   const login = async () => {
     if (!supabase) {
       Alert.alert(
@@ -1982,7 +2089,13 @@ export default function App() {
           return (
             <Pressable
               key={option.key}
-              onPress={() => setSaveInputMode(option.key)}
+              onPress={() => {
+                setSaveInputMode(option.key);
+
+                if (guidedTutorialActive && tutorialStep === "save-single" && option.key === "text") {
+                  setTutorialStep("save-file");
+                }
+              }}
               style={({ pressed }) => [
                 styles.saveModeChip,
                 active && styles.saveModeChipActive,
@@ -2960,7 +3073,7 @@ export default function App() {
         <View style={styles.appSummaryCard}>
           <Text style={styles.settingsTitle}>MEMORIA</Text>
           <Text style={styles.settingsBody}>{t("about.summaryBody")}</Text>
-          <Pressable onPress={() => setTutorialVisible(true)} style={({ pressed }) => [styles.inlineActionButton, pressed && styles.pressed]}>
+          <Pressable onPress={openTutorial} style={({ pressed }) => [styles.inlineActionButton, pressed && styles.pressed]}>
             <Text style={styles.inlineActionButtonText}>{t("about.tutorialAgain")}</Text>
           </Pressable>
         </View>
@@ -3307,6 +3420,10 @@ export default function App() {
         >
           {TABS.map((item) => {
             const active = tab === item.key;
+            const tutorialTarget =
+              guidedTutorialActive &&
+              currentTutorialStep?.type === "tab" &&
+              currentTutorialStep.tab === item.key;
 
             return (
               <Pressable
@@ -3314,6 +3431,7 @@ export default function App() {
                 onPress={() => handleTabChange(item.key)}
                 style={({ pressed }) => [
                   styles.tab,
+                  tutorialTarget && styles.tabTutorialTarget,
                   active && styles.tabActive,
                   pressed && styles.pressed,
                 ]}
@@ -3321,9 +3439,17 @@ export default function App() {
                 <MaterialCommunityIcons
                   name={item.icon}
                   size={22}
-                  color={active ? theme.iconContrast : theme.textSecondary}
+                  color={active ? theme.iconContrast : tutorialTarget ? theme.accent : theme.textSecondary}
                 />
-                <Text style={[styles.tabText, active && styles.tabTextActive]}>{t(item.labelKey)}</Text>
+                <Text
+                  style={[
+                    styles.tabText,
+                    tutorialTarget && styles.tabTextTutorialTarget,
+                    active && styles.tabTextActive,
+                  ]}
+                >
+                  {t(item.labelKey)}
+                </Text>
               </Pressable>
             );
           })}
@@ -3333,14 +3459,25 @@ export default function App() {
       {launchVisible ? (
         <LaunchScreen opacity={launchOpacity} scale={launchScale} glow={moonGlow} styles={styles} />
       ) : null}
-      {tutorialVisible ? (
+      {tutorialVisible && tutorialStep === "intro" ? (
         <TutorialOverlay
           styles={styles}
           theme={theme}
           t={t}
           maxWidth={tutorialMaxWidth}
           onClose={() => closeTutorial()}
-          onStart={() => closeTutorial("save")}
+          onStart={startGuidedTutorial}
+        />
+      ) : null}
+      {guidedTutorialActive && currentTutorialStep ? (
+        <TutorialCoach
+          step={currentTutorialStep}
+          styles={styles}
+          theme={theme}
+          t={t}
+          maxWidth={tutorialMaxWidth}
+          onClose={() => closeTutorial()}
+          onNext={advanceTutorial}
         />
       ) : null}
     </SafeAreaView>
@@ -3366,35 +3503,24 @@ function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) 
 
 function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
   const messages = [
-    { from: "bot", icon: "cards-outline", text: t("tutorial.messageHello") },
-    { from: "bot", text: t("tutorial.messageIntro") },
-    { from: "user", text: t("tutorial.replyReady") },
-    {
-      from: "bot",
-      icon: "cards-outline",
-      title: t("tutorial.saveTitle"),
-      text: t("tutorial.saveBody"),
-    },
-    {
-      from: "bot",
-      icon: "brain",
-      title: t("tutorial.quizTitle"),
-      text: t("tutorial.quizBody"),
-    },
-    { from: "user", text: t("tutorial.replyHistory") },
-    {
-      from: "bot",
-      icon: "chart-timeline-variant",
-      title: t("tutorial.historyTitle"),
-      text: t("tutorial.historyBody"),
-    },
-    {
-      from: "bot",
-      icon: "playlist-edit",
-      title: t("tutorial.manageTitle"),
-      text: t("tutorial.manageBody"),
-    },
+    { icon: "cards-outline", text: t("tutorial.messageHello") },
+    { icon: "compass-rose", text: t("tutorial.messageIntro") },
   ];
+  const [visibleMessageCount, setVisibleMessageCount] = useState(1);
+
+  useEffect(() => {
+    if (visibleMessageCount >= messages.length) {
+      return undefined;
+    }
+
+    const timeoutId = setTimeout(() => {
+      setVisibleMessageCount((currentCount) => Math.min(messages.length, currentCount + 1));
+    }, 650);
+
+    return () => clearTimeout(timeoutId);
+  }, [messages.length, visibleMessageCount]);
+
+  const choicesReady = visibleMessageCount >= messages.length;
 
   return (
     <View style={styles.tutorialOverlay}>
@@ -3411,41 +3537,20 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
         </View>
 
         <View style={styles.tutorialChat}>
-          {messages.map((message, index) => {
-            const isUser = message.from === "user";
-
-            return (
-              <View
-                key={`${message.from}-${index}`}
-                style={[styles.tutorialMessageRow, isUser && styles.tutorialMessageRowUser]}
-              >
-                {!isUser ? (
-                  <View style={styles.tutorialAvatar}>
-                    <MaterialCommunityIcons
-                      name={message.icon ?? "compass-rose"}
-                      size={19}
-                      color={theme.accentText}
-                    />
-                  </View>
-                ) : null}
-                <View style={[styles.tutorialBubble, isUser && styles.tutorialBubbleUser]}>
-                  {message.title ? (
-                    <Text
-                      style={[
-                        styles.tutorialBubbleTitle,
-                        isUser && styles.tutorialBubbleTextUser,
-                      ]}
-                    >
-                      {message.title}
-                    </Text>
-                  ) : null}
-                  <Text style={[styles.tutorialBubbleText, isUser && styles.tutorialBubbleTextUser]}>
-                    {message.text}
-                  </Text>
-                </View>
+          {messages.slice(0, visibleMessageCount).map((message, index) => (
+            <View key={`${message.icon}-${index}`} style={styles.tutorialMessageRow}>
+              <View style={styles.tutorialAvatar}>
+                <MaterialCommunityIcons
+                  name={message.icon}
+                  size={19}
+                  color={theme.accentText}
+                />
               </View>
-            );
-          })}
+              <View style={styles.tutorialBubble}>
+                <Text style={styles.tutorialBubbleText}>{message.text}</Text>
+              </View>
+            </View>
+          ))}
         </View>
       </ScrollView>
 
@@ -3453,24 +3558,102 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
         <View style={styles.tutorialActionRow}>
           <Pressable
             onPress={onClose}
+            disabled={!choicesReady}
             style={({ pressed }) => [
               styles.secondaryButton,
               styles.tutorialActionButton,
+              !choicesReady && styles.secondaryButtonDisabled,
               pressed && styles.pressed,
             ]}
           >
-            <Text style={styles.secondaryButtonText}>{t("tutorial.skip")}</Text>
+            <Text
+              style={[
+                styles.secondaryButtonText,
+                !choicesReady && styles.secondaryButtonTextDisabled,
+              ]}
+            >
+              {t("tutorial.alreadyKnow")}
+            </Text>
           </Pressable>
           <Pressable
             onPress={onStart}
+            disabled={!choicesReady}
             style={({ pressed }) => [
               styles.primaryButton,
               styles.tutorialActionButton,
+              !choicesReady && styles.primaryButtonDisabled,
               pressed && styles.pressed,
             ]}
           >
-            <Text style={styles.primaryButtonText}>{t("tutorial.startNow")}</Text>
+            <Text
+              style={[
+                styles.primaryButtonText,
+                !choicesReady && styles.primaryButtonTextDisabled,
+              ]}
+            >
+              {t("tutorial.like")}
+            </Text>
           </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function TutorialCoach({ step, styles, theme, t, onClose, onNext, maxWidth }) {
+  const isTabStep = step.type === "tab";
+  const tabLabel = t(`tabs.${step.tab}`);
+
+  return (
+    <View pointerEvents="box-none" style={styles.tutorialCoachLayer}>
+      <View
+        pointerEvents="auto"
+        style={[
+          styles.tutorialCoachBubble,
+          maxWidth ? { maxWidth, alignSelf: "center", width: "100%" } : null,
+        ]}
+      >
+        {isTabStep ? <View style={styles.tutorialCoachTail} /> : null}
+        <View style={styles.tutorialCoachHeader}>
+          <View style={styles.tutorialCoachIcon}>
+            <MaterialCommunityIcons name={step.icon} size={18} color={theme.accentText} />
+          </View>
+          <View style={styles.tutorialCoachCopy}>
+            <Text style={styles.tutorialCoachTitle}>{t(step.titleKey)}</Text>
+            <Text style={styles.tutorialCoachText}>{t(step.bodyKey)}</Text>
+            {isTabStep ? (
+              <Text style={styles.tutorialCoachHint}>
+                {t("tutorial.tapTabHint", { tab: tabLabel })}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+
+        <View style={styles.tutorialCoachActions}>
+          <Pressable
+            onPress={onClose}
+            style={({ pressed }) => [
+              styles.tutorialCoachSkipButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.tutorialCoachSkipText}>{t("tutorial.stop")}</Text>
+          </Pressable>
+          {isTabStep ? (
+            <View style={styles.tutorialCoachWaitingPill}>
+              <Text style={styles.tutorialCoachWaitingText}>{t("tutorial.waitingTap")}</Text>
+            </View>
+          ) : (
+            <Pressable
+              onPress={onNext}
+              style={({ pressed }) => [
+                styles.tutorialCoachNextButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={styles.tutorialCoachNextText}>{t(step.actionKey)}</Text>
+            </Pressable>
+          )}
         </View>
       </View>
     </View>
@@ -4834,11 +5017,19 @@ const createStyles = (theme) => StyleSheet.create({
   tabActive: {
     backgroundColor: theme.accent,
   },
+  tabTutorialTarget: {
+    borderWidth: 2,
+    borderColor: theme.accent,
+    backgroundColor: theme.mode === "dark" ? "rgba(184, 174, 255, 0.14)" : "rgba(142, 123, 255, 0.12)",
+  },
   tabText: {
     fontSize: 13,
     fontWeight: "700",
     lineHeight: 16,
     color: theme.tabText,
+  },
+  tabTextTutorialTarget: {
+    color: theme.accent,
   },
   tabTextActive: {
     color: theme.accentText,
@@ -4904,7 +5095,7 @@ const createStyles = (theme) => StyleSheet.create({
   },
   tutorialOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: theme.mode === "dark" ? "#0B1020" : "#EAF4FF",
+    backgroundColor: theme.appBg,
   },
   tutorialScrollContent: {
     flexGrow: 1,
@@ -4919,13 +5110,13 @@ const createStyles = (theme) => StyleSheet.create({
   tutorialTitle: {
     fontSize: 30,
     fontWeight: "900",
-    color: theme.mode === "dark" ? theme.textPrimary : "#111827",
+    color: theme.textPrimary,
   },
   tutorialCaption: {
     fontSize: 15,
     lineHeight: 22,
     fontWeight: "700",
-    color: theme.mode === "dark" ? theme.textMuted : "#7890B8",
+    color: theme.textMuted,
   },
   tutorialChat: {
     gap: 14,
@@ -4948,7 +5139,7 @@ const createStyles = (theme) => StyleSheet.create({
     justifyContent: "center",
     backgroundColor: theme.accent,
     borderWidth: 6,
-    borderColor: theme.mode === "dark" ? "rgba(255, 255, 255, 0.08)" : "#FFFFFF",
+    borderColor: theme.surfaceStrong,
   },
   tutorialBubble: {
     maxWidth: "86%",
@@ -4959,7 +5150,9 @@ const createStyles = (theme) => StyleSheet.create({
     borderTopRightRadius: 22,
     borderBottomRightRadius: 22,
     borderBottomLeftRadius: 22,
-    backgroundColor: theme.mode === "dark" ? theme.surfaceStrong : "#FFFFFF",
+    backgroundColor: theme.surfaceStrong,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
   },
   tutorialBubbleUser: {
     borderTopLeftRadius: 22,
@@ -4976,7 +5169,7 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 16,
     lineHeight: 25,
     fontWeight: "600",
-    color: theme.mode === "dark" ? theme.textStrong : "#111827",
+    color: theme.textStrong,
   },
   tutorialBubbleTextUser: {
     color: theme.accentText,
@@ -5000,5 +5193,119 @@ const createStyles = (theme) => StyleSheet.create({
   tutorialActionButton: {
     minHeight: 56,
     borderRadius: 18,
+  },
+  tutorialCoachLayer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "flex-end",
+    paddingHorizontal: 20,
+    paddingBottom: Platform.OS === "android" ? 128 : 114,
+  },
+  tutorialCoachBubble: {
+    position: "relative",
+    gap: 14,
+    padding: 16,
+    borderRadius: 24,
+    backgroundColor: theme.surfaceStrong,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  tutorialCoachTail: {
+    position: "absolute",
+    left: 42,
+    bottom: -12,
+    width: 24,
+    height: 24,
+    borderRadius: 5,
+    backgroundColor: theme.surfaceStrong,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: theme.surfaceBorder,
+    transform: [{ rotate: "45deg" }],
+  },
+  tutorialCoachHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  tutorialCoachIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accent,
+  },
+  tutorialCoachCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 5,
+  },
+  tutorialCoachTitle: {
+    fontSize: 17,
+    lineHeight: 23,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  tutorialCoachText: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: theme.textSecondary,
+  },
+  tutorialCoachHint: {
+    marginTop: 4,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: "800",
+    color: theme.accent,
+  },
+  tutorialCoachActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  tutorialCoachSkipButton: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.surfaceMuted,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  tutorialCoachSkipText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: theme.textSecondary,
+  },
+  tutorialCoachNextButton: {
+    flex: 1,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accent,
+  },
+  tutorialCoachNextText: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: theme.accentText,
+  },
+  tutorialCoachWaitingPill: {
+    flex: 1,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accentSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  tutorialCoachWaitingText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: theme.accent,
   },
 });
