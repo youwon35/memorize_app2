@@ -2754,7 +2754,6 @@ export default function App() {
                       <View style={styles.manageDisplayStack}>
                         <View style={styles.manageDisplayRow}>
                           <View style={styles.manageTextBlock}>
-                            <Text style={styles.previewLabel}>{t("common.front")}</Text>
                             <Text style={styles.managePairText} numberOfLines={1} ellipsizeMode="tail">
                               {pair.left}
                             </Text>
@@ -2777,7 +2776,6 @@ export default function App() {
                         <View style={styles.manageRowDivider} />
                         <View style={styles.manageDisplayRow}>
                           <View style={styles.manageTextBlock}>
-                            <Text style={styles.previewLabel}>{t("common.back")}</Text>
                             <Text style={styles.managePairText} numberOfLines={1} ellipsizeMode="tail">
                               {pair.right}
                             </Text>
@@ -3343,7 +3341,6 @@ export default function App() {
           maxWidth={tutorialMaxWidth}
           onClose={() => closeTutorial()}
           onStart={() => closeTutorial("save")}
-          onOpenHistory={() => closeTutorial("history")}
         />
       ) : null}
     </SafeAreaView>
@@ -3367,54 +3364,111 @@ function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) 
   );
 }
 
-function TutorialOverlay({ styles, theme, t, onClose, onStart, onOpenHistory, maxWidth }) {
+function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
+  const messages = [
+    { from: "bot", icon: "cards-outline", text: t("tutorial.messageHello") },
+    { from: "bot", text: t("tutorial.messageIntro") },
+    { from: "user", text: t("tutorial.replyReady") },
+    {
+      from: "bot",
+      icon: "cards-outline",
+      title: t("tutorial.saveTitle"),
+      text: t("tutorial.saveBody"),
+    },
+    {
+      from: "bot",
+      icon: "brain",
+      title: t("tutorial.quizTitle"),
+      text: t("tutorial.quizBody"),
+    },
+    { from: "user", text: t("tutorial.replyHistory") },
+    {
+      from: "bot",
+      icon: "chart-timeline-variant",
+      title: t("tutorial.historyTitle"),
+      text: t("tutorial.historyBody"),
+    },
+    {
+      from: "bot",
+      icon: "playlist-edit",
+      title: t("tutorial.manageTitle"),
+      text: t("tutorial.manageBody"),
+    },
+  ];
+
   return (
     <View style={styles.tutorialOverlay}>
-      <Pressable style={styles.tutorialBackdrop} onPress={onClose} />
-      <View style={[styles.tutorialCard, maxWidth ? { maxWidth, alignSelf: "center" } : null]}>
-        <View style={styles.tutorialBadge}>
-          <MaterialCommunityIcons name="compass-rose" size={20} color={theme.accentText} />
-        </View>
-        <Text style={styles.tutorialTitle}>{t("tutorial.title")}</Text>
-        <Text style={styles.tutorialBody}>{t("tutorial.body")}</Text>
-
-        <View style={styles.tutorialStepList}>
-          <View style={styles.tutorialStep}>
-            <View style={styles.tutorialStepIcon}>
-              <MaterialCommunityIcons name="cards-outline" size={18} color={theme.accent} />
-            </View>
-            <View style={styles.flex}>
-              <Text style={styles.tutorialStepTitle}>{t("tutorial.step1Title")}</Text>
-              <Text style={styles.tutorialStepBody}>{t("tutorial.step1Body")}</Text>
-            </View>
-          </View>
-
-          <View style={styles.tutorialStep}>
-            <View style={styles.tutorialStepIcon}>
-              <MaterialCommunityIcons name="brain" size={18} color={theme.accent} />
-            </View>
-            <View style={styles.flex}>
-              <Text style={styles.tutorialStepTitle}>{t("tutorial.step2Title")}</Text>
-              <Text style={styles.tutorialStepBody}>{t("tutorial.step2Body")}</Text>
-            </View>
-          </View>
-
-          <View style={styles.tutorialStep}>
-            <View style={styles.tutorialStepIcon}>
-              <MaterialCommunityIcons name="chart-timeline-variant" size={18} color={theme.accent} />
-            </View>
-            <View style={styles.flex}>
-              <Text style={styles.tutorialStepTitle}>{t("tutorial.step3Title")}</Text>
-              <Text style={styles.tutorialStepBody}>{t("tutorial.step3Body")}</Text>
-            </View>
-          </View>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          styles.tutorialScrollContent,
+          maxWidth ? { maxWidth, alignSelf: "center", width: "100%" } : null,
+        ]}
+      >
+        <View style={styles.tutorialHeader}>
+          <Text style={styles.tutorialTitle}>{t("tutorial.title")}</Text>
+          <Text style={styles.tutorialCaption}>{t("tutorial.caption")}</Text>
         </View>
 
+        <View style={styles.tutorialChat}>
+          {messages.map((message, index) => {
+            const isUser = message.from === "user";
+
+            return (
+              <View
+                key={`${message.from}-${index}`}
+                style={[styles.tutorialMessageRow, isUser && styles.tutorialMessageRowUser]}
+              >
+                {!isUser ? (
+                  <View style={styles.tutorialAvatar}>
+                    <MaterialCommunityIcons
+                      name={message.icon ?? "compass-rose"}
+                      size={19}
+                      color={theme.accentText}
+                    />
+                  </View>
+                ) : null}
+                <View style={[styles.tutorialBubble, isUser && styles.tutorialBubbleUser]}>
+                  {message.title ? (
+                    <Text
+                      style={[
+                        styles.tutorialBubbleTitle,
+                        isUser && styles.tutorialBubbleTextUser,
+                      ]}
+                    >
+                      {message.title}
+                    </Text>
+                  ) : null}
+                  <Text style={[styles.tutorialBubbleText, isUser && styles.tutorialBubbleTextUser]}>
+                    {message.text}
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      </ScrollView>
+
+      <View style={styles.tutorialBottomSheet}>
         <View style={styles.tutorialActionRow}>
-          <Pressable onPress={onOpenHistory} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-            <Text style={styles.secondaryButtonText}>{t("tutorial.viewHistory")}</Text>
+          <Pressable
+            onPress={onClose}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              styles.tutorialActionButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.secondaryButtonText}>{t("tutorial.skip")}</Text>
           </Pressable>
-          <Pressable onPress={onStart} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
+          <Pressable
+            onPress={onStart}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              styles.tutorialActionButton,
+              pressed && styles.pressed,
+            ]}
+          >
             <Text style={styles.primaryButtonText}>{t("tutorial.startNow")}</Text>
           </Pressable>
         </View>
@@ -4279,33 +4333,32 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textPrimary,
   },
   manageCard: {
-    gap: 8,
-    padding: 12,
-    borderRadius: 20,
+    gap: 6,
+    padding: 10,
+    borderRadius: 18,
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
   manageDisplayStack: {
-    gap: 6,
+    gap: 4,
   },
   manageDisplayRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    minHeight: 84,
+    minHeight: 44,
   },
   manageTextBlock: {
     flexGrow: 1,
     flexShrink: 1,
     maxWidth: "75%",
     minWidth: 0,
-    gap: 2,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    height: 84,
+    paddingVertical: 0,
+    height: 44,
     justifyContent: "center",
-    borderRadius: 16,
+    borderRadius: 14,
     backgroundColor: theme.surfaceCard,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
@@ -4319,16 +4372,16 @@ const createStyles = (theme) => StyleSheet.create({
   manageRowDivider: {
     height: 1,
     marginLeft: 12,
-    marginRight: 92,
+    marginRight: 86,
     backgroundColor: theme.surfaceBorderSoft,
   },
   manageSideButton: {
     flex: 0,
-    width: 86,
-    height: 84,
-    minHeight: 84,
+    width: 80,
+    height: 44,
+    minHeight: 44,
     paddingVertical: 0,
-    borderRadius: 14,
+    borderRadius: 13,
     alignSelf: "stretch",
   },
   aboutStack: {
@@ -4851,73 +4904,101 @@ const createStyles = (theme) => StyleSheet.create({
   },
   tutorialOverlay: {
     ...StyleSheet.absoluteFillObject,
-    justifyContent: "center",
-    paddingHorizontal: 18,
+    backgroundColor: theme.mode === "dark" ? "#0B1020" : "#EAF4FF",
   },
-  tutorialBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: theme.mode === "dark" ? "rgba(4, 7, 15, 0.72)" : "rgba(19, 27, 48, 0.22)",
+  tutorialScrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) + 34 : 54,
+    paddingBottom: 148,
   },
-  tutorialCard: {
-    gap: 16,
-    padding: 22,
-    borderRadius: 28,
-    backgroundColor: theme.surfaceStrong,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
+  tutorialHeader: {
+    gap: 8,
+    marginBottom: 28,
   },
-  tutorialBadge: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+  tutorialTitle: {
+    fontSize: 30,
+    fontWeight: "900",
+    color: theme.mode === "dark" ? theme.textPrimary : "#111827",
+  },
+  tutorialCaption: {
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: "700",
+    color: theme.mode === "dark" ? theme.textMuted : "#7890B8",
+  },
+  tutorialChat: {
+    gap: 14,
+  },
+  tutorialMessageRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    maxWidth: "92%",
+  },
+  tutorialMessageRowUser: {
+    alignSelf: "flex-end",
+    justifyContent: "flex-end",
+  },
+  tutorialAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: theme.accent,
+    borderWidth: 6,
+    borderColor: theme.mode === "dark" ? "rgba(255, 255, 255, 0.08)" : "#FFFFFF",
   },
-  tutorialTitle: {
-    fontSize: 24,
+  tutorialBubble: {
+    maxWidth: "86%",
+    gap: 4,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 22,
+    borderBottomRightRadius: 22,
+    borderBottomLeftRadius: 22,
+    backgroundColor: theme.mode === "dark" ? theme.surfaceStrong : "#FFFFFF",
+  },
+  tutorialBubbleUser: {
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 8,
+    backgroundColor: theme.accent,
+  },
+  tutorialBubbleTitle: {
+    fontSize: 15,
+    lineHeight: 21,
     fontWeight: "800",
     color: theme.textPrimary,
   },
-  tutorialBody: {
-    fontSize: 14,
-    lineHeight: 22,
-    color: theme.textSecondary,
+  tutorialBubbleText: {
+    fontSize: 16,
+    lineHeight: 25,
+    fontWeight: "600",
+    color: theme.mode === "dark" ? theme.textStrong : "#111827",
   },
-  tutorialStepList: {
-    gap: 12,
+  tutorialBubbleTextUser: {
+    color: theme.accentText,
   },
-  tutorialStep: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
-    padding: 14,
-    borderRadius: 18,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
-  tutorialStepIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.accentSoft,
-  },
-  tutorialStepTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: theme.textPrimary,
-  },
-  tutorialStepBody: {
-    marginTop: 3,
-    fontSize: 13,
-    lineHeight: 20,
-    color: theme.textSecondary,
+  tutorialBottomSheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: Platform.OS === "android" ? 34 : 28,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    backgroundColor: theme.surfaceStrong,
   },
   tutorialActionRow: {
     flexDirection: "row",
     gap: 12,
+  },
+  tutorialActionButton: {
+    minHeight: 56,
+    borderRadius: 18,
   },
 });
