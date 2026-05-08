@@ -191,6 +191,23 @@ const TUTORIAL_STEPS = [
     icon: "playlist-edit",
     titleKey: "tutorial.manageUseTitle",
     bodyKey: "tutorial.manageUseBody",
+    actionKey: "tutorial.nextAbout",
+  },
+  {
+    key: "about-tab",
+    type: "tab",
+    tab: "about",
+    icon: "information-outline",
+    titleKey: "tutorial.aboutTabTitle",
+    bodyKey: "tutorial.aboutTabBody",
+  },
+  {
+    key: "about-support",
+    type: "coach",
+    tab: "about",
+    icon: "message-question-outline",
+    titleKey: "tutorial.aboutSupportTitle",
+    bodyKey: "tutorial.aboutSupportBody",
     actionKey: "tutorial.finish",
   },
 ];
@@ -3533,56 +3550,51 @@ function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) 
 
 function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
   const messages = [
-    { icon: "cards-outline", text: t("tutorial.messageHello") },
-    { icon: "compass-rose", text: t("tutorial.messageIntro") },
+    { text: t("tutorial.messageHello") },
+    { text: t("tutorial.messageEfficiency") },
+    { text: t("tutorial.messageIntro") },
   ];
   const [visibleMessageCount, setVisibleMessageCount] = useState(1);
 
-  useEffect(() => {
-    if (visibleMessageCount >= messages.length) {
-      return undefined;
-    }
-
-    const timeoutId = setTimeout(() => {
-      setVisibleMessageCount((currentCount) => Math.min(messages.length, currentCount + 1));
-    }, 650);
-
-    return () => clearTimeout(timeoutId);
-  }, [messages.length, visibleMessageCount]);
-
   const choicesReady = visibleMessageCount >= messages.length;
+  const showNextMessage = () => {
+    setVisibleMessageCount((currentCount) => Math.min(messages.length, currentCount + 1));
+  };
 
   return (
     <View style={styles.tutorialOverlay}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.tutorialScrollContent,
-          maxWidth ? { maxWidth, alignSelf: "center", width: "100%" } : null,
-        ]}
+      <Pressable
+        style={styles.tutorialTapArea}
+        onPress={showNextMessage}
+        disabled={choicesReady}
       >
-        <View style={styles.tutorialHeader}>
-          <Text style={styles.tutorialTitle}>{t("tutorial.title")}</Text>
-          <Text style={styles.tutorialCaption}>{t("tutorial.caption")}</Text>
-        </View>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.tutorialScrollContent,
+            maxWidth ? { maxWidth, alignSelf: "center", width: "100%" } : null,
+          ]}
+        >
+          <View style={styles.tutorialHeader}>
+            <Text style={styles.tutorialTitle}>{t("tutorial.title")}</Text>
+            <Text style={styles.tutorialCaption}>{t("tutorial.caption")}</Text>
+          </View>
 
-        <View style={styles.tutorialChat}>
-          {messages.slice(0, visibleMessageCount).map((message, index) => (
-            <View key={`${message.icon}-${index}`} style={styles.tutorialMessageRow}>
-              <View style={styles.tutorialAvatar}>
-                <MaterialCommunityIcons
-                  name={message.icon}
-                  size={19}
-                  color={theme.accentText}
-                />
+          <View style={styles.tutorialChat}>
+            {messages.slice(0, visibleMessageCount).map((message, index) => (
+              <View key={`intro-message-${index}`} style={styles.tutorialMessageRow}>
+                <View style={styles.tutorialBubble}>
+                  <View style={styles.tutorialBubbleTail} />
+                  <Text style={styles.tutorialBubbleText}>{message.text}</Text>
+                </View>
               </View>
-              <View style={styles.tutorialBubble}>
-                <Text style={styles.tutorialBubbleText}>{message.text}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
-      </ScrollView>
+            ))}
+            {!choicesReady ? (
+              <Text style={styles.tutorialTapHint}>{t("tutorial.tapToContinue")}</Text>
+            ) : null}
+          </View>
+        </ScrollView>
+      </Pressable>
 
       <View style={styles.tutorialBottomSheet}>
         <View style={styles.tutorialActionRow}>
@@ -3648,6 +3660,11 @@ function TutorialCoach({
   const isTabStep = step.type === "tab";
   const isSaveDemo = step.type === "save-demo";
   const tabLabel = t(`tabs.${step.tab}`);
+  const tabIndex = Math.max(
+    TABS.findIndex((item) => item.key === step.tab),
+    0
+  );
+  const tabTailLeft = `${12 + tabIndex * 19}%`;
   const [demoFront, setDemoFront] = useState("");
   const [demoBack, setDemoBack] = useState("");
   const [savingDemo, setSavingDemo] = useState(false);
@@ -3686,7 +3703,9 @@ function TutorialCoach({
           maxWidth ? { maxWidth, alignSelf: "center", width: "100%" } : null,
         ]}
       >
-        {isTabStep ? <View style={styles.tutorialCoachTail} /> : null}
+        {isTabStep ? (
+          <View style={[styles.tutorialCoachTail, { left: tabTailLeft }]} />
+        ) : null}
         <View style={styles.tutorialCoachHeader}>
           <View style={styles.tutorialCoachIcon}>
             <MaterialCommunityIcons name={step.icon} size={18} color={theme.accentText} />
@@ -5244,6 +5263,9 @@ const createStyles = (theme) => StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: theme.appBg,
   },
+  tutorialTapArea: {
+    flex: 1,
+  },
   tutorialScrollContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
@@ -5271,8 +5293,8 @@ const createStyles = (theme) => StyleSheet.create({
   tutorialMessageRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 10,
     maxWidth: "92%",
+    paddingLeft: 18,
   },
   tutorialMessageRowUser: {
     alignSelf: "flex-end",
@@ -5289,7 +5311,8 @@ const createStyles = (theme) => StyleSheet.create({
     borderColor: theme.surfaceStrong,
   },
   tutorialBubble: {
-    maxWidth: "86%",
+    position: "relative",
+    maxWidth: "100%",
     gap: 4,
     paddingHorizontal: 18,
     paddingVertical: 14,
@@ -5300,6 +5323,19 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.surfaceStrong,
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
+  },
+  tutorialBubbleTail: {
+    position: "absolute",
+    left: -7,
+    top: 22,
+    width: 18,
+    height: 18,
+    borderBottomLeftRadius: 4,
+    backgroundColor: theme.surfaceStrong,
+    borderLeftWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: theme.surfaceBorder,
+    transform: [{ rotate: "45deg" }],
   },
   tutorialBubbleUser: {
     borderTopLeftRadius: 22,
@@ -5320,6 +5356,15 @@ const createStyles = (theme) => StyleSheet.create({
   },
   tutorialBubbleTextUser: {
     color: theme.accentText,
+  },
+  tutorialTapHint: {
+    alignSelf: "flex-start",
+    marginLeft: 28,
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "800",
+    color: theme.textMuted,
   },
   tutorialBottomSheet: {
     position: "absolute",
@@ -5352,7 +5397,7 @@ const createStyles = (theme) => StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: "flex-end",
     paddingHorizontal: 20,
-    paddingBottom: Platform.OS === "android" ? 128 : 114,
+    paddingBottom: Platform.OS === "android" ? 190 : 168,
   },
   tutorialCoachLayerCentered: {
     justifyContent: "center",
@@ -5365,8 +5410,11 @@ const createStyles = (theme) => StyleSheet.create({
   tutorialCoachBubble: {
     position: "relative",
     gap: 14,
-    padding: 16,
-    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 16,
+    borderRadius: 26,
+    borderBottomLeftRadius: 18,
     backgroundColor: theme.surfaceStrong,
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
@@ -5376,11 +5424,10 @@ const createStyles = (theme) => StyleSheet.create({
   },
   tutorialCoachTail: {
     position: "absolute",
-    left: 42,
-    bottom: -12,
-    width: 24,
-    height: 24,
-    borderRadius: 5,
+    bottom: -17,
+    width: 32,
+    height: 32,
+    borderRadius: 7,
     backgroundColor: theme.surfaceStrong,
     borderRightWidth: 1,
     borderBottomWidth: 1,
