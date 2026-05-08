@@ -126,20 +126,61 @@ const TUTORIAL_STEPS = [
     bodyKey: "tutorial.saveTabBody",
   },
   {
-    key: "save-single",
-    type: "save-demo",
+    key: "save-single-chip",
+    type: "spotlight",
     tab: "save",
+    targetKey: "save-mode-single",
     icon: "cards-outline",
-    titleKey: "tutorial.saveSingleTitle",
-    bodyKey: "tutorial.saveSingleBody",
+    titleKey: "tutorial.saveSingleChipTitle",
+    bodyKey: "tutorial.saveSingleChipBody",
+    actionKey: "tutorial.nextPractice",
+  },
+  {
+    key: "save-single-practice",
+    type: "practice",
+    tab: "save",
+    targetKey: "save-composer",
+    icon: "cards-outline",
+    titleKey: "tutorial.savePracticeTitle",
+    bodyKey: "tutorial.savePracticeBody",
+  },
+  {
+    key: "save-single-success",
+    type: "spotlight",
+    tab: "save",
+    targetKey: "save-composer",
+    icon: "check-circle-outline",
+    titleKey: "tutorial.saveSuccessTitle",
+    bodyKey: "tutorial.saveSuccessBody",
+    actionKey: "tutorial.nextFileChip",
+  },
+  {
+    key: "save-file-chip",
+    type: "target-press",
+    tab: "save",
+    targetKey: "save-mode-text",
+    icon: "file-document-plus-outline",
+    titleKey: "tutorial.saveFileChipTitle",
+    bodyKey: "tutorial.saveFileChipBody",
   },
   {
     key: "save-file",
-    type: "coach",
+    type: "spotlight",
     tab: "save",
+    targetKey: "save-import-panel",
     icon: "file-document-plus-outline",
     titleKey: "tutorial.saveFileTitle",
     bodyKey: "tutorial.saveFileBody",
+    actionKey: "tutorial.nextFileButton",
+  },
+  {
+    key: "save-file-button",
+    type: "spotlight",
+    tab: "save",
+    targetKey: "save-import-button",
+    icon: "file-upload-outline",
+    titleKey: "tutorial.saveFileButtonTitle",
+    bodyKey: "tutorial.saveFileButtonBody",
     actionKey: "tutorial.nextQuiz",
   },
   {
@@ -152,8 +193,9 @@ const TUTORIAL_STEPS = [
   },
   {
     key: "quiz-use",
-    type: "coach",
+    type: "spotlight",
     tab: "quiz",
+    targetKey: "quiz-ready-card",
     icon: "brain",
     titleKey: "tutorial.quizUseTitle",
     bodyKey: "tutorial.quizUseBody",
@@ -169,8 +211,9 @@ const TUTORIAL_STEPS = [
   },
   {
     key: "history-use",
-    type: "coach",
+    type: "spotlight",
     tab: "history",
+    targetKey: "history-panel",
     icon: "chart-timeline-variant",
     titleKey: "tutorial.historyUseTitle",
     bodyKey: "tutorial.historyUseBody",
@@ -185,9 +228,20 @@ const TUTORIAL_STEPS = [
     bodyKey: "tutorial.manageTabBody",
   },
   {
-    key: "manage-use",
-    type: "coach",
+    key: "manage-search",
+    type: "spotlight",
     tab: "manage",
+    targetKey: "manage-search-panel",
+    icon: "playlist-edit",
+    titleKey: "tutorial.manageSearchTitle",
+    bodyKey: "tutorial.manageSearchBody",
+    actionKey: "tutorial.nextManageList",
+  },
+  {
+    key: "manage-use",
+    type: "spotlight",
+    tab: "manage",
+    targetKey: "manage-list-panel",
     icon: "playlist-edit",
     titleKey: "tutorial.manageUseTitle",
     bodyKey: "tutorial.manageUseBody",
@@ -203,8 +257,9 @@ const TUTORIAL_STEPS = [
   },
   {
     key: "about-support",
-    type: "coach",
+    type: "spotlight",
     tab: "about",
+    targetKey: "about-support-panel",
     icon: "message-question-outline",
     titleKey: "tutorial.aboutSupportTitle",
     bodyKey: "tutorial.aboutSupportBody",
@@ -388,7 +443,7 @@ const mergeSupportRequests = (...collections) => {
 };
 
 export default function App() {
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [tab, setTab] = useState("save");
   const [language, setLanguage] = useState(getPreferredLanguage());
   const [themeMode, setThemeMode] = useState("light");
@@ -404,6 +459,7 @@ export default function App() {
   const [tutorialReady, setTutorialReady] = useState(false);
   const [tutorialVisible, setTutorialVisible] = useState(false);
   const [tutorialStep, setTutorialStep] = useState("intro");
+  const [tutorialTargetRect, setTutorialTargetRect] = useState(null);
   const [session, setSession] = useState(null);
   const [userRole, setUserRole] = useState("user");
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
@@ -447,6 +503,7 @@ export default function App() {
 
   const timerRef = useRef(null);
   const scrollRef = useRef(null);
+  const tutorialTargetRefs = useRef({});
   const pairsRef = useRef(pairs);
   const studyStatsRef = useRef(studyStats);
   const appOpenTrackedUserRef = useRef(null);
@@ -488,6 +545,39 @@ export default function App() {
   const guidedTutorialActive = tutorialVisible && tutorialStep !== "intro";
   const currentTutorialStep = guidedTutorialActive ? TUTORIAL_STEP_MAP[tutorialStep] : null;
 
+  const registerTutorialTarget = (key) => (node) => {
+    if (node) {
+      tutorialTargetRefs.current[key] = node;
+    }
+  };
+
+  const measureTutorialTarget = (key) => {
+    const target = tutorialTargetRefs.current[key];
+
+    if (!target?.measureInWindow) {
+      setTutorialTargetRect(null);
+      return;
+    }
+
+    target.measureInWindow((x, y, width, height) => {
+      if (!width || !height) {
+        setTutorialTargetRect(null);
+        return;
+      }
+
+      setTutorialTargetRect({ x, y, width, height });
+    });
+  };
+
+  const tutorialTargetProps = (key) => ({
+    ref: registerTutorialTarget(key),
+    onLayout: () => {
+      if (currentTutorialStep?.targetKey === key) {
+        requestAnimationFrame(() => measureTutorialTarget(key));
+      }
+    },
+  });
+
   const selectTab = (nextTab) => {
     setTab(nextTab);
     setManageSortMenuOpen(false);
@@ -497,14 +587,70 @@ export default function App() {
   };
 
   const applyTutorialStepSideEffects = (step) => {
-    if (step?.key === "save-single") {
+    if (
+      step?.key === "save-single-chip" ||
+      step?.key === "save-single-practice" ||
+      step?.key === "save-single-success" ||
+      step?.key === "save-file-chip"
+    ) {
       setSaveInputMode("single");
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
+      });
     }
 
-    if (step?.key === "save-file") {
+    if (step?.key === "save-file" || step?.key === "save-file-button") {
       setSaveInputMode("text");
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
+      });
+    }
+
+    if (step?.key === "about-support") {
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 560, animated: true });
+      });
+    }
+
+    if (step?.key === "manage-use") {
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 220, animated: true });
+      });
     }
   };
+
+  useEffect(() => {
+    if (!guidedTutorialActive || !currentTutorialStep?.targetKey) {
+      setTutorialTargetRect(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const measure = () => {
+      if (!cancelled) {
+        measureTutorialTarget(currentTutorialStep.targetKey);
+      }
+    };
+    const frameId = requestAnimationFrame(measure);
+    const timeoutId = setTimeout(measure, 280);
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frameId);
+      clearTimeout(timeoutId);
+    };
+  }, [
+    currentTutorialStep?.targetKey,
+    guidedTutorialActive,
+    language,
+    manageSortMenuOpen,
+    pairs.length,
+    saveInputMode,
+    screenHeight,
+    screenWidth,
+    tab,
+    tutorialStep,
+  ]);
 
   const handleTabChange = (nextTab) => {
     selectTab(nextTab);
@@ -1277,7 +1423,7 @@ export default function App() {
     applyTutorialStepSideEffects(nextStep);
 
     if (
-      (nextStep.type === "coach" || nextStep.type === "save-demo") &&
+      nextStep.type !== "tab" &&
       nextStep.tab &&
       tab !== nextStep.tab
     ) {
@@ -1391,6 +1537,11 @@ export default function App() {
     }
 
     setDraft({ left: "", right: "" });
+
+    if (guidedTutorialActive && tutorialStep === "save-single-practice") {
+      setTutorialStep("save-single-success");
+      return;
+    }
 
     if (saveResult.cloudSaved) {
       setTranslatedNote("notes.cardSavedCloud");
@@ -2131,11 +2282,12 @@ export default function App() {
           return (
             <Pressable
               key={option.key}
+              {...tutorialTargetProps(`save-mode-${option.key}`)}
               onPress={() => {
                 setSaveInputMode(option.key);
 
-                if (guidedTutorialActive && tutorialStep === "save-single" && option.key === "text") {
-                  setTutorialStep("save-file");
+                if (guidedTutorialActive && tutorialStep === "save-file-chip" && option.key === "text") {
+                  advanceTutorial();
                 }
               }}
               style={({ pressed }) => [
@@ -2158,7 +2310,7 @@ export default function App() {
       </View>
 
       {saveInputMode === "single" ? (
-        <View style={styles.composerPanel}>
+        <View style={styles.composerPanel} {...tutorialTargetProps("save-composer")}>
           <View style={styles.importHeader}>
             <View style={styles.importTitleRow}>
               <View style={styles.importIconWrap}>
@@ -2199,7 +2351,7 @@ export default function App() {
       ) : null}
 
       {saveInputMode === "text" ? (
-        <View style={styles.importPanel}>
+        <View style={styles.importPanel} {...tutorialTargetProps("save-import-panel")}>
           <View style={styles.importHeader}>
             <View style={styles.importTitleRow}>
               <View style={styles.importIconWrap}>
@@ -2243,6 +2395,7 @@ export default function App() {
           </View>
 
           <Pressable
+            {...tutorialTargetProps("save-import-button")}
             disabled={importing}
             onPress={() => void importCardsFromFile()}
             style={({ pressed }) => [
@@ -2547,7 +2700,7 @@ export default function App() {
             </View>
           </View>
         ) : hasSavedCards ? (
-          <View style={styles.quizReadyCard}>
+          <View style={styles.quizReadyCard} {...tutorialTargetProps("quiz-ready-card")}>
             <View style={styles.importHeader}>
               <View style={styles.importTitleRow}>
                 <View style={styles.importIconWrap}>
@@ -2666,7 +2819,7 @@ export default function App() {
 
         {hasStudyHistory ? (
           <>
-            <View style={styles.historySummaryCard}>
+            <View style={styles.historySummaryCard} {...tutorialTargetProps("history-panel")}>
               <View style={styles.historySummaryHeader}>
                 <Text style={styles.panelTitle}>{t("history.todayTitle")}</Text>
                 <Text style={styles.panelBody}>{t("history.todayBody")}</Text>
@@ -2765,15 +2918,17 @@ export default function App() {
             </View>
           </>
         ) : (
-          <EmptyPanel
-            styles={styles}
-            theme={theme}
-            icon="chart-line"
-            title={t("history.emptyTitle")}
-            body={t("history.emptyBody")}
-            actionLabel={t("history.emptyAction")}
-            onPress={() => handleTabChange("quiz")}
-          />
+          <View {...tutorialTargetProps("history-panel")}>
+            <EmptyPanel
+              styles={styles}
+              theme={theme}
+              icon="chart-line"
+              title={t("history.emptyTitle")}
+              body={t("history.emptyBody")}
+              actionLabel={t("history.emptyAction")}
+              onPress={() => handleTabChange("quiz")}
+            />
+          </View>
         )}
       </View>
     );
@@ -2790,7 +2945,7 @@ export default function App() {
 
       {pairs.length ? (
         <>
-          <View style={styles.settingsCard}>
+          <View style={styles.settingsCard} {...tutorialTargetProps("manage-search-panel")}>
             <View style={styles.settingsHeader}>
               <Text style={styles.settingsTitle}>{t("manage.searchTitle")}</Text>
               <Text style={styles.settingsBody}>{t("manage.searchBody")}</Text>
@@ -2861,7 +3016,7 @@ export default function App() {
           </View>
 
           {visibleManagePairs.length ? (
-            <View style={styles.libraryPanel}>
+            <View style={styles.libraryPanel} {...tutorialTargetProps("manage-list-panel")}>
               {visibleManagePairs.map((pair) => (
                 <View key={pair.id} style={styles.manageCard}>
                   {editingId === pair.id ? (
@@ -2964,15 +3119,17 @@ export default function App() {
               ))}
             </View>
           ) : (
-            <EmptyPanel
-              styles={styles}
-              theme={theme}
-              icon="magnify"
-              title={t("manage.searchEmptyTitle")}
-              body={t("manage.searchEmptyBody", { query: manageSearch.trim() })}
-              actionLabel={t("manage.clearSearch")}
-              onPress={() => setManageSearch("")}
-            />
+            <View {...tutorialTargetProps("manage-list-panel")}>
+              <EmptyPanel
+                styles={styles}
+                theme={theme}
+                icon="magnify"
+                title={t("manage.searchEmptyTitle")}
+                body={t("manage.searchEmptyBody", { query: manageSearch.trim() })}
+                actionLabel={t("manage.clearSearch")}
+                onPress={() => setManageSearch("")}
+              />
+            </View>
           )}
         </>
       ) : (
@@ -3120,7 +3277,7 @@ export default function App() {
           </Pressable>
         </View>
 
-        <View style={styles.settingsCard}>
+        <View style={styles.settingsCard} {...tutorialTargetProps("about-support-panel")}>
           <View style={styles.settingsHeader}>
             <Text style={styles.settingsTitle}>{t("about.supportTitle")}</Text>
             <Text style={styles.settingsBody}>{t("about.supportBody")}</Text>
@@ -3519,6 +3676,9 @@ export default function App() {
           theme={theme}
           t={t}
           maxWidth={tutorialMaxWidth}
+          screenWidth={screenWidth}
+          screenHeight={screenHeight}
+          targetRect={tutorialTargetRect}
           tabBarWidth={tabBarWidth}
           tabBarLeft={tabBarLeft}
           onClose={() => closeTutorial()}
@@ -3654,17 +3814,53 @@ function TutorialCoach({
   onSaveDemo,
   onTargetTabPress,
   maxWidth,
+  screenWidth,
+  screenHeight,
+  targetRect,
   tabBarWidth,
   tabBarLeft,
 }) {
   const isTabStep = step.type === "tab";
   const isSaveDemo = step.type === "save-demo";
+  const isSpotlightStep =
+    step.type === "spotlight" ||
+    step.type === "practice" ||
+    step.type === "target-press";
   const tabLabel = t(`tabs.${step.tab}`);
   const tabIndex = Math.max(
     TABS.findIndex((item) => item.key === step.tab),
     0
   );
   const tabTailLeft = `${12 + tabIndex * 19}%`;
+  const safeScreenWidth = screenWidth || 390;
+  const safeScreenHeight = screenHeight || 844;
+  const spotlightPadding = 8;
+  const spotlightRect = targetRect
+    ? (() => {
+        const left = Math.max(12, targetRect.x - spotlightPadding);
+        const top = Math.max(0, targetRect.y - spotlightPadding);
+        const right = Math.max(12, safeScreenWidth - targetRect.x - targetRect.width - spotlightPadding);
+        const bottom = Math.max(0, safeScreenHeight - targetRect.y - targetRect.height - spotlightPadding);
+
+        return {
+          left,
+          top,
+          width: Math.max(0, safeScreenWidth - left - right),
+          height: Math.max(0, safeScreenHeight - top - bottom),
+          right,
+          bottom,
+        };
+      })()
+    : null;
+  const bubbleWidth = Math.min(maxWidth ?? safeScreenWidth - 40, safeScreenWidth - 40);
+  const bubbleLeft = Math.max(20, (safeScreenWidth - bubbleWidth) / 2);
+  const targetBottom = spotlightRect ? spotlightRect.top + spotlightRect.height : safeScreenHeight * 0.48;
+  const placeBubbleAbove = spotlightRect && safeScreenHeight - targetBottom < 176 && spotlightRect.top > 214;
+  const bubbleTop = placeBubbleAbove
+    ? Math.max(18, spotlightRect.top - 174)
+    : Math.min(safeScreenHeight - 190, targetBottom + 18);
+  const targetCenterX = spotlightRect ? spotlightRect.left + spotlightRect.width / 2 : 64;
+  const tailLeft = Math.max(28, Math.min(bubbleWidth - 44, targetCenterX - bubbleLeft - 12));
   const [demoFront, setDemoFront] = useState("");
   const [demoBack, setDemoBack] = useState("");
   const [savingDemo, setSavingDemo] = useState(false);
@@ -3688,6 +3884,121 @@ function TutorialCoach({
       setSavingDemo(false);
     }
   };
+
+  if (isSpotlightStep) {
+    return (
+      <View pointerEvents="box-none" style={styles.tutorialSpotlightLayer}>
+        {spotlightRect ? (
+          <>
+            <Pressable style={[styles.tutorialScrimBlock, { top: 0, left: 0, right: 0, height: spotlightRect.top }]} onPress={() => {}} />
+            <Pressable
+              style={[
+                styles.tutorialScrimBlock,
+                {
+                  top: spotlightRect.top,
+                  left: 0,
+                  width: spotlightRect.left,
+                  height: spotlightRect.height,
+                },
+              ]}
+              onPress={() => {}}
+            />
+            <Pressable
+              style={[
+                styles.tutorialScrimBlock,
+                {
+                  top: spotlightRect.top,
+                  right: 0,
+                  width: spotlightRect.right,
+                  height: spotlightRect.height,
+                },
+              ]}
+              onPress={() => {}}
+            />
+            <Pressable
+              style={[
+                styles.tutorialScrimBlock,
+                {
+                  left: 0,
+                  right: 0,
+                  top: spotlightRect.top + spotlightRect.height,
+                  bottom: 0,
+                },
+              ]}
+              onPress={() => {}}
+            />
+            <View
+              pointerEvents="none"
+              style={[
+                styles.tutorialSpotlightRing,
+                {
+                  left: spotlightRect.left,
+                  top: spotlightRect.top,
+                  width: spotlightRect.width,
+                  height: spotlightRect.height,
+                },
+              ]}
+            />
+          </>
+        ) : (
+          <Pressable style={styles.tutorialScrim} onPress={() => {}} />
+        )}
+
+        <View
+          pointerEvents="auto"
+          style={[
+            styles.tutorialSpotlightBubble,
+            {
+              left: bubbleLeft,
+              top: bubbleTop,
+              width: bubbleWidth,
+            },
+          ]}
+        >
+          <View
+            style={[
+              placeBubbleAbove ? styles.tutorialSpotlightTailDown : styles.tutorialSpotlightTailUp,
+              { left: tailLeft },
+            ]}
+          />
+          <View style={styles.tutorialCoachHeader}>
+            <View style={styles.tutorialCoachIcon}>
+              <MaterialCommunityIcons name={step.icon} size={18} color={theme.accentText} />
+            </View>
+            <View style={styles.tutorialCoachCopy}>
+              <Text style={styles.tutorialCoachTitle}>{t(step.titleKey)}</Text>
+              <Text style={styles.tutorialCoachText}>{t(step.bodyKey)}</Text>
+              {step.type === "target-press" ? (
+                <Text style={styles.tutorialCoachHint}>
+                  {t("tutorial.tapTargetHint")}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+
+          <View style={styles.tutorialCoachActions}>
+            {step.type === "practice" || step.type === "target-press" ? (
+              <View style={styles.tutorialCoachWaitingPill}>
+                <Text style={styles.tutorialCoachWaitingText}>
+                  {t(step.type === "practice" ? "tutorial.waitingSave" : "tutorial.waitingTap")}
+                </Text>
+              </View>
+            ) : (
+              <Pressable
+                onPress={onNext}
+                style={({ pressed }) => [
+                  styles.tutorialCoachNextButton,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.tutorialCoachNextText}>{t(step.actionKey)}</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View
@@ -5407,6 +5718,55 @@ const createStyles = (theme) => StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: theme.mode === "dark" ? "rgba(0, 0, 0, 0.68)" : "rgba(8, 13, 28, 0.58)",
   },
+  tutorialSpotlightLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  tutorialScrimBlock: {
+    position: "absolute",
+    backgroundColor: theme.mode === "dark" ? "rgba(0, 0, 0, 0.68)" : "rgba(8, 13, 28, 0.58)",
+  },
+  tutorialSpotlightRing: {
+    position: "absolute",
+    borderRadius: 28,
+    borderWidth: 2,
+    borderColor: theme.accent,
+    backgroundColor: "transparent",
+  },
+  tutorialSpotlightBubble: {
+    position: "absolute",
+    gap: 14,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 16,
+    borderRadius: 26,
+    backgroundColor: theme.surfaceStrong,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  tutorialSpotlightTailUp: {
+    position: "absolute",
+    top: -14,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 13,
+    borderRightWidth: 13,
+    borderBottomWidth: 15,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderBottomColor: theme.surfaceStrong,
+  },
+  tutorialSpotlightTailDown: {
+    position: "absolute",
+    bottom: -14,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 13,
+    borderRightWidth: 13,
+    borderTopWidth: 15,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: theme.surfaceStrong,
+  },
   tutorialCoachBubble: {
     position: "relative",
     gap: 14,
@@ -5425,14 +5785,14 @@ const createStyles = (theme) => StyleSheet.create({
   tutorialCoachTail: {
     position: "absolute",
     bottom: -17,
-    width: 32,
-    height: 32,
-    borderRadius: 7,
-    backgroundColor: theme.surfaceStrong,
-    borderRightWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: theme.surfaceBorder,
-    transform: [{ rotate: "45deg" }],
+    width: 0,
+    height: 0,
+    borderLeftWidth: 15,
+    borderRightWidth: 15,
+    borderTopWidth: 18,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: theme.surfaceStrong,
   },
   tutorialCoachHeader: {
     flexDirection: "row",
