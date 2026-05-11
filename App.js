@@ -4312,13 +4312,19 @@ function TutorialCoach({
         {isTabStep ? (
           <View style={[styles.tutorialCoachTail, { left: tabTailLeft }]} />
         ) : null}
-        <View style={[styles.tutorialCoachHeader, isTabStep && styles.tutorialCoachHeaderCentered]}>
-          <View style={styles.tutorialCoachIcon}>
-            <MaterialCommunityIcons name={step.icon} size={18} color={theme.accentText} />
-          </View>
-          <View style={styles.tutorialCoachCopy}>
-            <Text style={styles.tutorialCoachTitle}>{t(step.titleKey)}</Text>
-            <Text style={styles.tutorialCoachText}>{t(step.bodyKey)}</Text>
+        <View style={[styles.tutorialCoachHeader, isTabStep && styles.tutorialCoachHeaderTextOnly]}>
+          {!isTabStep ? (
+            <View style={styles.tutorialCoachIcon}>
+              <MaterialCommunityIcons name={step.icon} size={18} color={theme.accentText} />
+            </View>
+          ) : null}
+          <View style={[styles.tutorialCoachCopy, isTabStep && styles.tutorialCoachCopyCentered]}>
+            <Text style={[styles.tutorialCoachTitle, isTabStep && styles.tutorialCoachTitleCentered]}>
+              {t(step.titleKey)}
+            </Text>
+            <Text style={[styles.tutorialCoachText, isTabStep && styles.tutorialCoachTextCentered]}>
+              {t(step.bodyKey)}
+            </Text>
           </View>
         </View>
 
@@ -6089,8 +6095,10 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: "flex-start",
     gap: 12,
   },
-  tutorialCoachHeaderCentered: {
+  tutorialCoachHeaderTextOnly: {
     alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
   },
   tutorialCoachIcon: {
     width: 38,
@@ -6105,16 +6113,25 @@ const createStyles = (theme) => StyleSheet.create({
     minWidth: 0,
     gap: 5,
   },
+  tutorialCoachCopyCentered: {
+    alignItems: "center",
+  },
   tutorialCoachTitle: {
     fontSize: 17,
     lineHeight: 23,
     fontWeight: "900",
     color: theme.textPrimary,
   },
+  tutorialCoachTitleCentered: {
+    textAlign: "center",
+  },
   tutorialCoachText: {
     fontSize: 14,
     lineHeight: 21,
     color: theme.textSecondary,
+  },
+  tutorialCoachTextCentered: {
+    textAlign: "center",
   },
   tutorialCoachHint: {
     marginTop: 4,
