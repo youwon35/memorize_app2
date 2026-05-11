@@ -308,7 +308,7 @@ const TRANSLATIONS = {
       tapTargetHint: "밝게 표시된 버튼을 직접 눌러주세요.",
       tapTabHint: "아래의 '{tab}' 탭을 눌러주세요.",
       saveTabTitle: "먼저 저장으로 가볼게요",
-      saveTabBody: "새 카드를 만들거나 파일로 여러 장을 넣는 곳입니다.",
+      saveTabBody: "이 곳은 암기할 카드쌍들을 만들거나 파일로 한번에 여러쌍을 넣을 수 있는 곳이에요.",
       saveSingleChipTitle: "'한장씩'은 직접 만드는 입구예요",
       saveSingleChipBody: "카드 한 쌍을 손으로 적고 싶을 때 쓰는 버튼입니다. 처음 외울 내용은 여기서 만드는 게 가장 쉽습니다.",
       nextPractice: "직접 저장해보기",

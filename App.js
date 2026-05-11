@@ -4032,7 +4032,6 @@ function TutorialCoach({
     step.type === "spotlight" ||
     step.type === "practice" ||
     step.type === "target-press";
-  const tabLabel = t(`tabs.${step.tab}`);
   const targetTabLabel = t(`tabs.${step.waitForTab ?? step.tab}`);
   const tabIndex = Math.max(
     TABS.findIndex((item) => item.key === step.tab),
@@ -4096,6 +4095,9 @@ function TutorialCoach({
   const waitingLabelKey = step.waitingKey ?? (
     step.type === "practice" ? "tutorial.waitingSave" : "tutorial.waitingTap"
   );
+  const waitingLabel = step.waitForTab || isTabStep
+    ? t("tutorial.tapTabHint", { tab: targetTabLabel })
+    : t(waitingLabelKey);
   const renderWaitingPill = (pressable = false) => {
     if (pressable) {
       return (
@@ -4106,14 +4108,14 @@ function TutorialCoach({
             pressed && styles.pressed,
           ]}
         >
-          <Text style={styles.tutorialCoachWaitingText}>{t(waitingLabelKey)}</Text>
+          <Text style={styles.tutorialCoachWaitingText}>{waitingLabel}</Text>
         </Pressable>
       );
     }
 
     return (
       <View style={styles.tutorialCoachWaitingPill}>
-        <Text style={styles.tutorialCoachWaitingText}>{t(waitingLabelKey)}</Text>
+        <Text style={styles.tutorialCoachWaitingText}>{waitingLabel}</Text>
       </View>
     );
   };
@@ -4226,10 +4228,6 @@ function TutorialCoach({
                 <Text style={styles.tutorialCoachHint}>
                   {t("tutorial.tapTargetHint")}
                 </Text>
-              ) : step.waitForTab ? (
-                <Text style={styles.tutorialCoachHint}>
-                  {t("tutorial.tapTabHint", { tab: targetTabLabel })}
-                </Text>
               ) : null}
             </View>
           </View>
@@ -4314,18 +4312,13 @@ function TutorialCoach({
         {isTabStep ? (
           <View style={[styles.tutorialCoachTail, { left: tabTailLeft }]} />
         ) : null}
-        <View style={styles.tutorialCoachHeader}>
+        <View style={[styles.tutorialCoachHeader, isTabStep && styles.tutorialCoachHeaderCentered]}>
           <View style={styles.tutorialCoachIcon}>
             <MaterialCommunityIcons name={step.icon} size={18} color={theme.accentText} />
           </View>
           <View style={styles.tutorialCoachCopy}>
             <Text style={styles.tutorialCoachTitle}>{t(step.titleKey)}</Text>
             <Text style={styles.tutorialCoachText}>{t(step.bodyKey)}</Text>
-            {isTabStep ? (
-              <Text style={styles.tutorialCoachHint}>
-                {t("tutorial.tapTabHint", { tab: tabLabel })}
-              </Text>
-            ) : null}
           </View>
         </View>
 
@@ -4353,7 +4346,7 @@ function TutorialCoach({
         <View style={styles.tutorialCoachActions}>
           {isTabStep ? (
             <View style={styles.tutorialCoachWaitingPill}>
-              <Text style={styles.tutorialCoachWaitingText}>{t("tutorial.waitingTap")}</Text>
+              <Text style={styles.tutorialCoachWaitingText}>{waitingLabel}</Text>
             </View>
           ) : isSaveDemo ? (
             <Pressable
@@ -6096,6 +6089,9 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: "flex-start",
     gap: 12,
   },
+  tutorialCoachHeaderCentered: {
+    alignItems: "center",
+  },
   tutorialCoachIcon: {
     width: 38,
     height: 38,
@@ -6179,7 +6175,9 @@ const createStyles = (theme) => StyleSheet.create({
   },
   tutorialCoachWaitingText: {
     fontSize: 13,
+    lineHeight: 18,
     fontWeight: "800",
+    textAlign: "center",
     color: theme.accent,
   },
   tutorialSpotlightTabs: {
