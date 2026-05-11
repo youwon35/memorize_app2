@@ -3,7 +3,6 @@ import {
   Alert,
   Animated,
   Easing,
-  findNodeHandle,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -589,7 +588,8 @@ export default function App() {
         height,
       });
     };
-    const measureInAppWindow = () => {
+
+    const measureTargetInWindow = () => {
       if (!target.measureInWindow) {
         setTutorialTargetRect(null);
         return;
@@ -606,23 +606,16 @@ export default function App() {
         });
       });
     };
-    const rootHandle = findNodeHandle(appRootRef.current);
 
-    if (target.measureLayout && rootHandle) {
-      try {
-        target.measureLayout(
-          rootHandle,
-          (x, y, width, height) => applyMeasuredRect(x, y, width, height),
-          measureInAppWindow
-        );
-        return;
-      } catch {
-        measureInAppWindow();
-        return;
-      }
+    try {
+      measureTargetInWindow();
+    } catch {
+      requestAnimationFrame(() => {
+        if (TUTORIAL_STEP_MAP[tutorialStepRef.current]?.targetKey === key) {
+          measureTargetInWindow();
+        }
+      });
     }
-
-    measureInAppWindow();
   };
 
   const queueTutorialTargetMeasure = (key) => {
@@ -638,6 +631,7 @@ export default function App() {
 
   const tutorialTargetProps = (key) => ({
     ref: registerTutorialTarget(key),
+    collapsable: false,
     onLayout: () => {
       if (currentTutorialStep?.targetKey === key) {
         queueTutorialTargetMeasure(key);
@@ -3630,7 +3624,7 @@ export default function App() {
   );
 
   return (
-    <SafeAreaView ref={appRootRef} style={styles.safeArea}>
+    <SafeAreaView ref={appRootRef} collapsable={false} style={styles.safeArea}>
       <StatusBar barStyle={theme.statusBarStyle} backgroundColor={theme.statusBarBg} />
 
       <View pointerEvents="none" style={styles.backgroundLayer}>
