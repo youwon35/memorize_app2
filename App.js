@@ -152,35 +152,13 @@ const TUTORIAL_STEPS = [
   },
   {
     key: "save-single-success",
-    type: "target-press",
+    type: "spotlight",
     tab: "save",
-    targetKey: "save-mode-text",
-    spotlightRadius: "pill",
+    waitForTab: "quiz",
+    hideBubbleTail: true,
     icon: "check-circle-outline",
     titleKey: "tutorial.saveSuccessTitle",
     bodyKey: "tutorial.saveSuccessBody",
-  },
-  {
-    key: "save-file",
-    type: "spotlight",
-    tab: "save",
-    targetKey: "save-import-panel",
-    spotlightRadius: 24,
-    icon: "file-document-plus-outline",
-    titleKey: "tutorial.saveFileTitle",
-    bodyKey: "tutorial.saveFileBody",
-    actionKey: "tutorial.nextFileButton",
-  },
-  {
-    key: "save-file-button",
-    type: "spotlight",
-    tab: "save",
-    targetKey: "save-import-button",
-    spotlightRadius: 18,
-    icon: "file-upload-outline",
-    titleKey: "tutorial.saveFileButtonTitle",
-    bodyKey: "tutorial.saveFileButtonBody",
-    waitForTab: "quiz",
   },
   {
     key: "quiz-tab",
@@ -712,13 +690,6 @@ export default function App() {
       step?.key === "save-single-success"
     ) {
       setSaveInputMode("single");
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-      });
-    }
-
-    if (step?.key === "save-file" || step?.key === "save-file-button") {
-      setSaveInputMode("text");
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo?.({ y: 0, animated: true });
       });
@@ -4216,12 +4187,14 @@ function TutorialCoach({
             },
           ]}
         >
-          <View
-            style={[
-              placeBubbleAbove ? styles.tutorialSpotlightTailDown : styles.tutorialSpotlightTailUp,
-              { left: tailLeft },
-            ]}
-          />
+          {step.hideBubbleTail ? null : (
+            <View
+              style={[
+                placeBubbleAbove ? styles.tutorialSpotlightTailDown : styles.tutorialSpotlightTailUp,
+                { left: tailLeft },
+              ]}
+            />
+          )}
           <View style={[styles.tutorialCoachHeader, styles.tutorialCoachHeaderTextOnly]}>
             <View style={styles.tutorialCoachCopy}>
               <Text style={styles.tutorialCoachTitle}>{t(step.titleKey)}</Text>
