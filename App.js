@@ -188,6 +188,8 @@ const TUTORIAL_STEPS = [
     icon: "brain",
     titleKey: "tutorial.quizStartTitle",
     bodyKey: "tutorial.quizStartBody",
+    waitingKey: "tutorial.waitingQuizStart",
+    hideTargetHint: true,
   },
   {
     key: "quiz-answer-practice",
@@ -4199,7 +4201,7 @@ function TutorialCoach({
             <View style={styles.tutorialCoachCopy}>
               <Text style={styles.tutorialCoachTitle}>{t(step.titleKey)}</Text>
               <Text style={styles.tutorialCoachText}>{t(step.bodyKey)}</Text>
-              {step.type === "target-press" ? (
+              {step.type === "target-press" && !step.hideTargetHint ? (
                 <Text style={styles.tutorialCoachHint}>
                   {t("tutorial.tapTargetHint")}
                 </Text>
