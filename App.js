@@ -4217,10 +4217,7 @@ function TutorialCoach({
               { left: tailLeft },
             ]}
           />
-          <View style={styles.tutorialCoachHeader}>
-            <View style={styles.tutorialCoachIcon}>
-              <MaterialCommunityIcons name={step.icon} size={18} color={theme.accentText} />
-            </View>
+          <View style={[styles.tutorialCoachHeader, styles.tutorialCoachHeaderTextOnly]}>
             <View style={styles.tutorialCoachCopy}>
               <Text style={styles.tutorialCoachTitle}>{t(step.titleKey)}</Text>
               <Text style={styles.tutorialCoachText}>{t(step.bodyKey)}</Text>
@@ -4312,19 +4309,10 @@ function TutorialCoach({
         {isTabStep ? (
           <View style={[styles.tutorialCoachTail, { left: tabTailLeft }]} />
         ) : null}
-        <View style={[styles.tutorialCoachHeader, isTabStep && styles.tutorialCoachHeaderTextOnly]}>
-          {!isTabStep ? (
-            <View style={styles.tutorialCoachIcon}>
-              <MaterialCommunityIcons name={step.icon} size={18} color={theme.accentText} />
-            </View>
-          ) : null}
-          <View style={[styles.tutorialCoachCopy, isTabStep && styles.tutorialCoachCopyCentered]}>
-            <Text style={[styles.tutorialCoachTitle, isTabStep && styles.tutorialCoachTitleCentered]}>
-              {t(step.titleKey)}
-            </Text>
-            <Text style={[styles.tutorialCoachText, isTabStep && styles.tutorialCoachTextCentered]}>
-              {t(step.bodyKey)}
-            </Text>
+        <View style={[styles.tutorialCoachHeader, styles.tutorialCoachHeaderTextOnly]}>
+          <View style={styles.tutorialCoachCopy}>
+            <Text style={styles.tutorialCoachTitle}>{t(step.titleKey)}</Text>
+            <Text style={styles.tutorialCoachText}>{t(step.bodyKey)}</Text>
           </View>
         </View>
 
@@ -6096,25 +6084,12 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 12,
   },
   tutorialCoachHeaderTextOnly: {
-    alignItems: "center",
-    justifyContent: "center",
     paddingHorizontal: 6,
-  },
-  tutorialCoachIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.accent,
   },
   tutorialCoachCopy: {
     flex: 1,
     minWidth: 0,
     gap: 5,
-  },
-  tutorialCoachCopyCentered: {
-    alignItems: "center",
   },
   tutorialCoachTitle: {
     fontSize: 17,
@@ -6122,16 +6097,10 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "900",
     color: theme.textPrimary,
   },
-  tutorialCoachTitleCentered: {
-    textAlign: "center",
-  },
   tutorialCoachText: {
     fontSize: 14,
     lineHeight: 21,
     color: theme.textSecondary,
-  },
-  tutorialCoachTextCentered: {
-    textAlign: "center",
   },
   tutorialCoachHint: {
     marginTop: 4,
