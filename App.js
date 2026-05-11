@@ -143,6 +143,9 @@ const TUTORIAL_STEPS = [
     tab: "save",
     targetKey: "save-composer",
     spotlightRadius: 30,
+    bubbleGap: 42,
+    bubbleHeight: 150,
+    hideWaitingPill: true,
     icon: "cards-outline",
     titleKey: "tutorial.savePracticeTitle",
     bodyKey: "tutorial.savePracticeBody",
@@ -4061,6 +4064,7 @@ function TutorialCoach({
   const bubbleWidth = Math.min(maxWidth ?? safeScreenWidth - 40, safeScreenWidth - 40);
   const bubbleLeft = Math.max(20, (safeScreenWidth - bubbleWidth) / 2);
   const targetBottom = spotlightRect ? spotlightRect.top + spotlightRect.height : safeScreenHeight * 0.48;
+  const bubbleGap = step.bubbleGap ?? 18;
   const bubbleEstimatedHeight = step.bubbleHeight ?? 230;
   const bubbleBottomInset = Platform.OS === "android" ? 126 : 104;
   const bubbleTopMax = Math.max(18, safeScreenHeight - bubbleEstimatedHeight - bubbleBottomInset);
@@ -4070,7 +4074,7 @@ function TutorialCoach({
     spotlightRect.top > bubbleEstimatedHeight + 18;
   const bubbleTop = placeBubbleAbove
     ? Math.max(18, spotlightRect.top - bubbleEstimatedHeight - 12)
-    : Math.min(bubbleTopMax, targetBottom + 18);
+    : Math.min(bubbleTopMax, targetBottom + bubbleGap);
   const targetCenterX = spotlightRect ? spotlightRect.left + spotlightRect.width / 2 : 64;
   const tailLeft = Math.max(28, Math.min(bubbleWidth - 44, targetCenterX - bubbleLeft - 12));
   const spotlightRadius = spotlightRect
@@ -4098,6 +4102,7 @@ function TutorialCoach({
   const waitingLabel = step.waitForTab || isTabStep
     ? t("tutorial.tapTabHint", { tab: targetTabLabel })
     : t(waitingLabelKey);
+  const showSpotlightActions = !(waitsForManualInteraction && step.hideWaitingPill);
   const renderWaitingPill = (pressable = false) => {
     if (pressable) {
       return (
@@ -4229,21 +4234,23 @@ function TutorialCoach({
             </View>
           </View>
 
-          <View style={styles.tutorialCoachActions}>
-            {waitsForManualInteraction ? (
-              renderWaitingPill(Boolean(step.waitForNextTap))
-            ) : (
-              <Pressable
-                onPress={onNext}
-                style={({ pressed }) => [
-                  styles.tutorialCoachNextButton,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={styles.tutorialCoachNextText}>{t(step.actionKey)}</Text>
-              </Pressable>
-            )}
-          </View>
+          {showSpotlightActions ? (
+            <View style={styles.tutorialCoachActions}>
+              {waitsForManualInteraction ? (
+                renderWaitingPill(Boolean(step.waitForNextTap))
+              ) : (
+                <Pressable
+                  onPress={onNext}
+                  style={({ pressed }) => [
+                    styles.tutorialCoachNextButton,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.tutorialCoachNextText}>{t(step.actionKey)}</Text>
+                </Pressable>
+              )}
+            </View>
+          ) : null}
         </View>
         {step.waitForTab ? (
           <View
