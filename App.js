@@ -149,24 +149,13 @@ const TUTORIAL_STEPS = [
   },
   {
     key: "save-single-success",
-    type: "spotlight",
-    tab: "save",
-    targetKey: "save-composer",
-    spotlightRadius: 30,
-    icon: "check-circle-outline",
-    titleKey: "tutorial.saveSuccessTitle",
-    bodyKey: "tutorial.saveSuccessBody",
-    actionKey: "tutorial.nextFileChip",
-  },
-  {
-    key: "save-file-chip",
     type: "target-press",
     tab: "save",
     targetKey: "save-mode-text",
     spotlightRadius: "pill",
-    icon: "file-document-plus-outline",
-    titleKey: "tutorial.saveFileChipTitle",
-    bodyKey: "tutorial.saveFileChipBody",
+    icon: "check-circle-outline",
+    titleKey: "tutorial.saveSuccessTitle",
+    bodyKey: "tutorial.saveSuccessBody",
   },
   {
     key: "save-file",
@@ -188,7 +177,7 @@ const TUTORIAL_STEPS = [
     icon: "file-upload-outline",
     titleKey: "tutorial.saveFileButtonTitle",
     bodyKey: "tutorial.saveFileButtonBody",
-    actionKey: "tutorial.nextQuiz",
+    waitForTab: "quiz",
   },
   {
     key: "quiz-tab",
@@ -269,7 +258,7 @@ const TUTORIAL_STEPS = [
     icon: "chart-timeline-variant",
     titleKey: "tutorial.historyRecentTitle",
     bodyKey: "tutorial.historyRecentBody",
-    actionKey: "tutorial.nextManage",
+    waitForTab: "manage",
   },
   {
     key: "manage-tab",
@@ -288,7 +277,7 @@ const TUTORIAL_STEPS = [
     icon: "playlist-edit",
     titleKey: "tutorial.manageSearchTitle",
     bodyKey: "tutorial.manageSearchBody",
-    actionKey: "tutorial.nextManageList",
+    waitForNextTap: true,
   },
   {
     key: "manage-use",
@@ -299,7 +288,7 @@ const TUTORIAL_STEPS = [
     icon: "playlist-edit",
     titleKey: "tutorial.manageUseTitle",
     bodyKey: "tutorial.manageUseBody",
-    actionKey: "tutorial.nextAbout",
+    waitForTab: "about",
   },
   {
     key: "about-tab",
@@ -418,6 +407,16 @@ const getNextTutorialStep = (currentKey) => {
   }
 
   return TUTORIAL_STEPS[currentIndex + 1] ?? null;
+};
+
+const getNextTutorialStepAfterInteraction = (currentKey, { completedTab } = {}) => {
+  let nextStep = getNextTutorialStep(currentKey);
+
+  if (completedTab && nextStep?.type === "tab" && nextStep.tab === completedTab) {
+    nextStep = getNextTutorialStep(nextStep.key);
+  }
+
+  return nextStep;
 };
 const appendUniqueId = (items, nextId) => (items.includes(nextId) ? items : [...items, nextId]);
 const isValidEmail = (value) => /\S+@\S+\.\S+/.test(value.trim());
@@ -707,8 +706,7 @@ export default function App() {
     if (
       step?.key === "save-single-chip" ||
       step?.key === "save-single-practice" ||
-      step?.key === "save-single-success" ||
-      step?.key === "save-file-chip"
+      step?.key === "save-single-success"
     ) {
       setSaveInputMode("single");
       requestAnimationFrame(() => {
@@ -806,12 +804,14 @@ export default function App() {
   const handleTabChange = (nextTab) => {
     selectTab(nextTab);
 
-    if (
-      guidedTutorialActive &&
-      currentTutorialStep?.type === "tab" &&
-      currentTutorialStep.tab === nextTab
-    ) {
-      const nextStep = getNextTutorialStep(tutorialStep);
+    const tutorialTabTarget =
+      currentTutorialStep?.type === "tab" && currentTutorialStep.tab === nextTab;
+    const tutorialWaitsForTab = currentTutorialStep?.waitForTab === nextTab;
+
+    if (guidedTutorialActive && (tutorialTabTarget || tutorialWaitsForTab)) {
+      const nextStep = tutorialWaitsForTab
+        ? getNextTutorialStepAfterInteraction(tutorialStep, { completedTab: nextTab })
+        : getNextTutorialStep(tutorialStep);
 
       if (nextStep) {
         setTutorialStep(nextStep.key);
@@ -2479,7 +2479,7 @@ export default function App() {
               onPress={() => {
                 setSaveInputMode(option.key);
 
-                if (guidedTutorialActive && tutorialStep === "save-file-chip" && option.key === "text") {
+                if (guidedTutorialActive && tutorialStep === "save-single-success" && option.key === "text") {
                   advanceTutorial();
                 }
               }}
@@ -3826,8 +3826,9 @@ export default function App() {
             const active = tab === item.key;
             const tutorialTarget =
               guidedTutorialActive &&
-              currentTutorialStep?.type === "tab" &&
-              currentTutorialStep.tab === item.key;
+              ((currentTutorialStep?.type === "tab" &&
+                currentTutorialStep.tab === item.key) ||
+                currentTutorialStep?.waitForTab === item.key);
 
             return (
               <Pressable
@@ -4032,6 +4033,7 @@ function TutorialCoach({
     step.type === "practice" ||
     step.type === "target-press";
   const tabLabel = t(`tabs.${step.tab}`);
+  const targetTabLabel = t(`tabs.${step.waitForTab ?? step.tab}`);
   const tabIndex = Math.max(
     TABS.findIndex((item) => item.key === step.tab),
     0
@@ -4086,6 +4088,35 @@ function TutorialCoach({
   const [demoFront, setDemoFront] = useState("");
   const [demoBack, setDemoBack] = useState("");
   const [savingDemo, setSavingDemo] = useState(false);
+  const waitsForManualInteraction =
+    step.type === "practice" ||
+    step.type === "target-press" ||
+    Boolean(step.waitForTab) ||
+    Boolean(step.waitForNextTap);
+  const waitingLabelKey = step.waitingKey ?? (
+    step.type === "practice" ? "tutorial.waitingSave" : "tutorial.waitingTap"
+  );
+  const renderWaitingPill = (pressable = false) => {
+    if (pressable) {
+      return (
+        <Pressable
+          onPress={onNext}
+          style={({ pressed }) => [
+            styles.tutorialCoachWaitingPill,
+            pressed && styles.pressed,
+          ]}
+        >
+          <Text style={styles.tutorialCoachWaitingText}>{t(waitingLabelKey)}</Text>
+        </Pressable>
+      );
+    }
+
+    return (
+      <View style={styles.tutorialCoachWaitingPill}>
+        <Text style={styles.tutorialCoachWaitingText}>{t(waitingLabelKey)}</Text>
+      </View>
+    );
+  };
 
   const saveDemoCard = async () => {
     if (!onSaveDemo || savingDemo) {
@@ -4149,58 +4180,6 @@ function TutorialCoach({
               ]}
               onPress={() => {}}
             />
-            <Pressable
-              style={[
-                styles.tutorialSpotlightCornerFill,
-                {
-                  left: spotlightRect.left,
-                  top: spotlightRect.top,
-                  width: spotlightRadius,
-                  height: spotlightRadius,
-                  borderBottomRightRadius: spotlightRadius,
-                },
-              ]}
-              onPress={() => {}}
-            />
-            <Pressable
-              style={[
-                styles.tutorialSpotlightCornerFill,
-                {
-                  left: spotlightRect.left + spotlightRect.width - spotlightRadius,
-                  top: spotlightRect.top,
-                  width: spotlightRadius,
-                  height: spotlightRadius,
-                  borderBottomLeftRadius: spotlightRadius,
-                },
-              ]}
-              onPress={() => {}}
-            />
-            <Pressable
-              style={[
-                styles.tutorialSpotlightCornerFill,
-                {
-                  left: spotlightRect.left,
-                  top: spotlightRect.top + spotlightRect.height - spotlightRadius,
-                  width: spotlightRadius,
-                  height: spotlightRadius,
-                  borderTopRightRadius: spotlightRadius,
-                },
-              ]}
-              onPress={() => {}}
-            />
-            <Pressable
-              style={[
-                styles.tutorialSpotlightCornerFill,
-                {
-                  left: spotlightRect.left + spotlightRect.width - spotlightRadius,
-                  top: spotlightRect.top + spotlightRect.height - spotlightRadius,
-                  width: spotlightRadius,
-                  height: spotlightRadius,
-                  borderTopLeftRadius: spotlightRadius,
-                },
-              ]}
-              onPress={() => {}}
-            />
             <View
               pointerEvents="none"
               style={[
@@ -4247,17 +4226,17 @@ function TutorialCoach({
                 <Text style={styles.tutorialCoachHint}>
                   {t("tutorial.tapTargetHint")}
                 </Text>
+              ) : step.waitForTab ? (
+                <Text style={styles.tutorialCoachHint}>
+                  {t("tutorial.tapTabHint", { tab: targetTabLabel })}
+                </Text>
               ) : null}
             </View>
           </View>
 
           <View style={styles.tutorialCoachActions}>
-            {step.type === "practice" || step.type === "target-press" ? (
-              <View style={styles.tutorialCoachWaitingPill}>
-                <Text style={styles.tutorialCoachWaitingText}>
-                  {t(step.waitingKey ?? (step.type === "practice" ? "tutorial.waitingSave" : "tutorial.waitingTap"))}
-                </Text>
-              </View>
+            {waitsForManualInteraction ? (
+              renderWaitingPill(Boolean(step.waitForNextTap))
             ) : (
               <Pressable
                 onPress={onNext}
@@ -4271,6 +4250,49 @@ function TutorialCoach({
             )}
           </View>
         </View>
+        {step.waitForTab ? (
+          <View
+            pointerEvents="auto"
+            style={[
+              styles.tutorialSpotlightTabs,
+              tabBarWidth
+                ? {
+                    width: tabBarWidth,
+                    left: tabBarLeft,
+                    right: undefined,
+                  }
+                : null,
+            ]}
+          >
+            {TABS.map((item) => {
+              const target = item.key === step.waitForTab;
+
+              if (!target) {
+                return (
+                  <View key={item.key} style={[styles.tutorialSpotlightTab, styles.tutorialSpotlightTabMuted]}>
+                    <MaterialCommunityIcons name={item.icon} size={22} color={theme.textSecondary} />
+                    <Text style={styles.tutorialSpotlightTabText}>{t(item.labelKey)}</Text>
+                  </View>
+                );
+              }
+
+              return (
+                <Pressable
+                  key={item.key}
+                  onPress={() => onTargetTabPress?.(item.key)}
+                  style={({ pressed }) => [
+                    styles.tutorialSpotlightTab,
+                    styles.tutorialSpotlightTabTarget,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <MaterialCommunityIcons name={item.icon} size={22} color={theme.accentText} />
+                  <Text style={styles.tutorialSpotlightTabTextTarget}>{t(item.labelKey)}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
       </View>
     );
   }
@@ -5997,10 +6019,6 @@ const createStyles = (theme) => StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   tutorialScrimBlock: {
-    position: "absolute",
-    backgroundColor: theme.mode === "dark" ? "rgba(0, 0, 0, 0.68)" : "rgba(8, 13, 28, 0.58)",
-  },
-  tutorialSpotlightCornerFill: {
     position: "absolute",
     backgroundColor: theme.mode === "dark" ? "rgba(0, 0, 0, 0.68)" : "rgba(8, 13, 28, 0.58)",
   },
