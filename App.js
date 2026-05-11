@@ -4,6 +4,7 @@ import {
   Animated,
   Easing,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -130,6 +131,7 @@ const TUTORIAL_STEPS = [
     type: "spotlight",
     tab: "save",
     targetKey: "save-mode-single",
+    spotlightRadius: "pill",
     icon: "cards-outline",
     titleKey: "tutorial.saveSingleChipTitle",
     bodyKey: "tutorial.saveSingleChipBody",
@@ -140,6 +142,7 @@ const TUTORIAL_STEPS = [
     type: "practice",
     tab: "save",
     targetKey: "save-composer",
+    spotlightRadius: 30,
     icon: "cards-outline",
     titleKey: "tutorial.savePracticeTitle",
     bodyKey: "tutorial.savePracticeBody",
@@ -149,6 +152,7 @@ const TUTORIAL_STEPS = [
     type: "spotlight",
     tab: "save",
     targetKey: "save-composer",
+    spotlightRadius: 30,
     icon: "check-circle-outline",
     titleKey: "tutorial.saveSuccessTitle",
     bodyKey: "tutorial.saveSuccessBody",
@@ -159,6 +163,7 @@ const TUTORIAL_STEPS = [
     type: "target-press",
     tab: "save",
     targetKey: "save-mode-text",
+    spotlightRadius: "pill",
     icon: "file-document-plus-outline",
     titleKey: "tutorial.saveFileChipTitle",
     bodyKey: "tutorial.saveFileChipBody",
@@ -168,6 +173,7 @@ const TUTORIAL_STEPS = [
     type: "spotlight",
     tab: "save",
     targetKey: "save-import-panel",
+    spotlightRadius: 24,
     icon: "file-document-plus-outline",
     titleKey: "tutorial.saveFileTitle",
     bodyKey: "tutorial.saveFileBody",
@@ -178,6 +184,7 @@ const TUTORIAL_STEPS = [
     type: "spotlight",
     tab: "save",
     targetKey: "save-import-button",
+    spotlightRadius: 18,
     icon: "file-upload-outline",
     titleKey: "tutorial.saveFileButtonTitle",
     bodyKey: "tutorial.saveFileButtonBody",
@@ -196,10 +203,32 @@ const TUTORIAL_STEPS = [
     type: "spotlight",
     tab: "quiz",
     targetKey: "quiz-ready-card",
+    spotlightRadius: 24,
     icon: "brain",
     titleKey: "tutorial.quizUseTitle",
     bodyKey: "tutorial.quizUseBody",
-    actionKey: "tutorial.nextHistory",
+    actionKey: "tutorial.nextQuizStart",
+  },
+  {
+    key: "quiz-start-button",
+    type: "target-press",
+    tab: "quiz",
+    targetKey: "quiz-start-button",
+    spotlightRadius: 18,
+    icon: "brain",
+    titleKey: "tutorial.quizStartTitle",
+    bodyKey: "tutorial.quizStartBody",
+  },
+  {
+    key: "quiz-answer-practice",
+    type: "practice",
+    tab: "quiz",
+    targetKey: "quiz-card",
+    spotlightRadius: 24,
+    icon: "brain",
+    titleKey: "tutorial.quizAnswerTitle",
+    bodyKey: "tutorial.quizAnswerBody",
+    waitingKey: "tutorial.waitingAnswer",
   },
   {
     key: "history-tab",
@@ -213,10 +242,33 @@ const TUTORIAL_STEPS = [
     key: "history-use",
     type: "spotlight",
     tab: "history",
-    targetKey: "history-panel",
+    targetKey: "history-summary-panel",
+    spotlightRadius: 26,
     icon: "chart-timeline-variant",
-    titleKey: "tutorial.historyUseTitle",
-    bodyKey: "tutorial.historyUseBody",
+    titleKey: "tutorial.historySummaryTitle",
+    bodyKey: "tutorial.historySummaryBody",
+    actionKey: "tutorial.nextHistoryMissed",
+  },
+  {
+    key: "history-missed",
+    type: "spotlight",
+    tab: "history",
+    targetKey: "history-missed-panel",
+    spotlightRadius: 26,
+    icon: "chart-timeline-variant",
+    titleKey: "tutorial.historyMissedTitle",
+    bodyKey: "tutorial.historyMissedBody",
+    actionKey: "tutorial.nextHistoryRecent",
+  },
+  {
+    key: "history-recent",
+    type: "spotlight",
+    tab: "history",
+    targetKey: "history-recent-panel",
+    spotlightRadius: 26,
+    icon: "chart-timeline-variant",
+    titleKey: "tutorial.historyRecentTitle",
+    bodyKey: "tutorial.historyRecentBody",
     actionKey: "tutorial.nextManage",
   },
   {
@@ -232,6 +284,7 @@ const TUTORIAL_STEPS = [
     type: "spotlight",
     tab: "manage",
     targetKey: "manage-search-panel",
+    spotlightRadius: 24,
     icon: "playlist-edit",
     titleKey: "tutorial.manageSearchTitle",
     bodyKey: "tutorial.manageSearchBody",
@@ -241,7 +294,8 @@ const TUTORIAL_STEPS = [
     key: "manage-use",
     type: "spotlight",
     tab: "manage",
-    targetKey: "manage-list-panel",
+    targetKey: "manage-first-card",
+    spotlightRadius: 18,
     icon: "playlist-edit",
     titleKey: "tutorial.manageUseTitle",
     bodyKey: "tutorial.manageUseBody",
@@ -260,6 +314,7 @@ const TUTORIAL_STEPS = [
     type: "spotlight",
     tab: "about",
     targetKey: "about-support-panel",
+    spotlightRadius: 24,
     icon: "message-question-outline",
     titleKey: "tutorial.aboutSupportTitle",
     bodyKey: "tutorial.aboutSupportBody",
@@ -506,6 +561,7 @@ export default function App() {
   const scrollRef = useRef(null);
   const tutorialStepRef = useRef(tutorialStep);
   const tutorialTargetRefs = useRef({});
+  const tutorialSavedPairIdRef = useRef(null);
   const pairsRef = useRef(pairs);
   const studyStatsRef = useRef(studyStats);
   const appOpenTrackedUserRef = useRef(null);
@@ -667,6 +723,38 @@ export default function App() {
       });
     }
 
+    if (step?.key === "quiz-use" || step?.key === "quiz-start-button") {
+      setQuizMode("front");
+      setQuizCountInput("1");
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
+      });
+    }
+
+    if (step?.key === "quiz-answer-practice") {
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
+      });
+    }
+
+    if (step?.key === "history-use") {
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
+      });
+    }
+
+    if (step?.key === "history-missed") {
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 170, animated: true });
+      });
+    }
+
+    if (step?.key === "history-recent") {
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 390, animated: true });
+      });
+    }
+
     if (step?.key === "about-support") {
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo?.({ y: 560, animated: true });
@@ -675,7 +763,7 @@ export default function App() {
 
     if (step?.key === "manage-use") {
       requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 220, animated: true });
+        scrollRef.current?.scrollTo?.({ y: 270, animated: true });
       });
     }
 
@@ -1544,7 +1632,7 @@ export default function App() {
     });
 
     if (!uniqueEntries.length) {
-      return { savedCount: 0, skippedDuplicates, cloudSaved: false };
+      return { savedCount: 0, skippedDuplicates, cloudSaved: false, savedPairs: [] };
     }
 
     let savedPairs = uniqueEntries.map((entry) => createLocalPair(entry.left, entry.right));
@@ -1580,6 +1668,7 @@ export default function App() {
       savedCount: savedPairs.length,
       skippedDuplicates,
       cloudSaved,
+      savedPairs,
     };
   };
 
@@ -1599,15 +1688,20 @@ export default function App() {
       return;
     }
 
+    Keyboard.dismiss();
     setDraft({ left: "", right: "" });
-
-    if (guidedTutorialActive && tutorialStep === "save-single-practice") {
-      setTutorialStep("save-single-success");
-      return;
-    }
 
     if (saveResult.cloudSaved) {
       setTranslatedNote("notes.cardSavedCloud");
+    } else {
+      setTranslatedNote("notes.cardSavedLocal");
+    }
+
+    if (guidedTutorialActive && tutorialStep === "save-single-practice") {
+      tutorialSavedPairIdRef.current = saveResult.savedPairs?.[0]?.id ?? null;
+      setTutorialStep("save-single-success");
+      applyTutorialStepSideEffects(TUTORIAL_STEP_MAP["save-single-success"]);
+      return;
     }
   };
 
@@ -1917,6 +2011,21 @@ export default function App() {
     updateStudyStats(nextStudyStats);
     roundMetaRef.current = null;
     setRoundComplete(true);
+
+    if (guidedTutorialActive && tutorialStepRef.current === "quiz-answer-practice") {
+      setTimeout(() => {
+        if (tutorialStepRef.current !== "quiz-answer-practice") {
+          return;
+        }
+
+        const nextStep = getNextTutorialStep("quiz-answer-practice");
+
+        if (nextStep) {
+          setTutorialStep(nextStep.key);
+          applyTutorialStepSideEffects(nextStep);
+        }
+      }, 420);
+    }
   };
 
   const resetQuizSession = () => {
@@ -2071,16 +2180,34 @@ export default function App() {
       return;
     }
 
-    const finalRequestedCount = resolveRequestedQuizCount(requestedCount);
-
-    beginQuizRound(
-      buildPracticeDeck(pairs, finalRequestedCount, quizMode, studyStatsRef.current),
-      {
-        requestedCount: finalRequestedCount,
-        mode: quizMode,
-        source: "adaptive",
-      }
+    const quizTutorialStarting =
+      guidedTutorialActive && tutorialStepRef.current === "quiz-start-button";
+    const tutorialPair =
+      quizTutorialStarting
+        ? pairsRef.current.find((pair) => pair.id === tutorialSavedPairIdRef.current) ?? pairsRef.current[0]
+        : null;
+    const finalRequestedCount = quizTutorialStarting ? 1 : resolveRequestedQuizCount(requestedCount);
+    const nextDeck = buildPracticeDeck(
+      tutorialPair ? [tutorialPair] : pairs,
+      finalRequestedCount,
+      quizTutorialStarting ? "front" : quizMode,
+      studyStatsRef.current
     );
+
+    beginQuizRound(nextDeck, {
+      requestedCount: finalRequestedCount,
+      mode: quizTutorialStarting ? "front" : quizMode,
+      source: "adaptive",
+    });
+
+    if (quizTutorialStarting) {
+      const nextStep = getNextTutorialStep("quiz-start-button");
+
+      if (nextStep) {
+        setTutorialStep(nextStep.key);
+        applyTutorialStepSideEffects(nextStep);
+      }
+    }
   };
 
   const retryIncorrectCards = () => {
@@ -2159,6 +2286,7 @@ export default function App() {
       return;
     }
 
+    Keyboard.dismiss();
     clearTimeout(timerRef.current);
 
     if (result === "correct") {
@@ -2187,6 +2315,8 @@ export default function App() {
       setFeedback(t("quiz.feedbackEmpty"));
       return;
     }
+
+    Keyboard.dismiss();
 
     if (compareAnswers(answer, current.answer)) {
       updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, true));
@@ -2708,7 +2838,7 @@ export default function App() {
             </View>
           </View>
         ) : current ? (
-          <View style={styles.quizCard}>
+          <View style={styles.quizCard} {...tutorialTargetProps("quiz-card")}>
             <View style={styles.quizMetaRow}>
               <Text style={styles.quizProgress}>
                 {Math.min(quizIndex + 1, deck.length)} / {deck.length}
@@ -2840,7 +2970,11 @@ export default function App() {
             </View>
 
             <View style={styles.actionRow}>
-              <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
+              <Pressable
+                {...tutorialTargetProps("quiz-start-button")}
+                onPress={() => startQuiz()}
+                style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
+              >
                 <Text style={styles.primaryButtonText}>{t("quiz.startButton")}</Text>
               </Pressable>
               <Pressable onPress={() => handleTabChange("manage")} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
@@ -2882,7 +3016,7 @@ export default function App() {
 
         {hasStudyHistory ? (
           <>
-            <View style={styles.historySummaryCard} {...tutorialTargetProps("history-panel")}>
+            <View style={styles.historySummaryCard} {...tutorialTargetProps("history-summary-panel")}>
               <View style={styles.historySummaryHeader}>
                 <Text style={styles.panelTitle}>{t("history.todayTitle")}</Text>
                 <Text style={styles.panelBody}>{t("history.todayBody")}</Text>
@@ -2905,7 +3039,7 @@ export default function App() {
               </View>
             </View>
 
-            <View style={styles.libraryPanel}>
+            <View style={styles.libraryPanel} {...tutorialTargetProps("history-missed-panel")}>
               <View style={styles.panelHeader}>
                 <Text style={styles.panelTitle}>{todayMissedCards.length ? t("history.todayMissed") : t("history.topMissed")}</Text>
                 <Text style={styles.historyChipText}>{todayMissedCards.length ? t("history.todayBasis") : t("history.totalBasis")}</Text>
@@ -2940,7 +3074,7 @@ export default function App() {
               </View>
             </View>
 
-            <View style={styles.libraryPanel}>
+            <View style={styles.libraryPanel} {...tutorialTargetProps("history-recent-panel")}>
               <View style={styles.panelHeader}>
                 <Text style={styles.panelTitle}>{t("history.recentSessions")}</Text>
               </View>
@@ -2981,7 +3115,7 @@ export default function App() {
             </View>
           </>
         ) : (
-          <View {...tutorialTargetProps("history-panel")}>
+          <View {...tutorialTargetProps("history-summary-panel")}>
             <EmptyPanel
               styles={styles}
               theme={theme}
@@ -3080,8 +3214,12 @@ export default function App() {
 
           {visibleManagePairs.length ? (
             <View style={styles.libraryPanel} {...tutorialTargetProps("manage-list-panel")}>
-              {visibleManagePairs.map((pair) => (
-                <View key={pair.id} style={styles.manageCard}>
+              {visibleManagePairs.map((pair, index) => (
+                <View
+                  key={pair.id}
+                  style={styles.manageCard}
+                  {...(index === 0 ? tutorialTargetProps("manage-first-card") : {})}
+                >
                   {editingId === pair.id ? (
                     <>
                       <Text style={styles.inputLabel}>{t("common.front")}</Text>
@@ -3182,7 +3320,7 @@ export default function App() {
               ))}
             </View>
           ) : (
-            <View {...tutorialTargetProps("manage-list-panel")}>
+            <View {...tutorialTargetProps("manage-first-card")}>
               <EmptyPanel
                 styles={styles}
                 theme={theme}
@@ -3901,7 +4039,7 @@ function TutorialCoach({
   const tabTailLeft = `${12 + tabIndex * 19}%`;
   const safeScreenWidth = screenWidth || 390;
   const safeScreenHeight = screenHeight || 844;
-  const spotlightPadding = 8;
+  const spotlightPadding = step.spotlightPadding ?? 0;
   const spotlightRect = targetRect
     ? (() => {
         const left = Math.max(12, targetRect.x - spotlightPadding);
@@ -3922,14 +4060,28 @@ function TutorialCoach({
   const bubbleWidth = Math.min(maxWidth ?? safeScreenWidth - 40, safeScreenWidth - 40);
   const bubbleLeft = Math.max(20, (safeScreenWidth - bubbleWidth) / 2);
   const targetBottom = spotlightRect ? spotlightRect.top + spotlightRect.height : safeScreenHeight * 0.48;
-  const placeBubbleAbove = spotlightRect && safeScreenHeight - targetBottom < 176 && spotlightRect.top > 214;
+  const bubbleEstimatedHeight = step.bubbleHeight ?? 230;
+  const bubbleBottomInset = Platform.OS === "android" ? 126 : 104;
+  const bubbleTopMax = Math.max(18, safeScreenHeight - bubbleEstimatedHeight - bubbleBottomInset);
+  const placeBubbleAbove =
+    spotlightRect &&
+    safeScreenHeight - targetBottom < bubbleEstimatedHeight + bubbleBottomInset &&
+    spotlightRect.top > bubbleEstimatedHeight + 18;
   const bubbleTop = placeBubbleAbove
-    ? Math.max(18, spotlightRect.top - 174)
-    : Math.min(safeScreenHeight - 190, targetBottom + 18);
+    ? Math.max(18, spotlightRect.top - bubbleEstimatedHeight - 12)
+    : Math.min(bubbleTopMax, targetBottom + 18);
   const targetCenterX = spotlightRect ? spotlightRect.left + spotlightRect.width / 2 : 64;
   const tailLeft = Math.max(28, Math.min(bubbleWidth - 44, targetCenterX - bubbleLeft - 12));
   const spotlightRadius = spotlightRect
-    ? Math.min(30, Math.max(16, Math.min(spotlightRect.width, spotlightRect.height) / 4))
+    ? Math.min(
+        step.spotlightRadius === "pill"
+          ? Math.min(spotlightRect.width, spotlightRect.height) / 2
+          : typeof step.spotlightRadius === "number"
+            ? step.spotlightRadius
+            : Math.max(16, Math.min(spotlightRect.width, spotlightRect.height) / 4),
+        spotlightRect.width / 2,
+        spotlightRect.height / 2
+      )
     : 0;
   const [demoFront, setDemoFront] = useState("");
   const [demoBack, setDemoBack] = useState("");
@@ -4103,7 +4255,7 @@ function TutorialCoach({
             {step.type === "practice" || step.type === "target-press" ? (
               <View style={styles.tutorialCoachWaitingPill}>
                 <Text style={styles.tutorialCoachWaitingText}>
-                  {t(step.type === "practice" ? "tutorial.waitingSave" : "tutorial.waitingTap")}
+                  {t(step.waitingKey ?? (step.type === "practice" ? "tutorial.waitingSave" : "tutorial.waitingTap"))}
                 </Text>
               </View>
             ) : (
