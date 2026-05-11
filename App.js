@@ -3,6 +3,7 @@ import {
   Alert,
   Animated,
   Easing,
+  findNodeHandle,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -502,7 +503,9 @@ export default function App() {
   const [launchVisible, setLaunchVisible] = useState(true);
 
   const timerRef = useRef(null);
+  const appRootRef = useRef(null);
   const scrollRef = useRef(null);
+  const tutorialStepRef = useRef(tutorialStep);
   const tutorialTargetRefs = useRef({});
   const pairsRef = useRef(pairs);
   const studyStatsRef = useRef(studyStats);
@@ -544,36 +547,100 @@ export default function App() {
       : Math.min(DEFAULT_QUIZ_COUNT, maxQuizCount);
   const guidedTutorialActive = tutorialVisible && tutorialStep !== "intro";
   const currentTutorialStep = guidedTutorialActive ? TUTORIAL_STEP_MAP[tutorialStep] : null;
+  tutorialStepRef.current = tutorialStep;
 
   const registerTutorialTarget = (key) => (node) => {
     if (node) {
       tutorialTargetRefs.current[key] = node;
+      return;
     }
+
+    delete tutorialTargetRefs.current[key];
   };
 
   const measureTutorialTarget = (key) => {
+    const activeTargetKey = TUTORIAL_STEP_MAP[tutorialStepRef.current]?.targetKey;
+
+    if (activeTargetKey !== key) {
+      return;
+    }
+
     const target = tutorialTargetRefs.current[key];
 
-    if (!target?.measureInWindow) {
+    if (!target) {
       setTutorialTargetRect(null);
       return;
     }
 
-    target.measureInWindow((x, y, width, height) => {
+    const applyMeasuredRect = (x, y, width, height) => {
+      if (TUTORIAL_STEP_MAP[tutorialStepRef.current]?.targetKey !== key) {
+        return;
+      }
+
       if (!width || !height) {
         setTutorialTargetRect(null);
         return;
       }
 
-      setTutorialTargetRect({ x, y, width, height });
-    });
+      setTutorialTargetRect({
+        x: Math.max(0, x),
+        y: Math.max(0, y),
+        width,
+        height,
+      });
+    };
+    const measureInAppWindow = () => {
+      if (!target.measureInWindow) {
+        setTutorialTargetRect(null);
+        return;
+      }
+
+      target.measureInWindow((x, y, width, height) => {
+        if (!appRootRef.current?.measureInWindow) {
+          applyMeasuredRect(x, y, width, height);
+          return;
+        }
+
+        appRootRef.current.measureInWindow((rootX, rootY) => {
+          applyMeasuredRect(x - rootX, y - rootY, width, height);
+        });
+      });
+    };
+    const rootHandle = findNodeHandle(appRootRef.current);
+
+    if (target.measureLayout && rootHandle) {
+      try {
+        target.measureLayout(
+          rootHandle,
+          (x, y, width, height) => applyMeasuredRect(x, y, width, height),
+          measureInAppWindow
+        );
+        return;
+      } catch {
+        measureInAppWindow();
+        return;
+      }
+    }
+
+    measureInAppWindow();
+  };
+
+  const queueTutorialTargetMeasure = (key) => {
+    if (!key) {
+      return;
+    }
+
+    requestAnimationFrame(() => measureTutorialTarget(key));
+    setTimeout(() => measureTutorialTarget(key), 140);
+    setTimeout(() => measureTutorialTarget(key), 360);
+    setTimeout(() => measureTutorialTarget(key), 720);
   };
 
   const tutorialTargetProps = (key) => ({
     ref: registerTutorialTarget(key),
     onLayout: () => {
       if (currentTutorialStep?.targetKey === key) {
-        requestAnimationFrame(() => measureTutorialTarget(key));
+        queueTutorialTargetMeasure(key);
       }
     },
   });
@@ -617,6 +684,8 @@ export default function App() {
         scrollRef.current?.scrollTo?.({ y: 220, animated: true });
       });
     }
+
+    queueTutorialTargetMeasure(step?.targetKey);
   };
 
   useEffect(() => {
@@ -632,12 +701,12 @@ export default function App() {
       }
     };
     const frameId = requestAnimationFrame(measure);
-    const timeoutId = setTimeout(measure, 280);
+    const timeoutIds = [120, 320, 640].map((delay) => setTimeout(measure, delay));
 
     return () => {
       cancelled = true;
       cancelAnimationFrame(frameId);
-      clearTimeout(timeoutId);
+      timeoutIds.forEach(clearTimeout);
     };
   }, [
     currentTutorialStep?.targetKey,
@@ -3561,7 +3630,7 @@ export default function App() {
   );
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView ref={appRootRef} style={styles.safeArea}>
       <StatusBar barStyle={theme.statusBarStyle} backgroundColor={theme.statusBarBg} />
 
       <View pointerEvents="none" style={styles.backgroundLayer}>
@@ -3595,6 +3664,9 @@ export default function App() {
           contentContainerStyle={[styles.content, { paddingTop: contentTopPadding }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          onContentSizeChange={() => queueTutorialTargetMeasure(currentTutorialStep?.targetKey)}
+          onMomentumScrollEnd={() => queueTutorialTargetMeasure(currentTutorialStep?.targetKey)}
+          onScrollEndDrag={() => queueTutorialTargetMeasure(currentTutorialStep?.targetKey)}
         >
           <View style={[styles.contentShell, contentMaxWidth ? { maxWidth: contentMaxWidth } : null]}>
             {tab === "save" ? renderSaveTab() : null}
