@@ -3657,6 +3657,7 @@ export default function App() {
           ref={scrollRef}
           contentContainerStyle={[styles.content, { paddingTop: contentTopPadding }]}
           showsVerticalScrollIndicator={false}
+          scrollEnabled={!guidedTutorialActive}
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={() => queueTutorialTargetMeasure(currentTutorialStep?.targetKey)}
           onMomentumScrollEnd={() => queueTutorialTargetMeasure(currentTutorialStep?.targetKey)}
@@ -3927,6 +3928,9 @@ function TutorialCoach({
     : Math.min(safeScreenHeight - 190, targetBottom + 18);
   const targetCenterX = spotlightRect ? spotlightRect.left + spotlightRect.width / 2 : 64;
   const tailLeft = Math.max(28, Math.min(bubbleWidth - 44, targetCenterX - bubbleLeft - 12));
+  const spotlightRadius = spotlightRect
+    ? Math.min(30, Math.max(16, Math.min(spotlightRect.width, spotlightRect.height) / 4))
+    : 0;
   const [demoFront, setDemoFront] = useState("");
   const [demoBack, setDemoBack] = useState("");
   const [savingDemo, setSavingDemo] = useState(false);
@@ -3993,6 +3997,58 @@ function TutorialCoach({
               ]}
               onPress={() => {}}
             />
+            <Pressable
+              style={[
+                styles.tutorialSpotlightCornerFill,
+                {
+                  left: spotlightRect.left,
+                  top: spotlightRect.top,
+                  width: spotlightRadius,
+                  height: spotlightRadius,
+                  borderBottomRightRadius: spotlightRadius,
+                },
+              ]}
+              onPress={() => {}}
+            />
+            <Pressable
+              style={[
+                styles.tutorialSpotlightCornerFill,
+                {
+                  left: spotlightRect.left + spotlightRect.width - spotlightRadius,
+                  top: spotlightRect.top,
+                  width: spotlightRadius,
+                  height: spotlightRadius,
+                  borderBottomLeftRadius: spotlightRadius,
+                },
+              ]}
+              onPress={() => {}}
+            />
+            <Pressable
+              style={[
+                styles.tutorialSpotlightCornerFill,
+                {
+                  left: spotlightRect.left,
+                  top: spotlightRect.top + spotlightRect.height - spotlightRadius,
+                  width: spotlightRadius,
+                  height: spotlightRadius,
+                  borderTopRightRadius: spotlightRadius,
+                },
+              ]}
+              onPress={() => {}}
+            />
+            <Pressable
+              style={[
+                styles.tutorialSpotlightCornerFill,
+                {
+                  left: spotlightRect.left + spotlightRect.width - spotlightRadius,
+                  top: spotlightRect.top + spotlightRect.height - spotlightRadius,
+                  width: spotlightRadius,
+                  height: spotlightRadius,
+                  borderTopLeftRadius: spotlightRadius,
+                },
+              ]}
+              onPress={() => {}}
+            />
             <View
               pointerEvents="none"
               style={[
@@ -4002,6 +4058,7 @@ function TutorialCoach({
                   top: spotlightRect.top,
                   width: spotlightRect.width,
                   height: spotlightRect.height,
+                  borderRadius: spotlightRadius,
                 },
               ]}
             />
@@ -5791,6 +5848,10 @@ const createStyles = (theme) => StyleSheet.create({
     position: "absolute",
     backgroundColor: theme.mode === "dark" ? "rgba(0, 0, 0, 0.68)" : "rgba(8, 13, 28, 0.58)",
   },
+  tutorialSpotlightCornerFill: {
+    position: "absolute",
+    backgroundColor: theme.mode === "dark" ? "rgba(0, 0, 0, 0.68)" : "rgba(8, 13, 28, 0.58)",
+  },
   tutorialSpotlightRing: {
     position: "absolute",
     borderRadius: 28,
@@ -5805,7 +5866,7 @@ const createStyles = (theme) => StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 16,
     borderRadius: 26,
-    backgroundColor: theme.surfaceStrong,
+    backgroundColor: theme.mode === "dark" ? "#111827" : "#FFFFFF",
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
@@ -5819,7 +5880,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderBottomWidth: 15,
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
-    borderBottomColor: theme.surfaceStrong,
+    borderBottomColor: theme.mode === "dark" ? "#111827" : "#FFFFFF",
   },
   tutorialSpotlightTailDown: {
     position: "absolute",
@@ -5831,7 +5892,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderTopWidth: 15,
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
-    borderTopColor: theme.surfaceStrong,
+    borderTopColor: theme.mode === "dark" ? "#111827" : "#FFFFFF",
   },
   tutorialCoachBubble: {
     position: "relative",
@@ -5841,7 +5902,7 @@ const createStyles = (theme) => StyleSheet.create({
     paddingBottom: 16,
     borderRadius: 26,
     borderBottomLeftRadius: 18,
-    backgroundColor: theme.surfaceStrong,
+    backgroundColor: theme.mode === "dark" ? "#111827" : "#FFFFFF",
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
@@ -5858,7 +5919,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderTopWidth: 18,
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
-    borderTopColor: theme.surfaceStrong,
+    borderTopColor: theme.mode === "dark" ? "#111827" : "#FFFFFF",
   },
   tutorialCoachHeader: {
     flexDirection: "row",
