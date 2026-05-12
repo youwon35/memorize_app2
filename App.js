@@ -84,7 +84,6 @@ const MANAGE_SORT_OPTIONS = [
   { key: "recent", labelKey: "manage.sortRecent" },
   { key: "alphabetical", labelKey: "manage.sortAlphabetical" },
   { key: "missed", labelKey: "manage.sortMissed" },
-  { key: "incorrectCount", labelKey: "manage.sortIncorrectCount" },
 ];
 const THEME_OPTIONS = [
   { key: "light", labelKey: "theme.light", icon: "white-balance-sunny" },
@@ -882,20 +881,6 @@ export default function App() {
 
         if (attemptsGap !== 0) {
           return attemptsGap;
-        }
-
-        return new Date(rightPair.updatedAt || rightPair.createdAt || 0) - new Date(leftPair.updatedAt || leftPair.createdAt || 0);
-      });
-    }
-
-    if (manageSort === "incorrectCount") {
-      return [...pairs].sort((leftPair, rightPair) => {
-        const leftStats = studyStats.cards[createSignature(leftPair.left, leftPair.right)] ?? {};
-        const rightStats = studyStats.cards[createSignature(rightPair.left, rightPair.right)] ?? {};
-        const incorrectGap = (rightStats.incorrect ?? 0) - (leftStats.incorrect ?? 0);
-
-        if (incorrectGap !== 0) {
-          return incorrectGap;
         }
 
         return new Date(rightPair.updatedAt || rightPair.createdAt || 0) - new Date(leftPair.updatedAt || leftPair.createdAt || 0);
@@ -2471,9 +2456,6 @@ export default function App() {
         <View style={styles.composerPanel} {...tutorialTargetProps("save-composer")}>
           <View style={styles.importHeader}>
             <View style={styles.importTitleRow}>
-              <View style={styles.importIconWrap}>
-                <MaterialCommunityIcons name="cards-outline" size={18} color={theme.accent} />
-              </View>
               <Text style={styles.importTitle}>{t("save.title")}</Text>
             </View>
             <Text style={styles.importBodyCompact}>{t("save.singleBody")}</Text>
@@ -4499,19 +4481,21 @@ const createStyles = (theme) => StyleSheet.create({
   },
   heroStrip: {
     paddingTop: 8,
-    gap: 4,
+    gap: 6,
   },
   heroEyebrow: {
-    fontSize: 13,
-    fontWeight: "700",
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "900",
     letterSpacing: 1.2,
     textTransform: "uppercase",
     color: theme.accent,
   },
   heroMeta: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: theme.textMuted,
+    fontSize: 17,
+    lineHeight: 27,
+    fontWeight: "700",
+    color: theme.textStrong,
   },
   syncStrip: {
     flexDirection: "row",
@@ -4673,19 +4657,23 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.accentSoft,
   },
   importTitle: {
-    fontSize: 15,
-    fontWeight: "800",
+    flexShrink: 1,
+    fontSize: 18,
+    lineHeight: 25,
+    fontWeight: "900",
     color: theme.textPrimary,
   },
   importBody: {
-    fontSize: 13,
-    lineHeight: 21,
-    color: theme.textSecondary,
+    fontSize: 16,
+    lineHeight: 26,
+    fontWeight: "700",
+    color: theme.textStrong,
   },
   importBodyCompact: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: theme.textSecondary,
+    fontSize: 16,
+    lineHeight: 26,
+    fontWeight: "700",
+    color: theme.textStrong,
   },
   subtleDivider: {
     height: 1,
@@ -5326,14 +5314,16 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 12,
   },
   settingsTitle: {
-    fontSize: 17,
-    fontWeight: "800",
+    fontSize: 18,
+    lineHeight: 25,
+    fontWeight: "900",
     color: theme.textPrimary,
   },
   settingsBody: {
-    fontSize: 14,
-    lineHeight: 22,
-    color: theme.textSecondary,
+    fontSize: 16,
+    lineHeight: 26,
+    fontWeight: "700",
+    color: theme.textStrong,
   },
   compactSelectRow: {
     flexDirection: "row",
