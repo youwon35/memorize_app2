@@ -203,33 +203,12 @@ const TUTORIAL_STEPS = [
     bodyKey: "tutorial.historyTabBody",
   },
   {
-    key: "history-use",
-    type: "spotlight",
-    tab: "history",
-    targetKey: "history-summary-panel",
-    spotlightRadius: 26,
-    icon: "chart-timeline-variant",
-    titleKey: "tutorial.historySummaryTitle",
-    bodyKey: "tutorial.historySummaryBody",
-    actionKey: "tutorial.nextHistoryMissed",
-  },
-  {
-    key: "history-missed",
-    type: "spotlight",
-    tab: "history",
-    targetKey: "history-missed-panel",
-    spotlightRadius: 26,
-    icon: "chart-timeline-variant",
-    titleKey: "tutorial.historyMissedTitle",
-    bodyKey: "tutorial.historyMissedBody",
-    actionKey: "tutorial.nextHistoryRecent",
-  },
-  {
     key: "history-recent",
     type: "spotlight",
     tab: "history",
     targetKey: "history-recent-panel",
     spotlightRadius: 26,
+    bubbleHeight: 340,
     icon: "chart-timeline-variant",
     titleKey: "tutorial.historyRecentTitle",
     bodyKey: "tutorial.historyRecentBody",
@@ -489,6 +468,7 @@ export default function App() {
   const [tutorialVisible, setTutorialVisible] = useState(false);
   const [tutorialStep, setTutorialStep] = useState("intro");
   const [tutorialTargetRect, setTutorialTargetRect] = useState(null);
+  const [tutorialQuizResult, setTutorialQuizResult] = useState(null);
   const [session, setSession] = useState(null);
   const [userRole, setUserRole] = useState("user");
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
@@ -576,6 +556,20 @@ export default function App() {
       : Math.min(DEFAULT_QUIZ_COUNT, maxQuizCount);
   const guidedTutorialActive = tutorialVisible && tutorialStep !== "intro";
   const currentTutorialStep = guidedTutorialActive ? TUTORIAL_STEP_MAP[tutorialStep] : null;
+  const displayedTutorialStep = useMemo(() => {
+    if (!currentTutorialStep || currentTutorialStep.key !== "history-tab") {
+      return currentTutorialStep;
+    }
+
+    return {
+      ...currentTutorialStep,
+      titleKey:
+        tutorialQuizResult === "incorrect"
+          ? "tutorial.historyTabTitleIncorrect"
+          : "tutorial.historyTabTitleCorrect",
+      bodyKey: "tutorial.historyTabBodyAfterQuiz",
+    };
+  }, [currentTutorialStep, tutorialQuizResult]);
   tutorialStepRef.current = tutorialStep;
 
   const registerTutorialTarget = (key) => (node) => {
@@ -700,18 +694,6 @@ export default function App() {
     if (step?.key === "quiz-answer-practice") {
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-      });
-    }
-
-    if (step?.key === "history-use") {
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-      });
-    }
-
-    if (step?.key === "history-missed") {
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 170, animated: true });
       });
     }
 
@@ -1514,6 +1496,7 @@ export default function App() {
     setTutorialVisible(false);
     setTutorialStep("intro");
     setTutorialSeen(true);
+    setTutorialQuizResult(null);
     void AsyncStorage.setItem(TUTORIAL_SEEN_KEY, "1");
 
     if (nextTab) {
@@ -1523,10 +1506,12 @@ export default function App() {
 
   const openTutorial = () => {
     setTutorialStep("intro");
+    setTutorialQuizResult(null);
     setTutorialVisible(true);
   };
 
   const startGuidedTutorial = () => {
+    setTutorialQuizResult(null);
     setTutorialStep(TUTORIAL_STEPS[0].key);
   };
 
@@ -2267,6 +2252,9 @@ export default function App() {
     if (result !== "incorrect") {
       updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, false));
       setRoundIncorrectIds(nextIncorrectIds);
+      if (guidedTutorialActive && tutorialStepRef.current === "quiz-answer-practice") {
+        setTutorialQuizResult("incorrect");
+      }
     }
 
     goNext(nextIncorrectIds);
@@ -2288,6 +2276,9 @@ export default function App() {
 
     if (compareAnswers(answer, current.answer)) {
       updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, true));
+      if (guidedTutorialActive && tutorialStepRef.current === "quiz-answer-practice") {
+        setTutorialQuizResult("correct");
+      }
       setResult("correct");
       setFeedback(t("quiz.feedbackCorrect"));
       timerRef.current = setTimeout(() => goNext(), 900);
@@ -2296,6 +2287,9 @@ export default function App() {
 
     const nextIncorrectIds = appendUniqueId(roundIncorrectIds, current.id);
     updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, false));
+    if (guidedTutorialActive && tutorialStepRef.current === "quiz-answer-practice") {
+      setTutorialQuizResult("incorrect");
+    }
     setResult("incorrect");
     setFeedback(t("quiz.feedbackIncorrect"));
     setRoundIncorrectIds(nextIncorrectIds);
@@ -3847,9 +3841,9 @@ export default function App() {
           onStart={startGuidedTutorial}
         />
       ) : null}
-      {guidedTutorialActive && currentTutorialStep ? (
+      {guidedTutorialActive && displayedTutorialStep ? (
         <TutorialCoach
-          step={currentTutorialStep}
+          step={displayedTutorialStep}
           styles={styles}
           theme={theme}
           t={t}
