@@ -128,14 +128,15 @@ const TUTORIAL_STEPS = [
   },
   {
     key: "save-single-chip",
-    type: "spotlight",
+    type: "target-press",
     tab: "save",
     targetKey: "save-mode-single",
     spotlightRadius: "pill",
     icon: "cards-outline",
     titleKey: "tutorial.saveSingleChipTitle",
     bodyKey: "tutorial.saveSingleChipBody",
-    actionKey: "tutorial.nextPractice",
+    waitingKey: "tutorial.waitingSaveModeSingle",
+    hideTargetHint: true,
   },
   {
     key: "save-single-practice",
@@ -144,7 +145,7 @@ const TUTORIAL_STEPS = [
     targetKey: "save-composer",
     spotlightRadius: 30,
     bubbleGap: 42,
-    bubbleHeight: 150,
+    bubbleHeight: 170,
     hideWaitingPill: true,
     icon: "cards-outline",
     titleKey: "tutorial.savePracticeTitle",
@@ -167,17 +168,6 @@ const TUTORIAL_STEPS = [
     icon: "brain",
     titleKey: "tutorial.quizTabTitle",
     bodyKey: "tutorial.quizTabBody",
-  },
-  {
-    key: "quiz-use",
-    type: "spotlight",
-    tab: "quiz",
-    targetKey: "quiz-ready-card",
-    spotlightRadius: 24,
-    icon: "brain",
-    titleKey: "tutorial.quizUseTitle",
-    bodyKey: "tutorial.quizUseBody",
-    actionKey: "tutorial.nextQuizStart",
   },
   {
     key: "quiz-start-button",
@@ -697,7 +687,7 @@ export default function App() {
       });
     }
 
-    if (step?.key === "quiz-use" || step?.key === "quiz-start-button") {
+    if (step?.key === "quiz-start-button") {
       setQuizMode("front");
       setQuizCountInput("1");
       requestAnimationFrame(() => {
@@ -2455,6 +2445,10 @@ export default function App() {
               onPress={() => {
                 setSaveInputMode(option.key);
 
+                if (guidedTutorialActive && tutorialStep === "save-single-chip" && option.key === "single") {
+                  advanceTutorial();
+                }
+
                 if (guidedTutorialActive && tutorialStep === "save-single-success" && option.key === "text") {
                   advanceTutorial();
                 }
@@ -4038,7 +4032,7 @@ function TutorialCoach({
   const bubbleLeft = Math.max(20, (safeScreenWidth - bubbleWidth) / 2);
   const targetBottom = spotlightRect ? spotlightRect.top + spotlightRect.height : safeScreenHeight * 0.48;
   const bubbleGap = step.bubbleGap ?? 18;
-  const bubbleEstimatedHeight = step.bubbleHeight ?? 230;
+  const bubbleEstimatedHeight = step.bubbleHeight ?? 250;
   const bubbleBottomInset = Platform.OS === "android" ? 126 : 104;
   const bubbleTopMax = Math.max(18, safeScreenHeight - bubbleEstimatedHeight - bubbleBottomInset);
   const placeBubbleAbove =
@@ -6074,14 +6068,14 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 5,
   },
   tutorialCoachTitle: {
-    fontSize: 17,
-    lineHeight: 23,
+    fontSize: 19,
+    lineHeight: 26,
     fontWeight: "900",
     color: theme.textPrimary,
   },
   tutorialCoachText: {
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 16,
+    lineHeight: 25,
     color: theme.textSecondary,
   },
   tutorialCoachHint: {
@@ -6142,8 +6136,8 @@ const createStyles = (theme) => StyleSheet.create({
     borderColor: theme.surfaceBorder,
   },
   tutorialCoachWaitingText: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 21,
     fontWeight: "800",
     textAlign: "center",
     color: theme.accent,
