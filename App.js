@@ -223,22 +223,12 @@ const TUTORIAL_STEPS = [
     bodyKey: "tutorial.manageTabBody",
   },
   {
-    key: "manage-search",
-    type: "spotlight",
-    tab: "manage",
-    targetKey: "manage-search-panel",
-    spotlightRadius: 24,
-    icon: "playlist-edit",
-    titleKey: "tutorial.manageSearchTitle",
-    bodyKey: "tutorial.manageSearchBody",
-    waitForNextTap: true,
-  },
-  {
     key: "manage-use",
     type: "spotlight",
     tab: "manage",
     targetKey: "manage-first-card",
     spotlightRadius: 18,
+    bubbleHeight: 360,
     icon: "playlist-edit",
     titleKey: "tutorial.manageUseTitle",
     bodyKey: "tutorial.manageUseBody",
@@ -258,6 +248,9 @@ const TUTORIAL_STEPS = [
     tab: "about",
     targetKey: "about-support-panel",
     spotlightRadius: 24,
+    spotlightPadding: 4,
+    bubbleGap: 26,
+    bubbleHeight: 300,
     icon: "message-question-outline",
     titleKey: "tutorial.aboutSupportTitle",
     bodyKey: "tutorial.aboutSupportBody",
@@ -1492,7 +1485,7 @@ export default function App() {
     setSupportRequests((currentRequests) => mergeSupportRequests([nextRequest], currentRequests));
   };
 
-  const closeTutorial = (nextTab = null) => {
+  const closeTutorial = (nextTab = null, { showCompletionAlert = false } = {}) => {
     setTutorialVisible(false);
     setTutorialStep("intro");
     setTutorialSeen(true);
@@ -1501,6 +1494,12 @@ export default function App() {
 
     if (nextTab) {
       selectTab(nextTab);
+    }
+
+    if (showCompletionAlert) {
+      setTimeout(() => {
+        Alert.alert(t("tutorial.completionTitle"), t("tutorial.completionBody"));
+      }, 250);
     }
   };
 
@@ -1519,7 +1518,7 @@ export default function App() {
     const nextStep = getNextTutorialStep(tutorialStep);
 
     if (!nextStep) {
-      closeTutorial();
+      closeTutorial(null, { showCompletionAlert: tutorialStep === "about-support" });
       return;
     }
 
@@ -3444,90 +3443,92 @@ export default function App() {
           </Pressable>
         </View>
 
-        <View style={styles.settingsCard} {...tutorialTargetProps("about-support-panel")}>
-          <View style={styles.settingsHeader}>
-            <Text style={styles.settingsTitle}>{t("about.supportTitle")}</Text>
-            <Text style={styles.settingsBody}>{t("about.supportBody")}</Text>
-          </View>
+        <View style={styles.settingsCard}>
+          <View style={styles.aboutSupportTutorialTarget} {...tutorialTargetProps("about-support-panel")}>
+            <View style={styles.settingsHeader}>
+              <Text style={styles.settingsTitle}>{t("about.supportTitle")}</Text>
+              <Text style={styles.settingsBody}>{t("about.supportBody")}</Text>
+            </View>
 
-          <View style={styles.supportForm}>
-            <View style={styles.supportField}>
-              <Text style={styles.supportLabel}>{t("about.supportCategoryLabel")}</Text>
-              <View style={styles.supportCategoryRow}>
-                {SUPPORT_CATEGORY_OPTIONS.map((option) => {
-                  const active = supportCategory === option;
+            <View style={styles.supportForm}>
+              <View style={styles.supportField}>
+                <Text style={styles.supportLabel}>{t("about.supportCategoryLabel")}</Text>
+                <View style={styles.supportCategoryRow}>
+                  {SUPPORT_CATEGORY_OPTIONS.map((option) => {
+                    const active = supportCategory === option;
 
-                  return (
-                    <Pressable
-                      key={option}
-                      onPress={() => setSupportCategory(option)}
-                      style={({ pressed }) => [
-                        styles.supportCategoryChip,
-                        active && styles.supportCategoryChipActive,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.supportCategoryChipText,
-                          active && styles.supportCategoryChipTextActive,
+                    return (
+                      <Pressable
+                        key={option}
+                        onPress={() => setSupportCategory(option)}
+                        style={({ pressed }) => [
+                          styles.supportCategoryChip,
+                          active && styles.supportCategoryChipActive,
+                          pressed && styles.pressed,
                         ]}
                       >
-                        {t(`supportCategories.${option}`)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+                        <Text
+                          style={[
+                            styles.supportCategoryChipText,
+                            active && styles.supportCategoryChipTextActive,
+                          ]}
+                        >
+                          {t(`supportCategories.${option}`)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.supportField}>
+                <Text style={styles.supportLabel}>{t("about.supportEmailLabel")}</Text>
+                <TextInput
+                  value={supportReplyEmail}
+                  onChangeText={setSupportReplyEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  placeholder={t("about.supportEmailPlaceholder")}
+                  placeholderTextColor={theme.textPlaceholder}
+                  style={styles.input}
+                />
+              </View>
+
+              <View style={styles.supportField}>
+                <Text style={styles.supportLabel}>{t("about.supportMessageLabel")}</Text>
+                <TextInput
+                  value={supportMessage}
+                  onChangeText={setSupportMessage}
+                  multiline
+                  textAlignVertical="top"
+                  placeholder={t("about.supportMessagePlaceholder")}
+                  placeholderTextColor={theme.textPlaceholder}
+                  style={[styles.input, styles.supportMessageInput]}
+                />
               </View>
             </View>
+          </View>
 
-            <View style={styles.supportField}>
-              <Text style={styles.supportLabel}>{t("about.supportEmailLabel")}</Text>
-              <TextInput
-                value={supportReplyEmail}
-                onChangeText={setSupportReplyEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                placeholder={t("about.supportEmailPlaceholder")}
-                placeholderTextColor={theme.textPlaceholder}
-                style={styles.input}
-              />
-            </View>
+          {supportNotice ? <Text style={styles.supportNotice}>{supportNotice}</Text> : null}
 
-            <View style={styles.supportField}>
-              <Text style={styles.supportLabel}>{t("about.supportMessageLabel")}</Text>
-              <TextInput
-                value={supportMessage}
-                onChangeText={setSupportMessage}
-                multiline
-                textAlignVertical="top"
-                placeholder={t("about.supportMessagePlaceholder")}
-                placeholderTextColor={theme.textPlaceholder}
-                style={[styles.input, styles.supportMessageInput]}
-              />
-            </View>
-
-            {supportNotice ? <Text style={styles.supportNotice}>{supportNotice}</Text> : null}
-
-            <Pressable
-              disabled={supportSending}
-              onPress={() => void submitSupportRequest()}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                supportSending && styles.primaryButtonDisabled,
-                pressed && styles.pressed,
+          <Pressable
+            disabled={supportSending}
+            onPress={() => void submitSupportRequest()}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              supportSending && styles.primaryButtonDisabled,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text
+              style={[
+                styles.primaryButtonText,
+                supportSending && styles.primaryButtonTextDisabled,
               ]}
             >
-              <Text
-                style={[
-                  styles.primaryButtonText,
-                  supportSending && styles.primaryButtonTextDisabled,
-                ]}
-              >
-                {supportSending ? t("about.supportSending") : t("about.supportSend")}
-              </Text>
-            </Pressable>
-          </View>
+              {supportSending ? t("about.supportSending") : t("about.supportSend")}
+            </Text>
+          </Pressable>
 
           {latestSupportRequests.length ? (
             <View style={styles.supportHistory}>
@@ -5303,6 +5304,10 @@ const createStyles = (theme) => StyleSheet.create({
   aboutStack: {
     gap: 12,
   },
+  aboutSupportTutorialTarget: {
+    gap: 14,
+    borderRadius: 22,
+  },
   settingsCard: {
     gap: 14,
     padding: 18,
@@ -6064,15 +6069,16 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 5,
   },
   tutorialCoachTitle: {
-    fontSize: 19,
-    lineHeight: 26,
+    fontSize: 20,
+    lineHeight: 28,
     fontWeight: "900",
     color: theme.textPrimary,
   },
   tutorialCoachText: {
-    fontSize: 16,
-    lineHeight: 25,
-    color: theme.textSecondary,
+    fontSize: 17,
+    lineHeight: 29,
+    fontWeight: "700",
+    color: theme.textStrong,
   },
   tutorialCoachHint: {
     marginTop: 4,
