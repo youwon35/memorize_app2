@@ -6,6 +6,7 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  NativeModules,
   Platform,
   Pressable,
   SafeAreaView,
@@ -58,6 +59,7 @@ import {
   formatDateTimeForLanguage,
   formatSessionLabelForLanguage,
   getPreferredLanguage,
+  isSupportedLanguage,
   LANGUAGE_OPTIONS,
   normalizeSupportCategory,
   normalizeSupportStatus,
@@ -89,6 +91,42 @@ const THEME_OPTIONS = [
   { key: "light", labelKey: "theme.light", icon: "white-balance-sunny" },
   { key: "dark", labelKey: "theme.dark", icon: "weather-night" },
 ];
+
+const getDeviceLocaleCandidates = () => {
+  const candidates = [];
+  const addCandidate = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(addCandidate);
+      return;
+    }
+
+    if (typeof value === "string" && value.trim()) {
+      candidates.push(value);
+    }
+  };
+
+  try {
+    addCandidate(Intl.DateTimeFormat().resolvedOptions().locale);
+  } catch {
+    // Native locale sources below will still provide a fallback.
+  }
+
+  const settings = NativeModules.SettingsManager?.settings;
+  addCandidate(settings?.AppleLocale);
+  addCandidate(settings?.AppleLanguages);
+
+  const i18nConstants = NativeModules.I18nManager?.getConstants?.() ?? NativeModules.I18nManager;
+  addCandidate(i18nConstants?.localeIdentifier);
+  addCandidate(i18nConstants?.locale);
+
+  const platformConstants = NativeModules.PlatformConstants?.getConstants?.() ?? NativeModules.PlatformConstants;
+  addCandidate(platformConstants?.localeIdentifier);
+  addCandidate(platformConstants?.locale);
+
+  return candidates;
+};
+
+const getInitialLanguage = () => getPreferredLanguage(getDeviceLocaleCandidates());
 const QUIZ_MODE_OPTIONS = [
   {
     key: "both",
@@ -445,7 +483,8 @@ const mergeSupportRequests = (...collections) => {
 export default function App() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [tab, setTab] = useState("save");
-  const [language, setLanguage] = useState(getPreferredLanguage());
+  const [language, setLanguage] = useState(getInitialLanguage());
+  const [preferencesReady, setPreferencesReady] = useState(false);
   const [themeMode, setThemeMode] = useState("light");
   const [saveInputMode, setSaveInputMode] = useState("single");
   const [manageSort, setManageSort] = useState("recent");
@@ -1030,7 +1069,7 @@ export default function App() {
         const storedTutorialSeen = await AsyncStorage.getItem(TUTORIAL_SEEN_KEY);
         const storedSupportRequests = await AsyncStorage.getItem(SUPPORT_REQUESTS_KEY);
 
-        if (storedLanguage === "ko" || storedLanguage === "en" || storedLanguage === "ja") {
+        if (isSupportedLanguage(storedLanguage)) {
           setLanguage(storedLanguage);
         }
 
@@ -1088,6 +1127,7 @@ export default function App() {
         }
       } finally {
         if (active) {
+          setPreferencesReady(true);
           setStorageReady(true);
         }
       }
@@ -1102,12 +1142,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!preferencesReady) {
+      return;
+    }
+
     void AsyncStorage.setItem(LANGUAGE_KEY, language);
-  }, [language]);
+  }, [language, preferencesReady]);
 
   useEffect(() => {
+    if (!preferencesReady) {
+      return;
+    }
+
     void AsyncStorage.setItem(THEME_MODE_KEY, themeMode);
-  }, [themeMode]);
+  }, [themeMode, preferencesReady]);
 
   useEffect(() => {
     void AsyncStorage.setItem(SUPPORT_REQUESTS_KEY, JSON.stringify(supportRequests));

@@ -4,11 +4,15 @@ const LANGUAGE_LOCALES = {
   ja: "ja-JP",
 };
 
+const FALLBACK_LANGUAGE = "en";
+
 export const LANGUAGE_OPTIONS = [
   { key: "ko", nativeLabel: "한국어" },
   { key: "en", nativeLabel: "English" },
   { key: "ja", nativeLabel: "日本語" },
 ];
+
+const SUPPORTED_LANGUAGE_KEYS = LANGUAGE_OPTIONS.map((option) => option.key);
 
 const TRANSLATIONS = {
   ko: {
@@ -707,7 +711,7 @@ const TRANSLATIONS = {
       saveSingleChipBody: "Cards are saved as front-and-back pairs.\nLet's make one card to memorize together.",
       nextPractice: "Try saving one",
       savePracticeTitle: "Save one real card pair",
-      savePracticeBody: "Write the word or sentence you want to memorize on the front and back.\nPut Hello on the front and '안녕' on the back, then press Save.",
+      savePracticeBody: "Write the word or sentence you want to memorize on the front and back.\nPut Hello on the front and Hi on the back, then tap Save.",
       saveSuccessTitle: "Nice! You made your first card pair!",
       saveSuccessBody: "The card pair you just saved will appear as a question and answer in the Study tab below.\nYou can also edit or delete it anytime in Library.\nReady to memorize the pair you just made?",
       nextFileChip: "View file button",
@@ -715,8 +719,8 @@ const TRANSLATIONS = {
       saveFileChipBody: "If you already have a word list or table, you do not need to type every card manually. Tap the highlighted File button.",
       saveSingleTitle: "Save one card",
       saveSingleBody: "This time, save one real card inside the tutorial. Put a prompt on the front and the answer on the back.",
-      demoFrontPlaceholder: "e.g. apple",
-      demoBackPlaceholder: "e.g. 사과",
+      demoFrontPlaceholder: "e.g. Hello",
+      demoBackPlaceholder: "e.g. Hi",
       demoSave: "Save and continue",
       demoSaving: "Saving...",
       saveFileTitle: "Import many cards",
@@ -748,7 +752,7 @@ const TRANSLATIONS = {
       historyMissedBody: "Cards missed just now or missed often gather here, so you can quickly find weak spots and retry them.",
       nextHistoryRecent: "View recent sessions",
       historyRecentTitle: "This is where your earlier study records are saved",
-      historyRecentBody: "Tap Retry missed cards to solve only the questions you missed in that session.\nMissed questions can be tough, but retrying them is what turns them into long-term memory.\n\nNow, shall we open the Library tab where all saved cards live?",
+      historyRecentBody: "Tap Retry missed only to solve only the questions you missed in that session.\nMissed questions can be tough, but retrying them is what turns them into long-term memory.\n\nNow, shall we open the Library tab where all saved cards live?",
       nextManage: "Go to Library",
       manageTabTitle: "Last, open Library",
       manageTabBody: "This is where saved cards are organized.",
@@ -756,9 +760,9 @@ const TRANSLATIONS = {
       manageSearchBody: "As your deck grows, search by front or back text and sort by recent, alphabetical, or frequently missed cards.",
       nextManageList: "View card list",
       manageUseTitle: "You can edit saved card pairs",
-      manageUseBody: "Here you can review every saved card and edit or delete it whenever needed.\nSorting is also helpful when you want to clean up cards you no longer need.\n\nNow, let's move to the final App Info tab.",
-      nextAbout: "Go to App Info",
-      aboutTabTitle: "Now check App Info",
+      manageUseBody: "Here you can review every saved card and edit or delete it whenever needed.\nSorting is also helpful when you want to clean up cards you no longer need.\n\nNow, let's move to the final About tab.",
+      nextAbout: "Go to About",
+      aboutTabTitle: "Now check About",
       aboutTabBody: "This is where account status, display mode, language, and contact live.",
       aboutSupportTitle: "Your ideas are always welcome!",
       aboutSupportBody: "If you find a bug or want a feature, send it anytime. We will listen closely and keep improving the app.",
@@ -1100,7 +1104,7 @@ const TRANSLATIONS = {
       saveSingleChipBody: "カードは表面と裏面のペアで保存できます。\n覚えるカードを1つ実際に作ってみましょう。",
       nextPractice: "実際に保存する",
       savePracticeTitle: "カード1組を実際に保存しましょう",
-      savePracticeBody: "覚えたい単語や文を表面と裏面に書いてください。\n表面に Hello、裏面に「안녕」と書いて保存ボタンを押してください。",
+      savePracticeBody: "覚えたい単語や文を表面と裏面に書いてください。\n表面に Hello、裏面に「こんにちは」と書いて保存ボタンを押してください。",
       saveSuccessTitle: "いいですね！最初のカードペアを作りました！",
       saveSuccessBody: "今保存したカードペアは、下の「暗記」タブで問題と答えとして出題されます。\nそして「保管庫」タブでいつでも編集・削除できます。\nでは、今作ったカードペアを覚えに行きましょう。",
       nextFileChip: "ファイルボタンを見る",
@@ -1108,8 +1112,8 @@ const TRANSLATIONS = {
       saveFileChipBody: "すでに単語帳や表があるなら、1枚ずつ入力しなくても大丈夫です。明るく表示された「ファイル」ボタンを押してみましょう。",
       saveSingleTitle: "1枚ずつ保存",
       saveSingleBody: "今回はチュートリアル内で実際にカード1組を保存してみましょう。表に問題や単語、裏に答えを書いてください。",
-      demoFrontPlaceholder: "例: apple",
-      demoBackPlaceholder: "例: 사과",
+      demoFrontPlaceholder: "例: Hello",
+      demoBackPlaceholder: "例: こんにちは",
       demoSave: "保存して続ける",
       demoSaving: "保存中...",
       saveFileTitle: "ファイルでまとめて保存",
@@ -1231,7 +1235,7 @@ const formatTemplate = (value, params = {}) =>
   value.replace(/\{(\w+)\}/g, (_, key) => `${params[key] ?? ""}`);
 
 export const createTranslator = (language) => {
-  const locale = TRANSLATIONS[language] ? language : "ko";
+  const locale = TRANSLATIONS[language] ? language : FALLBACK_LANGUAGE;
   const bundle = TRANSLATIONS[locale];
 
   return (path, params = {}) => {
@@ -1262,7 +1266,7 @@ export const formatDateTimeForLanguage = (timestamp, language) => {
     return createTranslator(language)("common.justNow");
   }
 
-  return new Intl.DateTimeFormat(LANGUAGE_LOCALES[language] ?? LANGUAGE_LOCALES.ko, {
+  return new Intl.DateTimeFormat(LANGUAGE_LOCALES[language] ?? LANGUAGE_LOCALES[FALLBACK_LANGUAGE], {
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
@@ -1277,7 +1281,7 @@ export const formatSessionLabelForLanguage = (timestamp, language) => {
     return formatDateTimeForLanguage(timestamp, language);
   }
 
-  return new Intl.DateTimeFormat(LANGUAGE_LOCALES[language] ?? LANGUAGE_LOCALES.ko, {
+  return new Intl.DateTimeFormat(LANGUAGE_LOCALES[language] ?? LANGUAGE_LOCALES[FALLBACK_LANGUAGE], {
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
@@ -1285,20 +1289,41 @@ export const formatSessionLabelForLanguage = (timestamp, language) => {
   }).format(date);
 };
 
-export const getPreferredLanguage = () => {
-  try {
-    const locale = Intl.DateTimeFormat().resolvedOptions().locale?.toLowerCase?.() ?? "";
+export const isSupportedLanguage = (language) => SUPPORTED_LANGUAGE_KEYS.includes(language);
 
-    if (locale.startsWith("en")) {
-      return "en";
+export const detectSupportedLanguage = (localeCandidates = []) => {
+  const candidates = Array.isArray(localeCandidates) ? localeCandidates : [localeCandidates];
+
+  for (const candidate of candidates) {
+    const locale = `${candidate ?? ""}`.trim().replace("_", "-").toLowerCase();
+
+    if (!locale) {
+      continue;
     }
 
-    if (locale.startsWith("ja")) {
-      return "ja";
+    const languageCode = locale.split("-")[0];
+
+    if (isSupportedLanguage(languageCode)) {
+      return languageCode;
     }
-  } catch {
-    // Fallback to Korean below.
   }
 
-  return "ko";
+  return FALLBACK_LANGUAGE;
+};
+
+export const getPreferredLanguage = (localeCandidates = []) => {
+  const candidates = Array.isArray(localeCandidates) ? [...localeCandidates] : [localeCandidates];
+  const hasLocaleCandidate = candidates.some((candidate) => `${candidate ?? ""}`.trim());
+
+  if (hasLocaleCandidate) {
+    return detectSupportedLanguage(candidates);
+  }
+
+  try {
+    candidates.push(Intl.DateTimeFormat().resolvedOptions().locale);
+  } catch {
+    // Fallback to the default language below.
+  }
+
+  return detectSupportedLanguage(candidates);
 };
