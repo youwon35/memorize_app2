@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
+  BackHandler,
   Easing,
   Image,
   Keyboard,
@@ -78,6 +79,11 @@ const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
 const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
 const DEFAULT_QUIZ_COUNT = 10;
+const DATE_FILTER_LOCALES = {
+  ko: "ko-KR",
+  en: "en-US",
+  ja: "ja-JP",
+};
 const MAX_SESSION_HISTORY = 60;
 const SUPPORT_CATEGORY_OPTIONS = ["bug", "feature", "other"];
 const SUPPORT_STATUS_OPTIONS = ["received", "reviewing", "resolved"];
@@ -490,6 +496,7 @@ export default function App() {
   const [manageSort, setManageSort] = useState("recent");
   const [manageSortMenuOpen, setManageSortMenuOpen] = useState(false);
   const [manageSearch, setManageSearch] = useState("");
+  const [historyDateKey, setHistoryDateKey] = useState(() => getLocalDayKey(new Date()));
   const [pairs, setPairs] = useState([]);
   const [studyStats, setStudyStats] = useState(createEmptyStudyStats());
   const [draft, setDraft] = useState({ left: "", right: "" });
@@ -570,6 +577,7 @@ export default function App() {
       : t("about.authLocalTitle");
   const authCaption = syncing ? t("notes.syncing") : note;
   const isAdmin = userRole === "admin";
+  const hasActiveQuizRound = tab === "quiz" && deck.length > 0 && !roundComplete;
   const hasSavedCards = pairs.length > 0;
   const quizModeConfig = getQuizModeConfig(quizMode);
   const maxQuizCount = pairs.length ? pairs.length * (quizMode === "both" ? 2 : 1) : 0;
@@ -783,22 +791,31 @@ export default function App() {
   ]);
 
   const handleTabChange = (nextTab) => {
-    selectTab(nextTab);
+    const completeTabChange = () => {
+      selectTab(nextTab);
 
-    const tutorialTabTarget =
-      currentTutorialStep?.type === "tab" && currentTutorialStep.tab === nextTab;
-    const tutorialWaitsForTab = currentTutorialStep?.waitForTab === nextTab;
+      const tutorialTabTarget =
+        currentTutorialStep?.type === "tab" && currentTutorialStep.tab === nextTab;
+      const tutorialWaitsForTab = currentTutorialStep?.waitForTab === nextTab;
 
-    if (guidedTutorialActive && (tutorialTabTarget || tutorialWaitsForTab)) {
-      const nextStep = tutorialWaitsForTab
-        ? getNextTutorialStepAfterInteraction(tutorialStep, { completedTab: nextTab })
-        : getNextTutorialStep(tutorialStep);
+      if (guidedTutorialActive && (tutorialTabTarget || tutorialWaitsForTab)) {
+        const nextStep = tutorialWaitsForTab
+          ? getNextTutorialStepAfterInteraction(tutorialStep, { completedTab: nextTab })
+          : getNextTutorialStep(tutorialStep);
 
-      if (nextStep) {
-        setTutorialStep(nextStep.key);
-        applyTutorialStepSideEffects(nextStep);
+        if (nextStep) {
+          setTutorialStep(nextStep.key);
+          applyTutorialStepSideEffects(nextStep);
+        }
       }
+    };
+
+    if (nextTab !== tab && hasActiveQuizRound) {
+      confirmStopActiveQuiz(completeTabChange);
+      return;
     }
+
+    completeTabChange();
   };
   const setTranslatedNote = (key, params = {}) => {
     setNoteState({ key, params });
@@ -886,7 +903,24 @@ export default function App() {
   const todaySessionCount = todaySessions.length;
   const todaySolvedCount = todaySessions.reduce((sum, item) => sum + (item.totalCards ?? 0), 0);
   const todayIncorrectCount = todaySessions.reduce((sum, item) => sum + (item.incorrectCount ?? 0), 0);
-  const recentSessions = useMemo(() => studyStats.sessions.slice(0, 6), [studyStats.sessions]);
+  const historyDateOptions = useMemo(() => {
+    const dayKeys = new Set([todayKey]);
+
+    studyStats.sessions.forEach((item) => {
+      dayKeys.add(getLocalDayKey(item.completedAt));
+    });
+
+    return Array.from(dayKeys)
+      .filter(Boolean)
+      .sort((left, right) => parseLocalDayKey(right) - parseLocalDayKey(left));
+  }, [studyStats.sessions, todayKey]);
+  const selectedHistorySessions = useMemo(
+    () =>
+      studyStats.sessions
+        .filter((item) => getLocalDayKey(item.completedAt) === historyDateKey)
+        .slice(0, 6),
+    [historyDateKey, studyStats.sessions]
+  );
   const normalizedManageSearch = manageSearch.trim().toLocaleLowerCase(language);
   const activeManageSortOption =
     MANAGE_SORT_OPTIONS.find((option) => option.key === manageSort) ?? MANAGE_SORT_OPTIONS[0];
@@ -1511,7 +1545,7 @@ export default function App() {
     const syncedStudyStats = createPersistableStudyStats(nextStudyStats, pairsRef.current);
     studyStatsRef.current = syncedStudyStats;
     setStudyStats(syncedStudyStats);
-    void AsyncStorage.setItem(STUDY_STATS_KEY, JSON.stringify(syncedStudyStats));
+    return AsyncStorage.setItem(STUDY_STATS_KEY, JSON.stringify(syncedStudyStats));
   };
 
   const addSupportRequest = (nextRequest) => {
@@ -2015,9 +2049,10 @@ export default function App() {
 
   const resetQuizSession = () => {
     clearTimeout(timerRef.current);
+    let persistPromise = Promise.resolve();
 
     if (roundSnapshotRef.current) {
-      updateStudyStats(roundSnapshotRef.current);
+      persistPromise = updateStudyStats(roundSnapshotRef.current);
     }
 
     roundSnapshotRef.current = null;
@@ -2029,7 +2064,43 @@ export default function App() {
     setResult(null);
     setRoundComplete(false);
     setRoundIncorrectIds([]);
+
+    return persistPromise;
   };
+
+  const confirmStopActiveQuiz = (onConfirm) => {
+    Alert.alert(t("quiz.stopTitle"), t("quiz.stopBody"), [
+      { text: t("quiz.stopNo"), style: "cancel" },
+      {
+        text: t("quiz.stopYes"),
+        style: "destructive",
+        onPress: () => {
+          const resetPromise = resetQuizSession();
+
+          if (onConfirm) {
+            void resetPromise.finally(onConfirm).catch(() => {});
+          }
+        },
+      },
+    ]);
+  };
+
+  useEffect(() => {
+    if (Platform.OS !== "android") {
+      return undefined;
+    }
+
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (!hasActiveQuizRound) {
+        return false;
+      }
+
+      confirmStopActiveQuiz(() => BackHandler.exitApp());
+      return true;
+    });
+
+    return () => subscription.remove();
+  }, [confirmStopActiveQuiz, hasActiveQuizRound]);
 
   const submitSupportRequest = async () => {
     const replyEmail = supportReplyEmail.trim();
@@ -2751,17 +2822,6 @@ export default function App() {
 
   const renderQuizTab = () => (
     <View style={styles.scene}>
-      {deck.length ? (
-        <View style={styles.quizResetRow}>
-          <Pressable
-            onPress={resetQuizSession}
-            style={({ pressed }) => [styles.quizStartButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.quizStartButtonText}>{t("quiz.reset")}</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
       {roundComplete && deck.length ? (
         <View style={styles.quizSummaryCard}>
           <View style={styles.quizSummaryHeader}>
@@ -2873,6 +2933,11 @@ export default function App() {
           </View>
         ) : hasSavedCards ? (
           <View style={styles.quizReadyCard} {...tutorialTargetProps("quiz-ready-card")}>
+            <View style={styles.historySummaryHeader}>
+              <Text style={styles.panelTitle}>{t("quiz.readyTitle")}</Text>
+              <Text style={styles.panelBody}>{t("quiz.readyBody")}</Text>
+            </View>
+
             <View style={styles.quizReadyStats}>
               <View style={styles.quizReadyStat}>
                 <Text style={styles.quizReadyStatValue}>{pairs.length}</Text>
@@ -2999,39 +3064,69 @@ export default function App() {
               <View style={styles.panelHeader}>
                 <Text style={styles.panelTitle}>{t("history.recentSessions")}</Text>
               </View>
-              <View style={styles.historyList}>
-                {recentSessions.map((item) => (
-                  <View key={item.id} style={styles.historyItem}>
-                    <View style={styles.historyItemBody}>
-                      <Text style={styles.historyItemTitle}>{formatSessionLabelForLanguage(item.completedAt, language)}</Text>
-                      <Text style={styles.historyItemCaption}>
-                        {t("history.recentSessionCaption", {
-                          source: t(item.source === "retry" ? "quiz.sourceRetry" : "quiz.sourceAdaptive"),
-                          total: item.totalCards,
-                          correct: item.correctCount,
-                        })}
+              <View style={styles.supportCategoryRow}>
+                {historyDateOptions.map((dateKey) => {
+                  const active = historyDateKey === dateKey;
+
+                  return (
+                    <Pressable
+                      key={dateKey}
+                      onPress={() => setHistoryDateKey(dateKey)}
+                      style={({ pressed }) => [
+                        styles.supportCategoryChip,
+                        active && styles.supportCategoryChipActive,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.supportCategoryChipText,
+                          active && styles.supportCategoryChipTextActive,
+                        ]}
+                      >
+                        {formatHistoryDateFilterLabel(dateKey, language, t)}
                       </Text>
-                    </View>
-                    <View style={styles.historyItemSide}>
-                      <View style={[styles.historyBadge, item.incorrectCount > 0 && styles.historyBadgeBad]}>
-                        <Text style={[styles.historyBadgeText, item.incorrectCount > 0 && styles.historyBadgeTextBad]}>
-                          {t("history.incorrectBadge", { count: item.incorrectCount })}
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={styles.historyList}>
+                {selectedHistorySessions.length ? (
+                  selectedHistorySessions.map((item) => (
+                    <View key={item.id} style={styles.historyItem}>
+                      <View style={styles.historyItemBody}>
+                        <Text style={styles.historyItemTitle}>{formatSessionLabelForLanguage(item.completedAt, language)}</Text>
+                        <Text style={styles.historyItemCaption}>
+                          {t("history.recentSessionCaption", {
+                            source: t(item.source === "retry" ? "quiz.sourceRetry" : "quiz.sourceAdaptive"),
+                            total: item.totalCards,
+                            correct: item.correctCount,
+                          })}
                         </Text>
                       </View>
-                      {item.incorrectCount > 0 ? (
-                        <Pressable
-                          onPress={() => retryIncorrectCardsFromSession(item)}
-                          style={({ pressed }) => [
-                            styles.historyRetryButton,
-                            pressed && styles.pressed,
-                          ]}
-                        >
-                          <Text style={styles.historyRetryButtonText}>{t("history.retrySession")}</Text>
-                        </Pressable>
-                      ) : null}
+                      <View style={styles.historyItemSide}>
+                        <View style={[styles.historyBadge, item.incorrectCount > 0 && styles.historyBadgeBad]}>
+                          <Text style={[styles.historyBadgeText, item.incorrectCount > 0 && styles.historyBadgeTextBad]}>
+                            {t("history.incorrectBadge", { count: item.incorrectCount })}
+                          </Text>
+                        </View>
+                        {item.incorrectCount > 0 ? (
+                          <Pressable
+                            onPress={() => retryIncorrectCardsFromSession(item)}
+                            style={({ pressed }) => [
+                              styles.historyRetryButton,
+                              pressed && styles.pressed,
+                            ]}
+                          >
+                            <Text style={styles.historyRetryButtonText}>{t("history.retrySession")}</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
                     </View>
-                  </View>
-                ))}
+                  ))
+                ) : (
+                  <Text style={styles.historyEmptyText}>{t("history.noSessionsForDate")}</Text>
+                )}
               </View>
             </View>
 
@@ -3412,10 +3507,6 @@ export default function App() {
           </View>
         </View>
 
-        <Pressable onPress={openTutorial} style={({ pressed }) => [styles.appSummaryCard, pressed && styles.pressed]}>
-          <Text style={styles.settingsTitle}>{t("about.tutorialAgain")}</Text>
-        </Pressable>
-
         <View style={styles.settingsCard}>
           <View style={styles.aboutSupportTutorialTarget} {...tutorialTargetProps("about-support-panel")}>
             <View style={styles.settingsHeader}>
@@ -3523,6 +3614,20 @@ export default function App() {
               ))}
             </View>
           ) : null}
+        </View>
+
+        <View style={styles.settingsCard}>
+          <View style={styles.settingsHeader}>
+            <Text style={styles.settingsTitle}>{t("about.tutorialTitle")}</Text>
+          </View>
+          <View style={styles.supportCategoryRow}>
+            <Pressable
+              onPress={openTutorial}
+              style={({ pressed }) => [styles.supportCategoryChip, pressed && styles.pressed]}
+            >
+              <Text style={styles.supportCategoryChipText}>{t("about.tutorialAgain")}</Text>
+            </Pressable>
+          </View>
         </View>
 
         {isAdmin ? (
@@ -4388,6 +4493,35 @@ function getLocalDayKey(timestamp) {
   const date = timestamp ? new Date(timestamp) : new Date();
 
   return [date.getFullYear(), date.getMonth() + 1, date.getDate()].join("-");
+}
+
+function parseLocalDayKey(dayKey) {
+  const [year, month, day] = `${dayKey}`.split("-").map((value) => Number.parseInt(value, 10));
+
+  if (!year || !month || !day) {
+    return new Date(0);
+  }
+
+  return new Date(year, month - 1, day);
+}
+
+function formatHistoryDateFilterLabel(dayKey, language, translate) {
+  const todayKey = getLocalDayKey(new Date());
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  if (dayKey === todayKey) {
+    return translate("history.dateToday");
+  }
+
+  if (dayKey === getLocalDayKey(yesterday)) {
+    return translate("history.dateYesterday");
+  }
+
+  return parseLocalDayKey(dayKey).toLocaleDateString(
+    DATE_FILTER_LOCALES[language] ?? DATE_FILTER_LOCALES.en,
+    { month: "numeric", day: "numeric" }
+  );
 }
 
 const createStyles = (theme) => StyleSheet.create({
