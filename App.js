@@ -84,6 +84,11 @@ const DATE_FILTER_LOCALES = {
   en: "en-US",
   ja: "ja-JP",
 };
+const CALENDAR_WEEKDAY_LABELS = {
+  ko: ["일", "월", "화", "수", "목", "금", "토"],
+  en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+  ja: ["日", "月", "火", "水", "木", "金", "土"],
+};
 const MAX_SESSION_HISTORY = 60;
 const SUPPORT_CATEGORY_OPTIONS = ["bug", "feature", "other"];
 const SUPPORT_STATUS_OPTIONS = ["received", "reviewing", "resolved"];
@@ -497,6 +502,8 @@ export default function App() {
   const [manageSortMenuOpen, setManageSortMenuOpen] = useState(false);
   const [manageSearch, setManageSearch] = useState("");
   const [historyDateKey, setHistoryDateKey] = useState(() => getLocalDayKey(new Date()));
+  const [historyCalendarOpen, setHistoryCalendarOpen] = useState(false);
+  const [historyCalendarMonth, setHistoryCalendarMonth] = useState(() => getStartOfLocalMonth(new Date()));
   const [pairs, setPairs] = useState([]);
   const [studyStats, setStudyStats] = useState(createEmptyStudyStats());
   const [draft, setDraft] = useState({ left: "", right: "" });
@@ -903,16 +910,16 @@ export default function App() {
   const todaySessionCount = todaySessions.length;
   const todaySolvedCount = todaySessions.reduce((sum, item) => sum + (item.totalCards ?? 0), 0);
   const todayIncorrectCount = todaySessions.reduce((sum, item) => sum + (item.incorrectCount ?? 0), 0);
-  const historyDateOptions = useMemo(() => {
-    const dayKeys = new Set([todayKey]);
+  const historySessionCountsByDate = useMemo(() => {
+    const counts = new Map([[todayKey, 0]]);
 
     studyStats.sessions.forEach((item) => {
-      dayKeys.add(getLocalDayKey(item.completedAt));
+      const dayKey = getLocalDayKey(item.completedAt);
+
+      counts.set(dayKey, (counts.get(dayKey) ?? 0) + 1);
     });
 
-    return Array.from(dayKeys)
-      .filter(Boolean)
-      .sort((left, right) => parseLocalDayKey(right) - parseLocalDayKey(left));
+    return counts;
   }, [studyStats.sessions, todayKey]);
   const selectedHistorySessions = useMemo(
     () =>
@@ -920,6 +927,11 @@ export default function App() {
         .filter((item) => getLocalDayKey(item.completedAt) === historyDateKey)
         .slice(0, 6),
     [historyDateKey, studyStats.sessions]
+  );
+  const selectedHistorySessionCount = historySessionCountsByDate.get(historyDateKey) ?? 0;
+  const historyCalendarCells = useMemo(
+    () => createCalendarCells(historyCalendarMonth, historySessionCountsByDate),
+    [historyCalendarMonth, historySessionCountsByDate]
   );
   const normalizedManageSearch = manageSearch.trim().toLocaleLowerCase(language);
   const activeManageSortOption =
@@ -3062,34 +3074,106 @@ export default function App() {
 
             <View style={styles.libraryPanel} {...tutorialTargetProps("history-recent-panel")}>
               <View style={styles.panelHeader}>
-                <Text style={styles.panelTitle}>{t("history.recentSessions")}</Text>
+                <View style={styles.panelHeaderText}>
+                  <Text style={styles.panelTitle}>{t("history.recentSessions")}</Text>
+                  <Text style={styles.historyDateSummary}>
+                    {t("history.selectedDateSummary", {
+                      date: formatHistoryDateFilterLabel(historyDateKey, language, t),
+                      count: selectedHistorySessionCount,
+                    })}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => {
+                    setHistoryCalendarMonth(getStartOfLocalMonth(parseLocalDayKey(historyDateKey)));
+                    setHistoryCalendarOpen((currentValue) => !currentValue);
+                  }}
+                  style={({ pressed }) => [
+                    styles.historyCalendarButton,
+                    historyCalendarOpen && styles.historyCalendarButtonActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name="calendar-month-outline"
+                    size={22}
+                    color={historyCalendarOpen ? theme.accentText : theme.accent}
+                  />
+                </Pressable>
               </View>
-              <View style={styles.supportCategoryRow}>
-                {historyDateOptions.map((dateKey) => {
-                  const active = historyDateKey === dateKey;
-
-                  return (
+              {historyCalendarOpen ? (
+                <View style={styles.historyCalendarPanel}>
+                  <View style={styles.historyCalendarHeader}>
                     <Pressable
-                      key={dateKey}
-                      onPress={() => setHistoryDateKey(dateKey)}
-                      style={({ pressed }) => [
-                        styles.supportCategoryChip,
-                        active && styles.supportCategoryChipActive,
-                        pressed && styles.pressed,
-                      ]}
+                      onPress={() => setHistoryCalendarMonth((currentMonth) => addLocalMonths(currentMonth, -1))}
+                      style={({ pressed }) => [styles.historyCalendarNavButton, pressed && styles.pressed]}
                     >
-                      <Text
-                        style={[
-                          styles.supportCategoryChipText,
-                          active && styles.supportCategoryChipTextActive,
-                        ]}
-                      >
-                        {formatHistoryDateFilterLabel(dateKey, language, t)}
-                      </Text>
+                      <MaterialCommunityIcons name="chevron-left" size={22} color={theme.textSecondary} />
                     </Pressable>
-                  );
-                })}
-              </View>
+                    <Text style={styles.historyCalendarMonthText}>
+                      {formatCalendarMonthLabel(historyCalendarMonth, language)}
+                    </Text>
+                    <Pressable
+                      onPress={() => setHistoryCalendarMonth((currentMonth) => addLocalMonths(currentMonth, 1))}
+                      style={({ pressed }) => [styles.historyCalendarNavButton, pressed && styles.pressed]}
+                    >
+                      <MaterialCommunityIcons name="chevron-right" size={22} color={theme.textSecondary} />
+                    </Pressable>
+                  </View>
+
+                  <View style={styles.historyCalendarWeekRow}>
+                    {(CALENDAR_WEEKDAY_LABELS[language] ?? CALENDAR_WEEKDAY_LABELS.en).map((weekday) => (
+                      <Text key={weekday} style={styles.historyCalendarWeekText}>
+                        {weekday}
+                      </Text>
+                    ))}
+                  </View>
+
+                  <View style={styles.historyCalendarGrid}>
+                    {historyCalendarCells.map((cell) => {
+                      const selected = cell.dayKey === historyDateKey;
+                      const today = cell.dayKey === todayKey;
+
+                      return (
+                        <Pressable
+                          key={cell.dayKey}
+                          onPress={() => {
+                            setHistoryDateKey(cell.dayKey);
+                            setHistoryCalendarOpen(false);
+                          }}
+                          style={({ pressed }) => [
+                            styles.historyCalendarDay,
+                            !cell.inMonth && styles.historyCalendarDayMuted,
+                            today && styles.historyCalendarDayToday,
+                            selected && styles.historyCalendarDaySelected,
+                            pressed && styles.pressed,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.historyCalendarDayText,
+                              !cell.inMonth && styles.historyCalendarDayTextMuted,
+                              selected && styles.historyCalendarDayTextSelected,
+                            ]}
+                          >
+                            {cell.date.getDate()}
+                          </Text>
+                          {cell.count > 0 ? (
+                            <Text
+                              style={[
+                                styles.historyCalendarCountText,
+                                selected && styles.historyCalendarCountTextSelected,
+                              ]}
+                            >
+                              {t("history.calendarSessionCount", { count: cell.count })}
+                            </Text>
+                          ) : null}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              ) : null}
               <View style={styles.historyList}>
                 {selectedHistorySessions.length ? (
                   selectedHistorySessions.map((item) => (
@@ -4495,6 +4579,16 @@ function getLocalDayKey(timestamp) {
   return [date.getFullYear(), date.getMonth() + 1, date.getDate()].join("-");
 }
 
+function getStartOfLocalMonth(timestamp) {
+  const date = timestamp ? new Date(timestamp) : new Date();
+
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addLocalMonths(date, offset) {
+  return new Date(date.getFullYear(), date.getMonth() + offset, 1);
+}
+
 function parseLocalDayKey(dayKey) {
   const [year, month, day] = `${dayKey}`.split("-").map((value) => Number.parseInt(value, 10));
 
@@ -4503,6 +4597,25 @@ function parseLocalDayKey(dayKey) {
   }
 
   return new Date(year, month - 1, day);
+}
+
+function createCalendarCells(monthDate, sessionCountsByDate) {
+  const monthStart = getStartOfLocalMonth(monthDate);
+  const gridStart = new Date(monthStart);
+  gridStart.setDate(monthStart.getDate() - monthStart.getDay());
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(gridStart);
+    date.setDate(gridStart.getDate() + index);
+    const dayKey = getLocalDayKey(date);
+
+    return {
+      date,
+      dayKey,
+      count: sessionCountsByDate.get(dayKey) ?? 0,
+      inMonth: date.getMonth() === monthStart.getMonth(),
+    };
+  });
 }
 
 function formatHistoryDateFilterLabel(dayKey, language, translate) {
@@ -4521,6 +4634,13 @@ function formatHistoryDateFilterLabel(dayKey, language, translate) {
   return parseLocalDayKey(dayKey).toLocaleDateString(
     DATE_FILTER_LOCALES[language] ?? DATE_FILTER_LOCALES.en,
     { month: "numeric", day: "numeric" }
+  );
+}
+
+function formatCalendarMonthLabel(monthDate, language) {
+  return getStartOfLocalMonth(monthDate).toLocaleDateString(
+    DATE_FILTER_LOCALES[language] ?? DATE_FILTER_LOCALES.en,
+    { year: "numeric", month: "long" }
   );
 }
 
@@ -4987,15 +5107,20 @@ const createStyles = (theme) => StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
   },
+  panelHeaderText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
   panelTitle: {
-    fontSize: 21,
+    flexShrink: 1,
+    fontSize: 15,
     fontWeight: "800",
     color: theme.textPrimary,
   },
   panelBody: {
-    marginTop: 4,
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 13,
+    lineHeight: 20,
     color: theme.textSecondary,
   },
   inlineLink: {
@@ -5782,6 +5907,104 @@ const createStyles = (theme) => StyleSheet.create({
   },
   historyList: {
     gap: 12,
+  },
+  historyDateSummary: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: theme.textSecondary,
+  },
+  historyCalendarButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accentSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  historyCalendarButtonActive: {
+    backgroundColor: theme.accent,
+    borderColor: theme.accent,
+  },
+  historyCalendarPanel: {
+    gap: 10,
+    padding: 12,
+    borderRadius: 20,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  historyCalendarHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  historyCalendarNavButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.surfaceCard,
+  },
+  historyCalendarMonthText: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 14,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  historyCalendarWeekRow: {
+    flexDirection: "row",
+  },
+  historyCalendarWeekText: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 10,
+    fontWeight: "800",
+    color: theme.textMuted,
+  },
+  historyCalendarGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  historyCalendarDay: {
+    width: "14.2857%",
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+    borderRadius: 13,
+  },
+  historyCalendarDayMuted: {
+    opacity: 0.35,
+  },
+  historyCalendarDayToday: {
+    backgroundColor: theme.surfaceCard,
+  },
+  historyCalendarDaySelected: {
+    backgroundColor: theme.accent,
+  },
+  historyCalendarDayText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  historyCalendarDayTextMuted: {
+    color: theme.textMuted,
+  },
+  historyCalendarDayTextSelected: {
+    color: theme.accentText,
+  },
+  historyCalendarCountText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: theme.accent,
+  },
+  historyCalendarCountTextSelected: {
+    color: theme.accentText,
   },
   historyItem: {
     flexDirection: "row",
