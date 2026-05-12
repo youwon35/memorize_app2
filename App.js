@@ -2944,7 +2944,7 @@ export default function App() {
             </View>
           </View>
         ) : hasSavedCards ? (
-          <View style={styles.quizReadyCard} {...tutorialTargetProps("quiz-ready-card")}>
+          <View style={[styles.quizReadyCard, styles.quizReadyCardOffset]} {...tutorialTargetProps("quiz-ready-card")}>
             <View style={styles.historySummaryHeader}>
               <Text style={styles.panelTitle}>{t("quiz.readyTitle")}</Text>
               <Text style={styles.panelBody}>{t("quiz.readyBody")}</Text>
@@ -4902,6 +4902,7 @@ const createStyles = (theme) => StyleSheet.create({
   importTitle: {
     flexShrink: 1,
     fontSize: 15,
+    lineHeight: 20,
     fontWeight: "800",
     color: theme.textPrimary,
   },
@@ -5115,6 +5116,7 @@ const createStyles = (theme) => StyleSheet.create({
   panelTitle: {
     flexShrink: 1,
     fontSize: 15,
+    lineHeight: 20,
     fontWeight: "800",
     color: theme.textPrimary,
   },
@@ -5347,6 +5349,9 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
+  quizReadyCardOffset: {
+    marginTop: 54,
+  },
   quizReadyIconWrap: {
     width: 46,
     height: 46,
@@ -5566,7 +5571,9 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 12,
   },
   settingsTitle: {
-    fontSize: 17,
+    flexShrink: 1,
+    fontSize: 15,
+    lineHeight: 20,
     fontWeight: "800",
     color: theme.textPrimary,
   },
@@ -5757,7 +5764,7 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textPrimary,
   },
   supportForm: {
-    gap: 12,
+    gap: 18,
   },
   supportCategoryRow: {
     flexDirection: "row",
@@ -5788,7 +5795,7 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.accent,
   },
   supportField: {
-    gap: 6,
+    gap: 10,
   },
   supportLabel: {
     fontSize: 13,
