@@ -2703,88 +2703,72 @@ export default function App() {
 
   const renderQuizTab = () => (
     <View style={styles.scene}>
-      <View style={styles.heroStrip}>
-        <Text style={styles.heroEyebrow}>{t("quiz.heroTitle")}</Text>
-        <Text style={styles.heroMeta}>
-          {pairs.length ? t("quiz.heroReady", { count: pairs.length }) : t("quiz.heroEmpty")}
-        </Text>
-      </View>
+      {deck.length ? (
+        <View style={styles.quizResetRow}>
+          <Pressable
+            onPress={resetQuizSession}
+            style={({ pressed }) => [styles.quizStartButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.quizStartButtonText}>{t("quiz.reset")}</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
-      <View style={styles.quizPanel}>
-        <View style={styles.quizHeader}>
-          <View style={styles.quizHeaderContent}>
-            <Text style={styles.panelTitle}>{t("quiz.panelTitle")}</Text>
+      {roundComplete && deck.length ? (
+        <View style={styles.quizSummaryCard}>
+          <View style={styles.quizSummaryHeader}>
+            <Text style={styles.panelTitle}>{t("quiz.roundComplete")}</Text>
             <Text style={styles.panelBody}>
-              {quizMode === "both"
-                ? t("quiz.panelBodyBoth")
-                : t("quiz.panelBodyMode", { description: t(quizModeConfig.descriptionKey) })}
+              {roundIncorrectCards.length
+                ? t("quiz.roundBodyRetry")
+                : t("quiz.roundBodyPerfect")}
             </Text>
           </View>
-          {deck.length ? (
-            <Pressable
-              onPress={resetQuizSession}
-              style={({ pressed }) => [styles.quizStartButton, pressed && styles.pressed]}
-            >
-              <Text style={styles.quizStartButtonText}>{t("quiz.reset")}</Text>
-            </Pressable>
-          ) : null}
-        </View>
 
-        {roundComplete && deck.length ? (
-          <View style={styles.quizSummaryCard}>
-            <View style={styles.quizSummaryHeader}>
-              <Text style={styles.panelTitle}>{t("quiz.roundComplete")}</Text>
-              <Text style={styles.panelBody}>
-                {roundIncorrectCards.length
-                  ? t("quiz.roundBodyRetry")
-                  : t("quiz.roundBodyPerfect")}
+          <View style={styles.quizSummaryStats}>
+            <View style={styles.quizSummaryStat}>
+              <Text style={styles.quizSummaryValue}>{deck.length}</Text>
+              <Text style={styles.quizSummaryLabel}>{t("quiz.total")}</Text>
+            </View>
+            <View style={styles.quizSummaryStat}>
+              <Text style={[styles.quizSummaryValue, styles.quizSummaryValueGood]}>
+                {roundCorrectCount}
               </Text>
+              <Text style={styles.quizSummaryLabel}>{t("quiz.correct")}</Text>
             </View>
-
-            <View style={styles.quizSummaryStats}>
-              <View style={styles.quizSummaryStat}>
-                <Text style={styles.quizSummaryValue}>{deck.length}</Text>
-                <Text style={styles.quizSummaryLabel}>{t("quiz.total")}</Text>
-              </View>
-              <View style={styles.quizSummaryStat}>
-                <Text style={[styles.quizSummaryValue, styles.quizSummaryValueGood]}>
-                  {roundCorrectCount}
-                </Text>
-                <Text style={styles.quizSummaryLabel}>{t("quiz.correct")}</Text>
-              </View>
-              <View style={styles.quizSummaryStat}>
-                <Text style={[styles.quizSummaryValue, styles.quizSummaryValueBad]}>
-                  {roundIncorrectCards.length}
-                </Text>
-                <Text style={styles.quizSummaryLabel}>{t("quiz.retry")}</Text>
-              </View>
-            </View>
-
-            <View style={styles.actionRow}>
-              <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-                <Text style={styles.secondaryButtonText}>{t("quiz.restartAdaptive")}</Text>
-              </Pressable>
-              <Pressable
-                disabled={!roundIncorrectCards.length}
-                onPress={retryIncorrectCards}
-                style={({ pressed }) => [
-                  styles.primaryButton,
-                  !roundIncorrectCards.length && styles.primaryButtonDisabled,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.primaryButtonText,
-                    !roundIncorrectCards.length && styles.primaryButtonTextDisabled,
-                  ]}
-                >
-                  {t("quiz.retryIncorrect")}
-                </Text>
-              </Pressable>
+            <View style={styles.quizSummaryStat}>
+              <Text style={[styles.quizSummaryValue, styles.quizSummaryValueBad]}>
+                {roundIncorrectCards.length}
+              </Text>
+              <Text style={styles.quizSummaryLabel}>{t("quiz.retry")}</Text>
             </View>
           </View>
-        ) : current ? (
+
+          <View style={styles.actionRow}>
+            <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
+              <Text style={styles.secondaryButtonText}>{t("quiz.restartAdaptive")}</Text>
+            </Pressable>
+            <Pressable
+              disabled={!roundIncorrectCards.length}
+              onPress={retryIncorrectCards}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                !roundIncorrectCards.length && styles.primaryButtonDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.primaryButtonText,
+                  !roundIncorrectCards.length && styles.primaryButtonTextDisabled,
+                ]}
+              >
+                {t("quiz.retryIncorrect")}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : current ? (
           <View style={styles.quizCard} {...tutorialTargetProps("quiz-card")}>
             <View style={styles.quizMetaRow}>
               <Text style={styles.quizProgress}>
@@ -2841,16 +2825,6 @@ export default function App() {
           </View>
         ) : hasSavedCards ? (
           <View style={styles.quizReadyCard} {...tutorialTargetProps("quiz-ready-card")}>
-            <View style={styles.importHeader}>
-              <View style={styles.importTitleRow}>
-                <View style={styles.importIconWrap}>
-                  <MaterialCommunityIcons name="brain" size={18} color={theme.accent} />
-                </View>
-                <Text style={styles.importTitle}>{t("quiz.readyTitle")}</Text>
-              </View>
-              <Text style={styles.importBodyCompact}>{t("quiz.readyBody", { count: maxQuizCount })}</Text>
-            </View>
-
             <View style={styles.quizReadyStats}>
               <View style={styles.quizReadyStat}>
                 <Text style={styles.quizReadyStatValue}>{pairs.length}</Text>
@@ -2940,7 +2914,6 @@ export default function App() {
             onPress={() => handleTabChange("save")}
           />
         )}
-      </View>
     </View>
   );
 
@@ -2949,18 +2922,6 @@ export default function App() {
 
     return (
       <View style={styles.scene}>
-        <View style={styles.heroStrip}>
-          <Text style={styles.heroEyebrow}>{t("history.heroTitle")}</Text>
-          <Text style={styles.heroMeta}>
-            {hasStudyHistory
-              ? t("history.heroWithHistory", {
-                  sessions: todaySessionCount,
-                  incorrect: todayIncorrectCount,
-                })
-              : t("history.heroEmpty")}
-          </Text>
-        </View>
-
         {hasStudyHistory ? (
           <>
             <View style={styles.historySummaryCard} {...tutorialTargetProps("history-summary-panel")}>
@@ -2983,41 +2944,6 @@ export default function App() {
                   </Text>
                   <Text style={styles.historyMetricLabel}>{t("history.incorrect")}</Text>
                 </View>
-              </View>
-            </View>
-
-            <View style={styles.libraryPanel} {...tutorialTargetProps("history-missed-panel")}>
-              <View style={styles.panelHeader}>
-                <Text style={styles.panelTitle}>{todayMissedCards.length ? t("history.todayMissed") : t("history.topMissed")}</Text>
-                <Text style={styles.historyChipText}>{todayMissedCards.length ? t("history.todayBasis") : t("history.totalBasis")}</Text>
-              </View>
-              <View style={styles.historyList}>
-                {missedCards.length ? (
-                  missedCards.map((card) => (
-                    <View key={`missed-${card.signature}`} style={styles.historyItem}>
-                      <View style={styles.historyItemBody}>
-                        <Text style={styles.historyItemTitle}>
-                          {card.left} ↔ {card.right}
-                        </Text>
-                        <Text style={styles.historyItemCaption}>
-                          {todayMissedCards.length
-                            ? t("history.todayMissedCaption", { count: card.count })
-                            : t("history.totalMissedCaption", {
-                                incorrect: card.incorrect,
-                                attempts: card.attempts,
-                              })}
-                        </Text>
-                      </View>
-                      <View style={styles.historyBadge}>
-                        <Text style={styles.historyBadgeText}>
-                          {todayMissedCards.length ? `${card.count}` : `${card.incorrect}`}
-                        </Text>
-                      </View>
-                    </View>
-                  ))
-                ) : (
-                  <Text style={styles.historyEmptyText}>{t("history.noMissed")}</Text>
-                )}
               </View>
             </View>
 
@@ -3060,6 +2986,41 @@ export default function App() {
                 ))}
               </View>
             </View>
+
+            <View style={styles.libraryPanel} {...tutorialTargetProps("history-missed-panel")}>
+              <View style={styles.panelHeader}>
+                <Text style={styles.panelTitle}>{todayMissedCards.length ? t("history.todayMissed") : t("history.topMissed")}</Text>
+                <Text style={styles.historyChipText}>{todayMissedCards.length ? t("history.todayBasis") : t("history.totalBasis")}</Text>
+              </View>
+              <View style={styles.historyList}>
+                {missedCards.length ? (
+                  missedCards.map((card) => (
+                    <View key={`missed-${card.signature}`} style={styles.historyItem}>
+                      <View style={styles.historyItemBody}>
+                        <Text style={styles.historyItemTitle}>
+                          {card.left} ↔ {card.right}
+                        </Text>
+                        <Text style={styles.historyItemCaption}>
+                          {todayMissedCards.length
+                            ? t("history.todayMissedCaption", { count: card.count })
+                            : t("history.totalMissedCaption", {
+                                incorrect: card.incorrect,
+                                attempts: card.attempts,
+                              })}
+                        </Text>
+                      </View>
+                      <View style={styles.historyBadge}>
+                        <Text style={styles.historyBadgeText}>
+                          {todayMissedCards.length ? `${card.count}` : `${card.incorrect}`}
+                        </Text>
+                      </View>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={styles.historyEmptyText}>{t("history.noMissed")}</Text>
+                )}
+              </View>
+            </View>
           </>
         ) : (
           <View {...tutorialTargetProps("history-summary-panel")}>
@@ -3080,16 +3041,9 @@ export default function App() {
 
   const renderManageTab = () => (
     <View style={styles.scene}>
-      <View style={styles.heroStrip}>
-        <Text style={styles.heroEyebrow}>{t("manage.heroTitle")}</Text>
-        <Text style={styles.heroMeta}>
-          {pairs.length ? t("manage.heroWithCards", { count: pairs.length }) : t("manage.heroEmpty")}
-        </Text>
-      </View>
-
       {pairs.length ? (
         <>
-          <View style={styles.settingsCard} {...tutorialTargetProps("manage-search-panel")}>
+          <View style={[styles.settingsCard, styles.manageSearchCard]} {...tutorialTargetProps("manage-search-panel")}>
             <View style={styles.settingsHeader}>
               <Text style={styles.settingsTitle}>{t("manage.searchTitle")}</Text>
               <Text style={styles.settingsBody}>{t("manage.searchBody")}</Text>
@@ -3296,11 +3250,6 @@ export default function App() {
 
   const renderAboutTab = () => (
     <View style={styles.scene}>
-      <View style={styles.heroStrip}>
-        <Text style={styles.heroEyebrow}>{t("about.heroTitle")}</Text>
-        <Text style={styles.heroMeta}>{t("about.heroBody")}</Text>
-      </View>
-
       <View style={styles.aboutStack}>
         <View style={styles.syncStrip}>
           <View style={styles.syncLead}>
@@ -3352,7 +3301,6 @@ export default function App() {
         <View style={styles.settingsCard}>
           <View style={styles.settingsHeader}>
             <Text style={styles.settingsTitle}>{t("about.themeTitle")}</Text>
-            <Text style={styles.settingsBody}>{t("about.themeBody")}</Text>
           </View>
 
           <View style={styles.modeSwitchRow}>
@@ -3386,7 +3334,6 @@ export default function App() {
         <View style={styles.settingsCard}>
           <View style={styles.settingsHeader}>
             <Text style={styles.settingsTitle}>{t("about.languageTitle")}</Text>
-            <Text style={styles.settingsBody}>{t("about.languageBody")}</Text>
           </View>
 
           <View style={styles.supportCategoryRow}>
@@ -3417,13 +3364,9 @@ export default function App() {
           </View>
         </View>
 
-        <View style={styles.appSummaryCard}>
-          <Text style={styles.settingsTitle}>MEMORIA</Text>
-          <Text style={styles.settingsBody}>{t("about.summaryBody")}</Text>
-          <Pressable onPress={openTutorial} style={({ pressed }) => [styles.inlineActionButton, pressed && styles.pressed]}>
-            <Text style={styles.inlineActionButtonText}>{t("about.tutorialAgain")}</Text>
-          </Pressable>
-        </View>
+        <Pressable onPress={openTutorial} style={({ pressed }) => [styles.appSummaryCard, pressed && styles.pressed]}>
+          <Text style={styles.settingsTitle}>{t("about.tutorialAgain")}</Text>
+        </Pressable>
 
         <View style={styles.settingsCard}>
           <View style={styles.aboutSupportTutorialTarget} {...tutorialTargetProps("about-support-panel")}>
@@ -4481,21 +4424,19 @@ const createStyles = (theme) => StyleSheet.create({
   },
   heroStrip: {
     paddingTop: 8,
-    gap: 6,
+    gap: 4,
   },
   heroEyebrow: {
-    fontSize: 15,
-    lineHeight: 21,
-    fontWeight: "900",
+    fontSize: 13,
+    fontWeight: "700",
     letterSpacing: 1.2,
     textTransform: "uppercase",
     color: theme.accent,
   },
   heroMeta: {
-    fontSize: 17,
-    lineHeight: 27,
-    fontWeight: "700",
-    color: theme.textStrong,
+    fontSize: 15,
+    lineHeight: 22,
+    color: theme.textMuted,
   },
   syncStrip: {
     flexDirection: "row",
@@ -4658,22 +4599,19 @@ const createStyles = (theme) => StyleSheet.create({
   },
   importTitle: {
     flexShrink: 1,
-    fontSize: 18,
-    lineHeight: 25,
-    fontWeight: "900",
+    fontSize: 15,
+    fontWeight: "800",
     color: theme.textPrimary,
   },
   importBody: {
-    fontSize: 16,
-    lineHeight: 26,
-    fontWeight: "700",
-    color: theme.textStrong,
+    fontSize: 13,
+    lineHeight: 21,
+    color: theme.textSecondary,
   },
   importBodyCompact: {
-    fontSize: 16,
-    lineHeight: 26,
-    fontWeight: "700",
-    color: theme.textStrong,
+    fontSize: 13,
+    lineHeight: 20,
+    color: theme.textSecondary,
   },
   subtleDivider: {
     height: 1,
@@ -5067,6 +5005,9 @@ const createStyles = (theme) => StyleSheet.create({
     lineHeight: 20,
     color: theme.textSecondary,
   },
+  quizResetRow: {
+    alignItems: "flex-end",
+  },
   quizStartButton: {
     alignSelf: "flex-start",
     borderRadius: 16,
@@ -5304,6 +5245,10 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
+  manageSearchCard: {
+    zIndex: 20,
+    elevation: 4,
+  },
   settingsHeader: {
     gap: 6,
   },
@@ -5314,22 +5259,21 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 12,
   },
   settingsTitle: {
-    fontSize: 18,
-    lineHeight: 25,
-    fontWeight: "900",
+    fontSize: 17,
+    fontWeight: "800",
     color: theme.textPrimary,
   },
   settingsBody: {
-    fontSize: 16,
-    lineHeight: 26,
-    fontWeight: "700",
-    color: theme.textStrong,
+    fontSize: 14,
+    lineHeight: 22,
+    color: theme.textSecondary,
   },
   compactSelectRow: {
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 12,
+    zIndex: 20,
   },
   compactSelectLabel: {
     flex: 1,
@@ -5340,7 +5284,8 @@ const createStyles = (theme) => StyleSheet.create({
   },
   compactSelectWrap: {
     width: 184,
-    gap: 8,
+    position: "relative",
+    zIndex: 30,
   },
   compactSelectTrigger: {
     flexDirection: "row",
@@ -5361,6 +5306,12 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textPrimary,
   },
   compactSelectMenu: {
+    position: "absolute",
+    top: 56,
+    left: 0,
+    right: 0,
+    zIndex: 40,
+    elevation: 10,
     overflow: "hidden",
     borderRadius: 18,
     backgroundColor: theme.surface,

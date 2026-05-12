@@ -74,7 +74,7 @@ const TRANSLATIONS = {
     },
     save: {
       title: "암기하고 싶은 쌍을 저장하세요!",
-      singleBody: "외우고 싶은 카드쌍을 앞면과 뒷면에 적고 '저장' 버튼을 눌러주세요.\n예를 들어 앞면에 'Sun', 뒷면에 '해'를 저장해요.",
+      singleBody: "외우고 싶은 카드쌍을 앞면과 뒷면에 적고 '저장' 버튼을 눌러주세요.",
       saveButton: "저장하기",
       memorizeNow: "바로 암기",
       textImportTitle: "파일로 여러 장 한꺼번에 추가",
@@ -242,7 +242,7 @@ const TRANSLATIONS = {
       languageTitle: "언어",
       languageBody: "한국어, English, 日本語 중에서 바로 전환해 해외 사용자도 편하게 사용할 수 있습니다.",
       summaryBody: "앞면과 뒷면 한 쌍으로 카드를 저장하고, 자주 틀린 카드와 새 카드를 더 자주 복습하도록 설계된 암기 앱입니다.",
-      tutorialAgain: "튜토리얼 다시 보기",
+      tutorialAgain: "튜토리얼 다시보기",
       supportTitle: "문의하기",
       supportBody: "오류 제보나 기능 제안이 있다면 앱 안에서 바로 내용을 남기고, 아래 최근 문의에서 접수 여부를 확인할 수 있습니다.",
       supportCategoryLabel: "문의 분류",
@@ -469,7 +469,7 @@ const TRANSLATIONS = {
     },
     save: {
       title: "Save the pairs you want to memorize!",
-      singleBody: "Write the card pair you want to memorize on the front and back, then tap Save.\nFor example, save 'Sun' on the front and 'sun' on the back.",
+      singleBody: "Write the card pair you want to memorize on the front and back, then tap Save.",
       saveButton: "Save",
       memorizeNow: "Study now",
       textImportTitle: "Add many cards at once from a file",
@@ -862,7 +862,7 @@ const TRANSLATIONS = {
     },
     save: {
       title: "覚えたいペアを保存しましょう！",
-      singleBody: "覚えたいカード組を表と裏に書き、「保存」ボタンを押してください。\nたとえば表に「Sun」、裏に「太陽」を保存します。",
+      singleBody: "覚えたいカード組を表と裏に書き、「保存」ボタンを押してください。",
       saveButton: "保存",
       memorizeNow: "すぐ暗記",
       textImportTitle: "ファイルからまとめて追加",
