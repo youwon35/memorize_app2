@@ -7,6 +7,7 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  Modal,
   NativeModules,
   Platform,
   Pressable,
@@ -651,6 +652,8 @@ export default function App() {
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [themeMode, setThemeMode] = useState("light");
   const [saveInputMode, setSaveInputMode] = useState("single");
+  const [saveActionMenuOpen, setSaveActionMenuOpen] = useState(false);
+  const [saveComposerVisible, setSaveComposerVisible] = useState(false);
   const [manageSort, setManageSort] = useState("recent");
   const [manageSortMenuOpen, setManageSortMenuOpen] = useState(false);
   const [manageSearch, setManageSearch] = useState("");
@@ -899,6 +902,7 @@ export default function App() {
 
   const selectTab = (nextTab) => {
     setTab(nextTab);
+    setSaveActionMenuOpen(false);
     setManageSortMenuOpen(false);
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo?.({ y: 0, animated: false });
@@ -906,12 +910,27 @@ export default function App() {
   };
 
   const applyTutorialStepSideEffects = (step) => {
-    if (
-      step?.key === "save-single-chip" ||
-      step?.key === "save-single-practice" ||
-      step?.key === "save-single-success"
-    ) {
+    if (step?.key === "save-single-chip") {
       setSaveInputMode("single");
+      setSaveComposerVisible(false);
+      setSaveActionMenuOpen(true);
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
+      });
+    }
+
+    if (step?.key === "save-single-practice") {
+      setSaveInputMode("single");
+      setSaveActionMenuOpen(false);
+      setSaveComposerVisible(true);
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
+      });
+    }
+
+    if (step?.key === "save-single-success") {
+      setSaveActionMenuOpen(false);
+      setSaveComposerVisible(false);
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo?.({ y: 0, animated: true });
       });
@@ -980,6 +999,8 @@ export default function App() {
     language,
     manageSortMenuOpen,
     pairs.length,
+    saveActionMenuOpen,
+    saveComposerVisible,
     saveInputMode,
     screenHeight,
     screenWidth,
@@ -2441,6 +2462,8 @@ export default function App() {
 
     Keyboard.dismiss();
     setDraft({ left: "", right: "" });
+    setSaveComposerVisible(false);
+    setSaveActionMenuOpen(false);
     setQuizFolderId(saveFolderId);
     setManageFolderId(saveFolderId);
 
@@ -2543,6 +2566,8 @@ export default function App() {
 
       setQuizFolderId(saveFolderId);
       setManageFolderId(saveFolderId);
+      setSaveComposerVisible(false);
+      setSaveActionMenuOpen(false);
       setTranslatedNote(
         saveResult.cloudSaved ? "notes.importSavedCloud" : "notes.importSavedLocal",
         { count: saveResult.savedCount }
@@ -2707,6 +2732,8 @@ export default function App() {
     if (saveResult.savedCount) {
       setQuizFolderId(saveFolderId);
       setManageFolderId(saveFolderId);
+      setSaveComposerVisible(false);
+      setSaveActionMenuOpen(false);
       Alert.alert(t("alerts.photoSavedTitle"), messages.join(" "));
     }
   };
@@ -3502,17 +3529,14 @@ export default function App() {
                   style={({ pressed }) => [styles.folderChildItem, pressed && styles.pressed]}
                 >
                   <View style={styles.folderChildIcon}>
-                    <MaterialCommunityIcons name="folder-outline" size={20} color={theme.accent} />
+                    <MaterialCommunityIcons name="folder" size={39} color={theme.accent} />
                   </View>
-                  <View style={styles.folderChildCopy}>
-                    <Text style={styles.folderChildName} numberOfLines={1}>
-                      {folder.name}
-                    </Text>
-                    <Text style={styles.folderChildMeta}>
-                      {t("folders.folderMeta", { count: directPairCount, childCount })}
-                    </Text>
-                  </View>
-                  <MaterialCommunityIcons name="chevron-right" size={18} color={theme.textPlaceholder} />
+                  <Text style={styles.folderChildName} numberOfLines={2} ellipsizeMode="tail">
+                    {folder.name}
+                  </Text>
+                  <Text style={styles.folderChildMeta} numberOfLines={1}>
+                    {t("folders.folderMeta", { count: directPairCount, childCount })}
+                  </Text>
                 </Pressable>
               );
             })
@@ -3555,56 +3579,68 @@ export default function App() {
     );
   };
 
-  const renderSaveTab = () => (
-    <View style={[styles.scene, styles.saveScene]}>
-      <View style={styles.saveModeRow}>
-        {SAVE_INPUT_OPTIONS.map((option) => {
-          const active = saveInputMode === option.key;
+  const closeSaveComposer = () => {
+    Keyboard.dismiss();
+    setSaveComposerVisible(false);
+    setSaveActionMenuOpen(false);
+  };
 
-          return (
-            <Pressable
-              key={option.key}
-              {...tutorialTargetProps(`save-mode-${option.key}`)}
-              onPress={() => {
-                setSaveInputMode(option.key);
+  const handleSaveModeSelect = (optionKey) => {
+    setSaveInputMode(optionKey);
+    setSaveComposerVisible(true);
+    setSaveActionMenuOpen(false);
 
-                if (guidedTutorialActive && tutorialStep === "save-single-chip" && option.key === "single") {
-                  advanceTutorial();
-                }
+    if (guidedTutorialActive && tutorialStep === "save-single-chip" && optionKey === "single") {
+      advanceTutorial();
+    }
 
-                if (guidedTutorialActive && tutorialStep === "save-single-success" && option.key === "text") {
-                  advanceTutorial();
-                }
-              }}
-              style={({ pressed }) => [
-                styles.saveModeChip,
-                active && styles.saveModeChipActive,
-                pressed && styles.pressed,
-              ]}
-            >
-              <MaterialCommunityIcons
-                name={option.icon}
-                size={18}
-                color={active ? theme.accent : theme.textSecondary}
-              />
-              <Text style={[styles.saveModeChipText, active && styles.saveModeChipTextActive]}>
-                {t(option.labelKey)}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+    if (guidedTutorialActive && tutorialStep === "save-single-success" && optionKey === "text") {
+      advanceTutorial();
+    }
+  };
 
-      {renderFolderExplorer({
-        currentFolderId: saveFolderId,
-        onSelectFolder: selectSaveFolder,
-        allowCreate: true,
-        pairCount: saveFolderPairs.length,
-        scope: "save",
-      })}
+  const renderSaveModeOption = (option, variant = "modal") => {
+    const active = saveInputMode === option.key;
+    const targetProps = variant === "fab" ? tutorialTargetProps(`save-mode-${option.key}`) : {};
 
+    return (
+      <Pressable
+        key={`${variant}-${option.key}`}
+        {...targetProps}
+        onPress={() => handleSaveModeSelect(option.key)}
+        style={({ pressed }) => [
+          variant === "fab" ? styles.saveFabMenuItem : styles.saveModeChip,
+          active && (variant === "fab" ? styles.saveFabMenuItemActive : styles.saveModeChipActive),
+          pressed && styles.pressed,
+        ]}
+      >
+        <MaterialCommunityIcons
+          name={option.icon}
+          size={variant === "fab" ? 19 : 18}
+          color={active ? theme.accent : theme.textSecondary}
+        />
+        <Text
+          style={[
+            variant === "fab" ? styles.saveFabMenuText : styles.saveModeChipText,
+            active && (variant === "fab" ? styles.saveFabMenuTextActive : styles.saveModeChipTextActive),
+          ]}
+        >
+          {t(option.labelKey)}
+        </Text>
+      </Pressable>
+    );
+  };
+
+  const renderSaveModeSelector = () => (
+    <View style={styles.saveModeRow}>
+      {SAVE_INPUT_OPTIONS.map((option) => renderSaveModeOption(option))}
+    </View>
+  );
+
+  const renderSaveInputContent = () => (
+    <>
       {saveInputMode === "single" ? (
-        <View style={styles.composerPanel} {...tutorialTargetProps("save-composer")}>
+        <View style={[styles.composerPanel, styles.saveModalInnerPanel]} {...tutorialTargetProps("save-composer")}>
           <View style={styles.importHeader}>
             <View style={styles.importTitleRow}>
               <Text style={styles.importTitle}>{t("save.title")}</Text>
@@ -3642,7 +3678,7 @@ export default function App() {
       ) : null}
 
       {saveInputMode === "text" ? (
-        <View style={styles.importPanel} {...tutorialTargetProps("save-import-panel")}>
+        <View style={[styles.importPanel, styles.saveModalInnerPanel]} {...tutorialTargetProps("save-import-panel")}>
           <View style={styles.importHeader}>
             <View style={styles.importTitleRow}>
               <View style={styles.importIconWrap}>
@@ -3701,7 +3737,7 @@ export default function App() {
       ) : null}
 
       {APP_FEATURES.photoImport && saveInputMode === "photo" ? (
-        <View style={styles.importPanel}>
+        <View style={[styles.importPanel, styles.saveModalInnerPanel]}>
           <View style={styles.importHeader}>
             <View style={styles.importTitleRow}>
               <View style={styles.importIconWrap}>
@@ -3849,6 +3885,108 @@ export default function App() {
           </View>
         </View>
       ) : null}
+    </>
+  );
+
+  const renderSaveComposerModal = () => (
+    <Modal
+      visible={saveComposerVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={closeSaveComposer}
+    >
+      <View style={styles.saveModalOverlay}>
+        <Pressable style={styles.saveModalBackdrop} onPress={closeSaveComposer} />
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.saveModalKeyboard}
+        >
+          <View style={[styles.saveModalSheet, contentMaxWidth ? { maxWidth: contentMaxWidth } : null]}>
+            <View style={styles.saveModalHandle} />
+            <View style={styles.saveModalHeader}>
+              <View style={styles.saveModalTitleRow}>
+                <MaterialCommunityIcons
+                  name={saveInputMode === "single" ? "cards-outline" : "file-document-plus-outline"}
+                  size={19}
+                  color={theme.accent}
+                />
+                <Text style={styles.saveModalTitle}>
+                  {t(saveInputMode === "single" ? "saveModes.single" : "saveModes.text")}
+                </Text>
+              </View>
+              <Pressable
+                onPress={closeSaveComposer}
+                style={({ pressed }) => [styles.saveModalCloseButton, pressed && styles.pressed]}
+              >
+                <MaterialCommunityIcons name="close" size={20} color={theme.textPrimary} />
+              </Pressable>
+            </View>
+            {renderSaveModeSelector()}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.saveModalScrollContent}
+            >
+              {renderSaveInputContent()}
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
+    </Modal>
+  );
+
+  const renderSaveFloatingAdd = () => {
+    const shouldShow =
+      tab === "save" &&
+      !saveComposerVisible &&
+      (!guidedTutorialActive || tutorialStep === "save-single-chip");
+
+    if (!shouldShow) {
+      return null;
+    }
+
+    return (
+      <View
+        pointerEvents="box-none"
+        style={[
+          styles.saveFabLayer,
+          tabBarLeft !== null ? { right: Math.max(24, tabBarLeft + 24) } : null,
+        ]}
+      >
+        {saveActionMenuOpen ? (
+          <View style={styles.saveFabMenu}>
+            {SAVE_INPUT_OPTIONS.map((option) => renderSaveModeOption(option, "fab"))}
+          </View>
+        ) : null}
+        <Pressable
+          accessibilityLabel={t("folders.actions")}
+          onPress={() => setSaveActionMenuOpen((currentValue) => !currentValue)}
+          style={({ pressed }) => [
+            styles.saveFabButton,
+            saveActionMenuOpen && styles.saveFabButtonActive,
+            pressed && styles.pressed,
+          ]}
+        >
+          <MaterialCommunityIcons
+            name={saveActionMenuOpen ? "close" : "plus"}
+            size={30}
+            color={theme.accentText}
+          />
+        </Pressable>
+      </View>
+    );
+  };
+
+  const renderSaveTab = () => (
+    <View style={[styles.scene, styles.saveScene]}>
+      {renderFolderExplorer({
+        currentFolderId: saveFolderId,
+        onSelectFolder: selectSaveFolder,
+        allowCreate: true,
+        pairCount: saveFolderPairs.length,
+        scope: "save",
+      })}
+      {renderSaveComposerModal()}
     </View>
   );
 
@@ -5096,6 +5234,8 @@ export default function App() {
           </View>
         </ScrollView>
 
+        {renderSaveFloatingAdd()}
+
         <View
           style={[
             styles.tabs,
@@ -5904,6 +6044,141 @@ const createStyles = (theme) => StyleSheet.create({
   saveModeChipTextActive: {
     color: theme.accent,
   },
+  saveFabLayer: {
+    position: "absolute",
+    right: 24,
+    bottom: Platform.OS === "android" ? 136 : 118,
+    zIndex: 80,
+    alignItems: "flex-end",
+  },
+  saveFabMenu: {
+    gap: 8,
+    width: 154,
+    marginBottom: 10,
+    padding: 8,
+    borderRadius: 22,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+    shadowColor: theme.textPrimary,
+    shadowOpacity: theme.mode === "dark" ? 0.24 : 0.1,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
+  saveFabMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  saveFabMenuItemActive: {
+    backgroundColor: theme.accentSoft,
+    borderColor: theme.accent,
+  },
+  saveFabMenuText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  saveFabMenuTextActive: {
+    color: theme.accent,
+  },
+  saveFabButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accent,
+    borderWidth: 1,
+    borderColor: theme.accent,
+    shadowColor: theme.accent,
+    shadowOpacity: theme.mode === "dark" ? 0.28 : 0.32,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
+  },
+  saveFabButtonActive: {
+    backgroundColor: theme.textPrimary,
+    borderColor: theme.textPrimary,
+  },
+  saveModalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  saveModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: theme.mode === "dark" ? "rgba(2, 5, 14, 0.68)" : "rgba(24, 32, 51, 0.32)",
+  },
+  saveModalKeyboard: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  saveModalSheet: {
+    width: "100%",
+    maxHeight: "88%",
+    alignSelf: "center",
+    gap: 12,
+    paddingTop: 10,
+    paddingHorizontal: 18,
+    paddingBottom: Platform.OS === "android" ? 28 : 18,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  saveModalHandle: {
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: "center",
+    backgroundColor: theme.surfaceBorder,
+  },
+  saveModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  saveModalTitleRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  saveModalTitle: {
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  saveModalCloseButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  saveModalScrollContent: {
+    gap: 12,
+    paddingBottom: 8,
+  },
+  saveModalInnerPanel: {
+    borderRadius: 22,
+  },
   folderPanel: {
     position: "relative",
     zIndex: 20,
@@ -6038,38 +6313,48 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.accent,
   },
   folderChildList: {
-    gap: 8,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
   },
   folderChildItem: {
-    flexDirection: "row",
+    width: "30.9%",
+    minWidth: 92,
+    minHeight: 124,
     alignItems: "center",
-    gap: 10,
-    padding: 11,
-    borderRadius: 18,
+    justifyContent: "flex-start",
+    gap: 7,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    borderRadius: 16,
     backgroundColor: theme.surfaceSoft,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
   folderChildIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 54,
+    height: 46,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: theme.accentSoft,
   },
   folderChildCopy: {
     flex: 1,
     gap: 2,
   },
   folderChildName: {
-    fontSize: 14,
+    width: "100%",
+    minHeight: 34,
+    fontSize: 13,
+    lineHeight: 17,
     fontWeight: "800",
+    textAlign: "center",
     color: theme.textPrimary,
   },
   folderChildMeta: {
-    fontSize: 12,
-    lineHeight: 17,
+    width: "100%",
+    fontSize: 10,
+    lineHeight: 14,
+    textAlign: "center",
     color: theme.textSecondary,
   },
   folderEmptyText: {
