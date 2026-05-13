@@ -744,6 +744,7 @@ export default function App() {
     }
 
     if (step?.key === "history-recent") {
+      setHistoryCalendarOpen(false);
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo?.({ y: 390, animated: true });
       });
@@ -3044,6 +3045,39 @@ export default function App() {
 
   const renderHistoryTab = () => {
     const missedCards = todayMissedCards.length ? todayMissedCards : topMissedCards;
+    const [firstSelectedHistorySession, ...remainingSelectedHistorySessions] = selectedHistorySessions;
+    const renderHistorySessionItem = (item) => (
+      <View key={item.id} style={styles.historyItem}>
+        <View style={styles.historyItemBody}>
+          <Text style={styles.historyItemTitle}>{formatSessionLabelForLanguage(item.completedAt, language)}</Text>
+          <Text style={styles.historyItemCaption}>
+            {t("history.recentSessionCaption", {
+              source: t(item.source === "retry" ? "quiz.sourceRetry" : "quiz.sourceAdaptive"),
+              total: item.totalCards,
+              correct: item.correctCount,
+            })}
+          </Text>
+        </View>
+        <View style={styles.historyItemSide}>
+          <View style={[styles.historyBadge, item.incorrectCount > 0 && styles.historyBadgeBad]}>
+            <Text style={[styles.historyBadgeText, item.incorrectCount > 0 && styles.historyBadgeTextBad]}>
+              {t("history.incorrectBadge", { count: item.incorrectCount })}
+            </Text>
+          </View>
+          {item.incorrectCount > 0 ? (
+            <Pressable
+              onPress={() => retryIncorrectCardsFromSession(item)}
+              style={({ pressed }) => [
+                styles.historyRetryButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={styles.historyRetryButtonText}>{t("history.retrySession")}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+    );
 
     return (
       <View style={styles.scene}>
@@ -3072,146 +3106,122 @@ export default function App() {
               </View>
             </View>
 
-            <View style={styles.libraryPanel} {...tutorialTargetProps("history-recent-panel")}>
-              <View style={styles.panelHeader}>
-                <View style={styles.panelHeaderText}>
-                  <Text style={styles.panelTitle}>{t("history.recentSessions")}</Text>
-                  <Text style={styles.historyDateSummary}>
-                    {t("history.selectedDateSummary", {
-                      date: formatHistoryDateFilterLabel(historyDateKey, language, t),
-                      count: selectedHistorySessionCount,
-                    })}
-                  </Text>
-                </View>
-                <Pressable
-                  onPress={() => {
-                    setHistoryCalendarMonth(getStartOfLocalMonth(parseLocalDayKey(historyDateKey)));
-                    setHistoryCalendarOpen((currentValue) => !currentValue);
-                  }}
-                  style={({ pressed }) => [
-                    styles.historyCalendarButton,
-                    historyCalendarOpen && styles.historyCalendarButtonActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <MaterialCommunityIcons
-                    name="calendar-month-outline"
-                    size={22}
-                    color={historyCalendarOpen ? theme.accentText : theme.accent}
-                  />
-                </Pressable>
-              </View>
-              {historyCalendarOpen ? (
-                <View style={styles.historyCalendarPanel}>
-                  <View style={styles.historyCalendarHeader}>
-                    <Pressable
-                      onPress={() => setHistoryCalendarMonth((currentMonth) => addLocalMonths(currentMonth, -1))}
-                      style={({ pressed }) => [styles.historyCalendarNavButton, pressed && styles.pressed]}
-                    >
-                      <MaterialCommunityIcons name="chevron-left" size={22} color={theme.textSecondary} />
-                    </Pressable>
-                    <Text style={styles.historyCalendarMonthText}>
-                      {formatCalendarMonthLabel(historyCalendarMonth, language)}
+            <View style={styles.libraryPanel}>
+              <View style={styles.historyRecentTutorialTarget} {...tutorialTargetProps("history-recent-panel")}>
+                <View style={styles.panelHeader}>
+                  <View style={styles.panelHeaderText}>
+                    <Text style={styles.panelTitle}>{t("history.recentSessions")}</Text>
+                    <Text style={styles.historyDateSummary}>
+                      {t("history.selectedDateSummary", {
+                        date: formatHistoryDateFilterLabel(historyDateKey, language, t),
+                        count: selectedHistorySessionCount,
+                      })}
                     </Text>
-                    <Pressable
-                      onPress={() => setHistoryCalendarMonth((currentMonth) => addLocalMonths(currentMonth, 1))}
-                      style={({ pressed }) => [styles.historyCalendarNavButton, pressed && styles.pressed]}
-                    >
-                      <MaterialCommunityIcons name="chevron-right" size={22} color={theme.textSecondary} />
-                    </Pressable>
                   </View>
-
-                  <View style={styles.historyCalendarWeekRow}>
-                    {(CALENDAR_WEEKDAY_LABELS[language] ?? CALENDAR_WEEKDAY_LABELS.en).map((weekday) => (
-                      <Text key={weekday} style={styles.historyCalendarWeekText}>
-                        {weekday}
-                      </Text>
-                    ))}
-                  </View>
-
-                  <View style={styles.historyCalendarGrid}>
-                    {historyCalendarCells.map((cell) => {
-                      const selected = cell.dayKey === historyDateKey;
-                      const today = cell.dayKey === todayKey;
-
-                      return (
-                        <Pressable
-                          key={cell.dayKey}
-                          onPress={() => {
-                            setHistoryDateKey(cell.dayKey);
-                            setHistoryCalendarOpen(false);
-                          }}
-                          style={({ pressed }) => [
-                            styles.historyCalendarDay,
-                            !cell.inMonth && styles.historyCalendarDayMuted,
-                            today && styles.historyCalendarDayToday,
-                            selected && styles.historyCalendarDaySelected,
-                            pressed && styles.pressed,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.historyCalendarDayText,
-                              !cell.inMonth && styles.historyCalendarDayTextMuted,
-                              selected && styles.historyCalendarDayTextSelected,
-                            ]}
-                          >
-                            {cell.date.getDate()}
-                          </Text>
-                          {cell.count > 0 ? (
-                            <Text
-                              style={[
-                                styles.historyCalendarCountText,
-                                selected && styles.historyCalendarCountTextSelected,
-                              ]}
-                            >
-                              {t("history.calendarSessionCount", { count: cell.count })}
-                            </Text>
-                          ) : null}
-                        </Pressable>
-                      );
-                    })}
-                  </View>
+                  <Pressable
+                    onPress={() => {
+                      setHistoryCalendarMonth(getStartOfLocalMonth(parseLocalDayKey(historyDateKey)));
+                      setHistoryCalendarOpen((currentValue) => !currentValue);
+                    }}
+                    style={({ pressed }) => [
+                      styles.historyCalendarButton,
+                      historyCalendarOpen && styles.historyCalendarButtonActive,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <MaterialCommunityIcons
+                      name="calendar-month-outline"
+                      size={22}
+                      color={historyCalendarOpen ? theme.accentText : theme.accent}
+                    />
+                  </Pressable>
                 </View>
-              ) : null}
-              <View style={styles.historyList}>
-                {selectedHistorySessions.length ? (
-                  selectedHistorySessions.map((item) => (
-                    <View key={item.id} style={styles.historyItem}>
-                      <View style={styles.historyItemBody}>
-                        <Text style={styles.historyItemTitle}>{formatSessionLabelForLanguage(item.completedAt, language)}</Text>
-                        <Text style={styles.historyItemCaption}>
-                          {t("history.recentSessionCaption", {
-                            source: t(item.source === "retry" ? "quiz.sourceRetry" : "quiz.sourceAdaptive"),
-                            total: item.totalCards,
-                            correct: item.correctCount,
-                          })}
+                {historyCalendarOpen ? (
+                  <View style={styles.historyCalendarPanel}>
+                    <View style={styles.historyCalendarHeader}>
+                      <Pressable
+                        onPress={() => setHistoryCalendarMonth((currentMonth) => addLocalMonths(currentMonth, -1))}
+                        style={({ pressed }) => [styles.historyCalendarNavButton, pressed && styles.pressed]}
+                      >
+                        <MaterialCommunityIcons name="chevron-left" size={22} color={theme.textSecondary} />
+                      </Pressable>
+                      <Text style={styles.historyCalendarMonthText}>
+                        {formatCalendarMonthLabel(historyCalendarMonth, language)}
+                      </Text>
+                      <Pressable
+                        onPress={() => setHistoryCalendarMonth((currentMonth) => addLocalMonths(currentMonth, 1))}
+                        style={({ pressed }) => [styles.historyCalendarNavButton, pressed && styles.pressed]}
+                      >
+                        <MaterialCommunityIcons name="chevron-right" size={22} color={theme.textSecondary} />
+                      </Pressable>
+                    </View>
+
+                    <View style={styles.historyCalendarWeekRow}>
+                      {(CALENDAR_WEEKDAY_LABELS[language] ?? CALENDAR_WEEKDAY_LABELS.en).map((weekday) => (
+                        <Text key={weekday} style={styles.historyCalendarWeekText}>
+                          {weekday}
                         </Text>
-                      </View>
-                      <View style={styles.historyItemSide}>
-                        <View style={[styles.historyBadge, item.incorrectCount > 0 && styles.historyBadgeBad]}>
-                          <Text style={[styles.historyBadgeText, item.incorrectCount > 0 && styles.historyBadgeTextBad]}>
-                            {t("history.incorrectBadge", { count: item.incorrectCount })}
-                          </Text>
-                        </View>
-                        {item.incorrectCount > 0 ? (
+                      ))}
+                    </View>
+
+                    <View style={styles.historyCalendarGrid}>
+                      {historyCalendarCells.map((cell) => {
+                        const selected = cell.dayKey === historyDateKey;
+                        const today = cell.dayKey === todayKey;
+
+                        return (
                           <Pressable
-                            onPress={() => retryIncorrectCardsFromSession(item)}
+                            key={cell.dayKey}
+                            onPress={() => {
+                              setHistoryDateKey(cell.dayKey);
+                              setHistoryCalendarOpen(false);
+                            }}
                             style={({ pressed }) => [
-                              styles.historyRetryButton,
+                              styles.historyCalendarDay,
+                              !cell.inMonth && styles.historyCalendarDayMuted,
+                              today && styles.historyCalendarDayToday,
+                              selected && styles.historyCalendarDaySelected,
                               pressed && styles.pressed,
                             ]}
                           >
-                            <Text style={styles.historyRetryButtonText}>{t("history.retrySession")}</Text>
+                            <Text
+                              style={[
+                                styles.historyCalendarDayText,
+                                !cell.inMonth && styles.historyCalendarDayTextMuted,
+                                selected && styles.historyCalendarDayTextSelected,
+                              ]}
+                            >
+                              {cell.date.getDate()}
+                            </Text>
+                            {cell.count > 0 ? (
+                              <Text
+                                style={[
+                                  styles.historyCalendarCountText,
+                                  selected && styles.historyCalendarCountTextSelected,
+                                ]}
+                              >
+                                {t("history.calendarSessionCount", { count: cell.count })}
+                              </Text>
+                            ) : null}
                           </Pressable>
-                        ) : null}
-                      </View>
+                        );
+                      })}
                     </View>
-                  ))
-                ) : (
-                  <Text style={styles.historyEmptyText}>{t("history.noSessionsForDate")}</Text>
-                )}
+                  </View>
+                ) : null}
+                <View style={styles.historyList}>
+                  {firstSelectedHistorySession ? (
+                    renderHistorySessionItem(firstSelectedHistorySession)
+                  ) : (
+                    <Text style={styles.historyEmptyText}>{t("history.noSessionsForDate")}</Text>
+                  )}
+                </View>
               </View>
+              {remainingSelectedHistorySessions.length ? (
+                <View style={styles.historyList}>
+                  {remainingSelectedHistorySessions.map(renderHistorySessionItem)}
+                </View>
+              ) : null}
             </View>
 
             <View style={styles.libraryPanel} {...tutorialTargetProps("history-missed-panel")}>
@@ -3591,8 +3601,8 @@ export default function App() {
           </View>
         </View>
 
-        <View style={styles.settingsCard}>
-          <View style={styles.aboutSupportTutorialTarget} {...tutorialTargetProps("about-support-panel")}>
+        <View style={styles.settingsCard} {...tutorialTargetProps("about-support-panel")}>
+          <View style={styles.aboutSupportTutorialTarget}>
             <View style={styles.settingsHeader}>
               <Text style={styles.settingsTitle}>{t("about.supportTitle")}</Text>
               <Text style={styles.settingsBody}>{t("about.supportBody")}</Text>
@@ -3655,28 +3665,28 @@ export default function App() {
                 />
               </View>
             </View>
-          </View>
 
-          {supportNotice ? <Text style={styles.supportNotice}>{supportNotice}</Text> : null}
+            {supportNotice ? <Text style={styles.supportNotice}>{supportNotice}</Text> : null}
 
-          <Pressable
-            disabled={supportSending}
-            onPress={() => void submitSupportRequest()}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              supportSending && styles.primaryButtonDisabled,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text
-              style={[
-                styles.primaryButtonText,
-                supportSending && styles.primaryButtonTextDisabled,
+            <Pressable
+              disabled={supportSending}
+              onPress={() => void submitSupportRequest()}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                supportSending && styles.primaryButtonDisabled,
+                pressed && styles.pressed,
               ]}
             >
-              {supportSending ? t("about.supportSending") : t("about.supportSend")}
-            </Text>
-          </Pressable>
+              <Text
+                style={[
+                  styles.primaryButtonText,
+                  supportSending && styles.primaryButtonTextDisabled,
+                ]}
+              >
+                {supportSending ? t("about.supportSending") : t("about.supportSend")}
+              </Text>
+            </Pressable>
+          </View>
 
           {latestSupportRequests.length ? (
             <View style={styles.supportHistory}>
@@ -5914,6 +5924,14 @@ const createStyles = (theme) => StyleSheet.create({
   },
   historyList: {
     gap: 12,
+  },
+  historyRecentTutorialTarget: {
+    gap: 12,
+    marginHorizontal: -18,
+    marginTop: -18,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    borderRadius: 26,
   },
   historyDateSummary: {
     fontSize: 12,
