@@ -782,6 +782,8 @@ export default function App() {
   const contentTopPadding = 18 + (Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0);
   const isTabletLayout = screenWidth >= 768;
   const contentMaxWidth = isTabletLayout ? 820 : null;
+  const contentResolvedWidth = contentMaxWidth ?? Math.max(280, screenWidth - 36);
+  const manageSwipeCardWidth = contentResolvedWidth - 36;
   const tutorialMaxWidth = isTabletLayout ? 560 : null;
   const tabBarWidth = isTabletLayout ? Math.min(screenWidth - 28, 820) : null;
   const tabBarLeft = tabBarWidth ? Math.max(14, (screenWidth - tabBarWidth) / 2) : null;
@@ -965,7 +967,7 @@ export default function App() {
 
     if (step?.key === "manage-use") {
       requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 270, animated: true });
+        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
       });
     }
 
@@ -2017,6 +2019,21 @@ export default function App() {
     setEditingLeft("");
     setEditingRight("");
     setEditingFolderId(ROOT_FOLDER_ID);
+  };
+
+  const openFolderCards = (folderId) => {
+    const nextFolderId = normalizeFolderId(folderId);
+
+    setManageFolderId(nextFolderId);
+    setManageSearch("");
+    setManageSort("recent");
+    setManageSortMenuOpen(false);
+    setSelectedManagePairIds([]);
+    setEditingId(null);
+    setEditingLeft("");
+    setEditingRight("");
+    setEditingFolderId(ROOT_FOLDER_ID);
+    handleTabChange("manage");
   };
 
   const beginFolderRename = (folder) => {
@@ -3345,6 +3362,9 @@ export default function App() {
     const parentFolderId = currentFolder?.parentId ?? ROOT_FOLDER_ID;
     const path = getFolderPath(folders, normalizedCurrentFolderId);
     const children = getFolderChildren(folders, normalizedCurrentFolderId);
+    const directPairCount = pairs.filter(
+      (pair) => normalizeFolderId(pair.folderId) === normalizedCurrentFolderId
+    ).length;
     const canManageCurrentFolder = allowCreate && currentFolder;
     const renamingCurrentFolder = renamingFolderId === normalizedCurrentFolderId;
     const folderViewKey = createFolderViewKey(scope, normalizedCurrentFolderId);
@@ -3516,33 +3536,49 @@ export default function App() {
           </View>
         ) : null}
 
-        <View style={styles.folderChildList}>
+        <View style={styles.folderChildrenSection}>
           {children.length ? (
-            children.map((folder) => {
-              const childCount = getFolderChildren(folders, folder.id).length;
-              const directPairCount = pairs.filter((pair) => normalizeFolderId(pair.folderId) === folder.id).length;
+            <View style={styles.folderChildList}>
+              {children.map((folder) => {
+                const childCount = getFolderChildren(folders, folder.id).length;
+                const childDirectPairCount = pairs.filter((pair) => normalizeFolderId(pair.folderId) === folder.id).length;
 
-              return (
-                <Pressable
-                  key={folder.id}
-                  onPress={() => onSelectFolder(folder.id)}
-                  style={({ pressed }) => [styles.folderChildItem, pressed && styles.pressed]}
-                >
-                  <View style={styles.folderChildIcon}>
-                    <MaterialCommunityIcons name="folder" size={39} color={theme.accent} />
-                  </View>
-                  <Text style={styles.folderChildName} numberOfLines={2} ellipsizeMode="tail">
-                    {folder.name}
-                  </Text>
-                  <Text style={styles.folderChildMeta} numberOfLines={1}>
-                    {t("folders.folderMeta", { count: directPairCount, childCount })}
-                  </Text>
-                </Pressable>
-              );
-            })
+                return (
+                  <Pressable
+                    key={folder.id}
+                    onPress={() => onSelectFolder(folder.id)}
+                    style={({ pressed }) => [styles.folderChildItem, pressed && styles.pressed]}
+                  >
+                    <View style={styles.folderChildIcon}>
+                      <MaterialCommunityIcons name="folder" size={39} color={theme.accent} />
+                    </View>
+                    <Text style={styles.folderChildName} numberOfLines={2} ellipsizeMode="tail">
+                      {folder.name}
+                    </Text>
+                    <Text style={styles.folderChildMeta} numberOfLines={1}>
+                      {t("folders.folderMeta", { count: childDirectPairCount, childCount })}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           ) : (
             <Text style={styles.folderEmptyText}>{t("folders.emptyChildren")}</Text>
           )}
+          <Pressable
+            onPress={() => openFolderCards(normalizedCurrentFolderId)}
+            style={({ pressed }) => [styles.folderSavedCardsItem, pressed && styles.pressed]}
+          >
+            <View style={styles.folderSavedCardsIcon}>
+              <MaterialCommunityIcons name="file-document-outline" size={34} color={theme.textSecondary} />
+            </View>
+            <Text style={styles.folderSavedCardsName} numberOfLines={2}>
+              {t("folders.savedCards")}
+            </Text>
+            <Text style={styles.folderSavedCardsMeta}>
+              {t("folders.savedCardsMeta", { count: directPairCount })}
+            </Text>
+          </Pressable>
         </View>
 
         {allowCreate && creatingCurrentFolder ? (
@@ -4442,6 +4478,145 @@ export default function App() {
     );
   };
 
+  const renderManagePairCard = (pair, index) => {
+    const targetProps = index === 0 ? tutorialTargetProps("manage-first-card") : {};
+    const beginEdit = () => {
+      setEditingId(pair.id);
+      setEditingLeft(pair.left);
+      setEditingRight(pair.right);
+      setEditingFolderId(normalizeFolderId(pair.folderId));
+    };
+    const confirmDelete = () =>
+      Alert.alert(t("manage.deleteTitle"), t("manage.deleteBody"), [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("common.delete"),
+          style: "destructive",
+          onPress: () => {
+            void removePair(pair);
+          },
+        },
+      ]);
+
+    if (editingId === pair.id) {
+      return (
+        <View key={pair.id} style={styles.manageCard} {...targetProps}>
+          <Text style={styles.inputLabel}>{t("common.front")}</Text>
+          <TextInput
+            value={editingLeft}
+            onChangeText={setEditingLeft}
+            placeholder={t("common.front")}
+            placeholderTextColor={theme.textPlaceholder}
+            style={[styles.input, styles.multilineInput]}
+            multiline
+            textAlignVertical="top"
+          />
+
+          <Text style={styles.inputLabel}>{t("common.back")}</Text>
+          <TextInput
+            value={editingRight}
+            onChangeText={setEditingRight}
+            placeholder={t("common.back")}
+            placeholderTextColor={theme.textPlaceholder}
+            style={[styles.input, styles.multilineInput]}
+            multiline
+            textAlignVertical="top"
+          />
+
+          <Text style={styles.inputLabel}>{t("folders.cardLocation")}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderPickerRow}>
+            {selectableFolders.map((folder) => {
+              const active = normalizeFolderId(editingFolderId) === folder.id;
+
+              return (
+                <Pressable
+                  key={folder.id}
+                  onPress={() => setEditingFolderId(folder.id)}
+                  style={({ pressed }) => [
+                    styles.folderPickerChip,
+                    active && styles.folderPickerChipActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={[styles.folderPickerText, active && styles.folderPickerTextActive]}>
+                    {folder.id === ROOT_FOLDER_ID ? folder.name : getFolderLabel(folder.id)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          <View style={styles.manageActionRow}>
+            <Pressable onPress={() => void saveEdit()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
+              <Text style={styles.primaryButtonText}>{t("manage.saveEdit")}</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setEditingId(null);
+                setEditingLeft("");
+                setEditingRight("");
+                setEditingFolderId(ROOT_FOLDER_ID);
+              }}
+              style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.secondaryButtonText}>{t("common.cancel")}</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View key={pair.id} style={styles.manageSwipeShell} {...targetProps}>
+        <ScrollView
+          horizontal
+          bounces={false}
+          showsHorizontalScrollIndicator={false}
+          snapToOffsets={[0, 152]}
+          decelerationRate="fast"
+          overScrollMode="never"
+          contentContainerStyle={styles.manageSwipeTrack}
+        >
+          <View style={[styles.manageCard, styles.manageSwipeCard, { width: manageSwipeCardWidth }]}>
+            <View style={styles.manageDisplayStack}>
+              <View style={styles.manageDisplayRow}>
+                <View style={styles.manageTextBlock}>
+                  <Text style={styles.managePairText} numberOfLines={1} ellipsizeMode="tail">
+                    {pair.left}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.manageRowDivider} />
+              <View style={styles.manageDisplayRow}>
+                <View style={styles.manageTextBlock}>
+                  <Text style={styles.managePairText} numberOfLines={1} ellipsizeMode="tail">
+                    {pair.right}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+          <View style={styles.manageSwipeActions}>
+            <Pressable
+              onPress={beginEdit}
+              style={({ pressed }) => [styles.manageSwipeAction, styles.manageSwipeEditAction, pressed && styles.pressed]}
+            >
+              <MaterialCommunityIcons name="pencil-outline" size={20} color={theme.accentText} />
+              <Text style={styles.manageSwipeActionText}>{t("manage.edit")}</Text>
+            </Pressable>
+            <Pressable
+              onPress={confirmDelete}
+              style={({ pressed }) => [styles.manageSwipeAction, styles.manageSwipeDeleteAction, pressed && styles.pressed]}
+            >
+              <MaterialCommunityIcons name="trash-can-outline" size={20} color={theme.accentText} />
+              <Text style={styles.manageSwipeActionText}>{t("common.delete")}</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  };
+
   const renderManageTab = () => (
     <View style={styles.scene}>
       {renderFolderExplorer({
@@ -4454,308 +4629,9 @@ export default function App() {
       })}
 
       {manageFolderPairs.length ? (
-        <>
-          <View style={[styles.settingsCard, styles.manageSearchCard]} {...tutorialTargetProps("manage-search-panel")}>
-            <View style={styles.settingsHeader}>
-              <Text style={styles.settingsTitle}>{t("manage.searchTitle")}</Text>
-              <Text style={styles.settingsBody}>{t("manage.searchBody")}</Text>
-            </View>
-            <TextInput
-              value={manageSearch}
-              onChangeText={setManageSearch}
-              placeholder={t("manage.searchPlaceholder")}
-              placeholderTextColor={theme.textPlaceholder}
-              style={styles.input}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="search"
-            />
-
-            <View style={styles.subtleDivider} />
-            <View style={styles.compactSelectRow}>
-              <Text style={styles.compactSelectLabel}>{t("manage.sortTitle")}</Text>
-              <View style={styles.compactSelectWrap}>
-                <Pressable
-                  onPress={() => setManageSortMenuOpen((currentValue) => !currentValue)}
-                  style={({ pressed }) => [styles.compactSelectTrigger, pressed && styles.pressed]}
-                >
-                  <Text style={styles.compactSelectValue}>{t(activeManageSortOption.labelKey)}</Text>
-                  <MaterialCommunityIcons
-                    name={manageSortMenuOpen ? "chevron-up" : "chevron-down"}
-                    size={18}
-                    color={theme.textSecondary}
-                  />
-                </Pressable>
-
-                {manageSortMenuOpen ? (
-                  <View style={styles.compactSelectMenu}>
-                    {MANAGE_SORT_OPTIONS.map((option) => {
-                      const active = manageSort === option.key;
-
-                      return (
-                        <Pressable
-                          key={option.key}
-                          onPress={() => {
-                            setManageSort(option.key);
-                            setManageSortMenuOpen(false);
-                          }}
-                          style={({ pressed }) => [
-                            styles.compactSelectOption,
-                            active && styles.compactSelectOptionActive,
-                            pressed && styles.pressed,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.compactSelectOptionText,
-                              active && styles.compactSelectOptionTextActive,
-                            ]}
-                          >
-                            {t(option.labelKey)}
-                          </Text>
-                          {active ? (
-                            <MaterialCommunityIcons name="check" size={18} color={theme.accent} />
-                          ) : null}
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                ) : null}
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.bulkMovePanel}>
-            <View style={styles.bulkMoveHeader}>
-              <View style={styles.bulkMoveHeaderCopy}>
-                <Text style={styles.bulkMoveTitle}>{t("folders.bulkMoveTitle")}</Text>
-                <Text style={styles.bulkMoveBody}>
-                  {selectedManagePairIds.length
-                    ? t("folders.bulkMoveSelected", { count: selectedManagePairIds.length })
-                    : t("folders.bulkMoveHint")}
-                </Text>
-              </View>
-              <View style={styles.bulkMoveHeaderActions}>
-                <Pressable
-                  disabled={!visibleManagePairs.length}
-                  onPress={selectAllVisibleManagePairs}
-                  style={({ pressed }) => [
-                    styles.folderSmallSecondaryButton,
-                    !visibleManagePairs.length && styles.secondaryButtonDisabled,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.folderSmallSecondaryText,
-                      !visibleManagePairs.length && styles.secondaryButtonTextDisabled,
-                    ]}
-                  >
-                    {t("folders.selectAll")}
-                  </Text>
-                </Pressable>
-                {selectedManagePairIds.length ? (
-                  <Pressable
-                    onPress={() => setSelectedManagePairIds([])}
-                    style={({ pressed }) => [styles.folderSmallSecondaryButton, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.folderSmallSecondaryText}>{t("folders.clearSelection")}</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            </View>
-
-            {selectedManagePairIds.length ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderPickerRow}>
-                {selectableFolders.map((folder) => (
-                  <Pressable
-                    key={`bulk-${folder.id}`}
-                    onPress={() => void moveSelectedPairsToFolder(folder.id)}
-                    style={({ pressed }) => [styles.folderPickerChip, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.folderPickerText}>
-                      {folder.id === ROOT_FOLDER_ID ? folder.name : getFolderLabel(folder.id)}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            ) : null}
-          </View>
-
-          {visibleManagePairs.length ? (
-            <View style={styles.libraryPanel} {...tutorialTargetProps("manage-list-panel")}>
-              {visibleManagePairs.map((pair, index) => (
-                <View
-                  key={pair.id}
-                  style={styles.manageCard}
-                  {...(index === 0 ? tutorialTargetProps("manage-first-card") : {})}
-                >
-                  {editingId === pair.id ? (
-                    <>
-                      <Text style={styles.inputLabel}>{t("common.front")}</Text>
-                      <TextInput
-                        value={editingLeft}
-                        onChangeText={setEditingLeft}
-                        placeholder={t("common.front")}
-                        placeholderTextColor={theme.textPlaceholder}
-                        style={[styles.input, styles.multilineInput]}
-                        multiline
-                        textAlignVertical="top"
-                      />
-
-                      <Text style={styles.inputLabel}>{t("common.back")}</Text>
-                      <TextInput
-                        value={editingRight}
-                        onChangeText={setEditingRight}
-                        placeholder={t("common.back")}
-                        placeholderTextColor={theme.textPlaceholder}
-                        style={[styles.input, styles.multilineInput]}
-                        multiline
-                        textAlignVertical="top"
-                      />
-
-                      <Text style={styles.inputLabel}>{t("folders.cardLocation")}</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderPickerRow}>
-                        {selectableFolders.map((folder) => {
-                          const active = normalizeFolderId(editingFolderId) === folder.id;
-
-                          return (
-                            <Pressable
-                              key={folder.id}
-                              onPress={() => setEditingFolderId(folder.id)}
-                              style={({ pressed }) => [
-                                styles.folderPickerChip,
-                                active && styles.folderPickerChipActive,
-                                pressed && styles.pressed,
-                              ]}
-                            >
-                              <Text style={[styles.folderPickerText, active && styles.folderPickerTextActive]}>
-                                {folder.id === ROOT_FOLDER_ID ? folder.name : getFolderLabel(folder.id)}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </ScrollView>
-
-                      <View style={styles.manageActionRow}>
-                        <Pressable onPress={() => void saveEdit()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-                          <Text style={styles.primaryButtonText}>{t("manage.saveEdit")}</Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => {
-                            setEditingId(null);
-                            setEditingLeft("");
-                            setEditingRight("");
-                            setEditingFolderId(ROOT_FOLDER_ID);
-                          }}
-                          style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
-                        >
-                          <Text style={styles.secondaryButtonText}>{t("common.cancel")}</Text>
-                        </Pressable>
-                      </View>
-                    </>
-                  ) : (
-                    <>
-                      <View style={styles.manageCardMetaRow}>
-                        <Pressable
-                          onPress={() => toggleManagePairSelection(pair.id)}
-                          style={({ pressed }) => [
-                            styles.manageSelectButton,
-                            selectedManagePairSet.has(pair.id) && styles.manageSelectButtonActive,
-                            pressed && styles.pressed,
-                          ]}
-                        >
-                          <MaterialCommunityIcons
-                            name={selectedManagePairSet.has(pair.id) ? "checkbox-marked-circle" : "checkbox-blank-circle-outline"}
-                            size={18}
-                            color={selectedManagePairSet.has(pair.id) ? theme.accentText : theme.textSecondary}
-                          />
-                          <Text
-                            style={[
-                              styles.manageSelectText,
-                              selectedManagePairSet.has(pair.id) && styles.manageSelectTextActive,
-                            ]}
-                          >
-                            {t("folders.selectCard")}
-                          </Text>
-                        </Pressable>
-                        <View style={styles.manageFolderBadge}>
-                          <MaterialCommunityIcons name="folder-outline" size={14} color={theme.accent} />
-                          <Text style={styles.manageFolderBadgeText}>{getFolderLabel(pair.folderId)}</Text>
-                        </View>
-                      </View>
-                      <View style={styles.manageDisplayStack}>
-                        <View style={styles.manageDisplayRow}>
-                          <View style={styles.manageTextBlock}>
-                            <Text style={styles.managePairText} numberOfLines={1} ellipsizeMode="tail">
-                              {pair.left}
-                            </Text>
-                          </View>
-                          <Pressable
-                            onPress={() => {
-                              setEditingId(pair.id);
-                              setEditingLeft(pair.left);
-                              setEditingRight(pair.right);
-                              setEditingFolderId(normalizeFolderId(pair.folderId));
-                            }}
-                            style={({ pressed }) => [
-                              styles.secondaryButton,
-                              styles.manageSideButton,
-                              pressed && styles.pressed,
-                            ]}
-                          >
-                            <Text style={styles.secondaryButtonText}>{t("manage.edit")}</Text>
-                          </Pressable>
-                        </View>
-                        <View style={styles.manageRowDivider} />
-                        <View style={styles.manageDisplayRow}>
-                          <View style={styles.manageTextBlock}>
-                            <Text style={styles.managePairText} numberOfLines={1} ellipsizeMode="tail">
-                              {pair.right}
-                            </Text>
-                          </View>
-                          <Pressable
-                            onPress={() =>
-                              Alert.alert(t("manage.deleteTitle"), t("manage.deleteBody"), [
-                                { text: t("common.cancel"), style: "cancel" },
-                                {
-                                  text: t("common.delete"),
-                                  style: "destructive",
-                                  onPress: () => {
-                                    void removePair(pair);
-                                  },
-                                },
-                              ])
-                            }
-                            style={({ pressed }) => [
-                              styles.dangerButton,
-                              styles.manageSideButton,
-                              pressed && styles.pressed,
-                            ]}
-                          >
-                            <Text style={styles.dangerButtonText}>{t("common.delete")}</Text>
-                          </Pressable>
-                        </View>
-                      </View>
-                    </>
-                  )}
-                </View>
-              ))}
-            </View>
-          ) : (
-            <View {...tutorialTargetProps("manage-first-card")}>
-              <EmptyPanel
-                styles={styles}
-                theme={theme}
-                icon="magnify"
-                title={t("manage.searchEmptyTitle")}
-                body={t("manage.searchEmptyBody", { query: manageSearch.trim() })}
-                actionLabel={t("manage.clearSearch")}
-                onPress={() => setManageSearch("")}
-              />
-            </View>
-          )}
-        </>
+        <View style={styles.libraryPanel} {...tutorialTargetProps("manage-list-panel")}>
+          {sortedManagePairs.map(renderManagePairCard)}
+        </View>
       ) : (
         <EmptyPanel
           styles={styles}
@@ -6001,7 +5877,7 @@ const createStyles = (theme) => StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 18,
     paddingTop: 18,
-    paddingBottom: Platform.OS === "android" ? 188 : 144,
+    paddingBottom: Platform.OS === "android" ? 230 : 170,
   },
   contentShell: {
     width: "100%",
@@ -6047,7 +5923,7 @@ const createStyles = (theme) => StyleSheet.create({
   saveFabLayer: {
     position: "absolute",
     right: 24,
-    bottom: Platform.OS === "android" ? 136 : 118,
+    bottom: Platform.OS === "android" ? 190 : 150,
     zIndex: 80,
     alignItems: "flex-end",
   },
@@ -6312,6 +6188,9 @@ const createStyles = (theme) => StyleSheet.create({
   folderBreadcrumbTextActive: {
     color: theme.accent,
   },
+  folderChildrenSection: {
+    gap: 10,
+  },
   folderChildList: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -6361,6 +6240,42 @@ const createStyles = (theme) => StyleSheet.create({
     paddingVertical: 3,
     fontSize: 12,
     lineHeight: 18,
+    color: theme.textSecondary,
+  },
+  folderSavedCardsItem: {
+    width: "30.9%",
+    minWidth: 92,
+    minHeight: 118,
+    alignItems: "center",
+    justifyContent: "flex-start",
+    gap: 7,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  folderSavedCardsIcon: {
+    width: 48,
+    height: 46,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  folderSavedCardsName: {
+    width: "100%",
+    minHeight: 34,
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: "800",
+    textAlign: "center",
+    color: theme.textPrimary,
+  },
+  folderSavedCardsMeta: {
+    width: "100%",
+    fontSize: 10,
+    lineHeight: 14,
+    textAlign: "center",
     color: theme.textSecondary,
   },
   folderCreateRow: {
@@ -7245,6 +7160,41 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
+  manageSwipeShell: {
+    overflow: "hidden",
+    borderRadius: 18,
+  },
+  manageSwipeTrack: {
+    alignItems: "stretch",
+  },
+  manageSwipeCard: {
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+  manageSwipeActions: {
+    width: 152,
+    flexDirection: "row",
+  },
+  manageSwipeAction: {
+    width: 76,
+    minHeight: 116,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  manageSwipeEditAction: {
+    backgroundColor: theme.textSecondary,
+  },
+  manageSwipeDeleteAction: {
+    backgroundColor: theme.danger,
+  },
+  manageSwipeActionText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "800",
+    textAlign: "center",
+    color: theme.accentText,
+  },
   bulkMovePanel: {
     gap: 12,
     padding: 14,
@@ -7337,7 +7287,7 @@ const createStyles = (theme) => StyleSheet.create({
   manageTextBlock: {
     flexGrow: 1,
     flexShrink: 1,
-    maxWidth: "75%",
+    maxWidth: "100%",
     minWidth: 0,
     paddingHorizontal: 12,
     paddingVertical: 0,
@@ -7357,7 +7307,7 @@ const createStyles = (theme) => StyleSheet.create({
   manageRowDivider: {
     height: 1,
     marginLeft: 12,
-    marginRight: 86,
+    marginRight: 12,
     backgroundColor: theme.surfaceBorderSoft,
   },
   manageSideButton: {
@@ -7922,7 +7872,7 @@ const createStyles = (theme) => StyleSheet.create({
     position: "absolute",
     left: 14,
     right: 14,
-    bottom: Platform.OS === "android" ? 28 : 14,
+    bottom: Platform.OS === "android" ? 56 : 24,
     flexDirection: "row",
     gap: 8,
     paddingTop: 10,
