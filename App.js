@@ -6419,19 +6419,18 @@ const createStyles = (theme) => StyleSheet.create({
   tutorialCoachCopy: {
     flex: 1,
     minWidth: 0,
-    gap: 5,
+    gap: 12,
   },
   tutorialCoachTitle: {
-    fontSize: 20,
-    lineHeight: 28,
-    fontWeight: "900",
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "800",
     color: theme.textPrimary,
   },
   tutorialCoachText: {
-    fontSize: 17,
-    lineHeight: 29,
-    fontWeight: "700",
-    color: theme.textStrong,
+    fontSize: 13,
+    lineHeight: 20,
+    color: theme.textSecondary,
   },
   tutorialCoachHint: {
     marginTop: 4,
