@@ -13,13 +13,14 @@ export const createBlankDraft = () => ({
   right: "",
 });
 
-export const createLocalPair = (left, right) => {
+export const createLocalPair = (left, right, options = {}) => {
   const now = new Date().toISOString();
 
   return {
     id: createId("local"),
     left: left.trim(),
     right: right.trim(),
+    folderId: options.folderId ?? "root",
     source: "local",
     createdAt: now,
     updatedAt: now,
@@ -50,11 +51,12 @@ export const mergePairsBySignature = (...collections) => {
   const merged = new Map();
 
   collections.flat().forEach((pair) => {
-    const signature = createSignature(pair.left, pair.right);
+    const folderId = pair.folderId ?? "root";
+    const signature = `${folderId}::${createSignature(pair.left, pair.right)}`;
     const current = merged.get(signature);
 
     if (!current || pair.source === "cloud") {
-      merged.set(signature, pair);
+      merged.set(signature, { ...pair, folderId });
     }
   });
 
@@ -360,6 +362,7 @@ export const mapPairRecord = (record) => ({
   id: record.id,
   left: record.prompt_a ?? "",
   right: record.prompt_b ?? "",
+  folderId: record.folder_id ?? "root",
   source: "cloud",
   userId: record.user_id ?? null,
   createdAt: record.created_at,

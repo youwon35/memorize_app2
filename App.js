@@ -70,6 +70,8 @@ WebBrowser.maybeCompleteAuthSession();
 
 const APP_NAME = "MEMORIA";
 const STORAGE_KEY = "@memoria/cards";
+const FOLDERS_STORAGE_KEY = "@memoria/folders";
+const ROOT_FOLDER_ID = "root";
 const THEME_MODE_KEY = "@memoria/theme-mode";
 const LANGUAGE_KEY = "@memoria/language";
 const STUDY_STATS_KEY = "@memoria/study-stats";
@@ -102,6 +104,106 @@ const THEME_OPTIONS = [
   { key: "light", labelKey: "theme.light", icon: "white-balance-sunny" },
   { key: "dark", labelKey: "theme.dark", icon: "weather-night" },
 ];
+
+const createFolderId = () =>
+  `folder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const normalizeFolderId = (folderId) =>
+  typeof folderId === "string" && folderId.trim() ? folderId : ROOT_FOLDER_ID;
+
+const normalizePairFolder = (pair) => ({
+  ...pair,
+  folderId: normalizeFolderId(pair.folderId),
+});
+
+const createLocalFolder = (name, parentId = ROOT_FOLDER_ID) => {
+  const now = new Date().toISOString();
+
+  return {
+    id: createFolderId(),
+    name: name.trim(),
+    parentId: normalizeFolderId(parentId),
+    createdAt: now,
+    updatedAt: now,
+  };
+};
+
+const normalizeFolders = (value) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seenIds = new Set([ROOT_FOLDER_ID]);
+
+  return value
+    .filter((folder) => folder && typeof folder === "object")
+    .map((folder) => ({
+      id: normalizeFolderId(folder.id),
+      name: String(folder.name ?? "").trim(),
+      parentId: normalizeFolderId(folder.parentId),
+      createdAt: folder.createdAt ?? new Date().toISOString(),
+      updatedAt: folder.updatedAt ?? folder.createdAt ?? new Date().toISOString(),
+    }))
+    .filter((folder) => {
+      if (
+        folder.id === ROOT_FOLDER_ID ||
+        !folder.name ||
+        seenIds.has(folder.id) ||
+        folder.parentId === folder.id
+      ) {
+        return false;
+      }
+
+      seenIds.add(folder.id);
+      return true;
+    });
+};
+
+const getFolderChildren = (folders, parentId) =>
+  folders
+    .filter((folder) => normalizeFolderId(folder.parentId) === normalizeFolderId(parentId))
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+
+const getFolderPath = (folders, folderId) => {
+  const byId = new Map(folders.map((folder) => [folder.id, folder]));
+  const path = [];
+  let cursorId = normalizeFolderId(folderId);
+  const visited = new Set();
+
+  while (cursorId !== ROOT_FOLDER_ID && !visited.has(cursorId)) {
+    visited.add(cursorId);
+    const folder = byId.get(cursorId);
+
+    if (!folder) {
+      break;
+    }
+
+    path.unshift(folder);
+    cursorId = normalizeFolderId(folder.parentId);
+  }
+
+  return path;
+};
+
+const getFolderSubtreeIds = (folders, folderId) => {
+  const result = new Set([normalizeFolderId(folderId)]);
+  const walk = (parentId) => {
+    getFolderChildren(folders, parentId).forEach((folder) => {
+      if (result.has(folder.id)) {
+        return;
+      }
+
+      result.add(folder.id);
+      walk(folder.id);
+    });
+  };
+
+  walk(folderId);
+  return result;
+};
+
+const createFolderScopedSignature = (left, right, folderId) =>
+  `${normalizeFolderId(folderId)}::${createSignature(left, right)}`;
 
 const getDeviceLocaleCandidates = () => {
   const candidates = [];
@@ -505,6 +607,11 @@ export default function App() {
   const [historyCalendarOpen, setHistoryCalendarOpen] = useState(false);
   const [historyCalendarMonth, setHistoryCalendarMonth] = useState(() => getStartOfLocalMonth(new Date()));
   const [pairs, setPairs] = useState([]);
+  const [folders, setFolders] = useState([]);
+  const [saveFolderId, setSaveFolderId] = useState(ROOT_FOLDER_ID);
+  const [quizFolderId, setQuizFolderId] = useState(ROOT_FOLDER_ID);
+  const [manageFolderId, setManageFolderId] = useState(ROOT_FOLDER_ID);
+  const [folderNameDraft, setFolderNameDraft] = useState("");
   const [studyStats, setStudyStats] = useState(createEmptyStudyStats());
   const [draft, setDraft] = useState({ left: "", right: "" });
   const [storageReady, setStorageReady] = useState(false);
@@ -526,6 +633,7 @@ export default function App() {
   const [editingId, setEditingId] = useState(null);
   const [editingLeft, setEditingLeft] = useState("");
   const [editingRight, setEditingRight] = useState("");
+  const [editingFolderId, setEditingFolderId] = useState(ROOT_FOLDER_ID);
   const [deck, setDeck] = useState([]);
   const [quizIndex, setQuizIndex] = useState(0);
   const [quizCountInput, setQuizCountInput] = useState(`${DEFAULT_QUIZ_COUNT}`);
@@ -585,9 +693,27 @@ export default function App() {
   const authCaption = syncing ? t("notes.syncing") : note;
   const isAdmin = userRole === "admin";
   const hasActiveQuizRound = tab === "quiz" && deck.length > 0 && !roundComplete;
-  const hasSavedCards = pairs.length > 0;
+  const quizFolderSubtreeIds = useMemo(() => getFolderSubtreeIds(folders, quizFolderId), [folders, quizFolderId]);
+  const manageFolderSubtreeIds = useMemo(() => getFolderSubtreeIds(folders, manageFolderId), [folders, manageFolderId]);
+  const selectableFolders = useMemo(
+    () => [{ id: ROOT_FOLDER_ID, name: t("folders.root"), parentId: ROOT_FOLDER_ID }, ...folders],
+    [folders, t]
+  );
+  const saveFolderPairs = useMemo(
+    () => pairs.filter((pair) => normalizeFolderId(pair.folderId) === saveFolderId),
+    [pairs, saveFolderId]
+  );
+  const quizFolderPairs = useMemo(
+    () => pairs.filter((pair) => quizFolderSubtreeIds.has(normalizeFolderId(pair.folderId))),
+    [pairs, quizFolderSubtreeIds]
+  );
+  const manageFolderPairs = useMemo(
+    () => pairs.filter((pair) => manageFolderSubtreeIds.has(normalizeFolderId(pair.folderId))),
+    [pairs, manageFolderSubtreeIds]
+  );
+  const hasSavedCards = quizFolderPairs.length > 0;
   const quizModeConfig = getQuizModeConfig(quizMode);
-  const maxQuizCount = pairs.length ? pairs.length * (quizMode === "both" ? 2 : 1) : 0;
+  const maxQuizCount = quizFolderPairs.length ? quizFolderPairs.length * (quizMode === "both" ? 2 : 1) : 0;
   const contentTopPadding = 18 + (Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0);
   const isTabletLayout = screenWidth >= 768;
   const contentMaxWidth = isTabletLayout ? 820 : null;
@@ -787,6 +913,7 @@ export default function App() {
     };
   }, [
     currentTutorialStep?.targetKey,
+    folders.length,
     guidedTutorialActive,
     language,
     manageSortMenuOpen,
@@ -939,7 +1066,7 @@ export default function App() {
     MANAGE_SORT_OPTIONS.find((option) => option.key === manageSort) ?? MANAGE_SORT_OPTIONS[0];
   const sortedManagePairs = useMemo(() => {
     if (manageSort === "alphabetical") {
-      return [...pairs].sort((leftPair, rightPair) => {
+      return [...manageFolderPairs].sort((leftPair, rightPair) => {
         const leftText = `${leftPair.left} ${leftPair.right}`.trim();
         const rightText = `${rightPair.left} ${rightPair.right}`.trim();
 
@@ -948,7 +1075,7 @@ export default function App() {
     }
 
     if (manageSort === "missed") {
-      return [...pairs].sort((leftPair, rightPair) => {
+      return [...manageFolderPairs].sort((leftPair, rightPair) => {
         const leftStats = studyStats.cards[createSignature(leftPair.left, leftPair.right)] ?? {};
         const rightStats = studyStats.cards[createSignature(rightPair.left, rightPair.right)] ?? {};
         const missRateGap = calculateMissRate(rightStats) - calculateMissRate(leftStats);
@@ -973,8 +1100,8 @@ export default function App() {
       });
     }
 
-    return sortPairs(pairs);
-  }, [language, manageSort, pairs, studyStats.cards]);
+    return sortPairs(manageFolderPairs);
+  }, [language, manageFolderPairs, manageSort, studyStats.cards]);
   const visibleManagePairs = useMemo(() => {
     if (!normalizedManageSearch) {
       return sortedManagePairs;
@@ -1115,6 +1242,7 @@ export default function App() {
         const storedStudyStats = await AsyncStorage.getItem(STUDY_STATS_KEY);
         const storedTutorialSeen = await AsyncStorage.getItem(TUTORIAL_SEEN_KEY);
         const storedSupportRequests = await AsyncStorage.getItem(SUPPORT_REQUESTS_KEY);
+        const storedFolders = await AsyncStorage.getItem(FOLDERS_STORAGE_KEY);
 
         if (isSupportedLanguage(storedLanguage)) {
           setLanguage(storedLanguage);
@@ -1137,6 +1265,14 @@ export default function App() {
             setSupportRequests(JSON.parse(storedSupportRequests).map(normalizeSupportRequest));
           } catch {
             setSupportRequests([]);
+          }
+        }
+
+        if (storedFolders && active) {
+          try {
+            setFolders(normalizeFolders(JSON.parse(storedFolders)));
+          } catch {
+            setFolders([]);
           }
         }
 
@@ -1170,7 +1306,7 @@ export default function App() {
         const parsed = JSON.parse(storedValue);
 
         if (Array.isArray(parsed)) {
-          setPairs(sortPairs(parsed));
+          setPairs(sortPairs(parsed.map(normalizePairFolder)));
         }
       } finally {
         if (active) {
@@ -1207,6 +1343,14 @@ export default function App() {
   useEffect(() => {
     void AsyncStorage.setItem(SUPPORT_REQUESTS_KEY, JSON.stringify(supportRequests));
   }, [supportRequests]);
+
+  useEffect(() => {
+    if (!storageReady) {
+      return;
+    }
+
+    void AsyncStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(folders));
+  }, [folders, storageReady]);
 
   useEffect(() => {
     if (!storageReady) {
@@ -1370,7 +1514,25 @@ export default function App() {
           throw remoteResponse.error;
         }
 
-        const remote = (remoteResponse.data ?? []).map(mapPairRecord);
+        const localFolderBySignature = new Map(
+          pairsRef.current.map((pair) => [
+            createSignature(pair.left, pair.right),
+            normalizeFolderId(pair.folderId),
+          ])
+        );
+        const localFolderById = new Map(
+          pairsRef.current.map((pair) => [pair.id, normalizeFolderId(pair.folderId)])
+        );
+        const remote = (remoteResponse.data ?? []).map((record) => {
+          const mapped = mapPairRecord(record);
+          return {
+            ...mapped,
+            folderId:
+              localFolderById.get(mapped.id) ??
+              localFolderBySignature.get(createSignature(mapped.left, mapped.right)) ??
+              normalizeFolderId(mapped.folderId),
+          };
+        });
         const signatures = new Set(remote.map((pair) => createSignature(pair.left, pair.right)));
         const localOnly = pairsRef.current.filter(
           (pair) => !signatures.has(createSignature(pair.left, pair.right))
@@ -1393,10 +1555,13 @@ export default function App() {
             throw uploaded.error;
           }
 
-          inserted = (uploaded.data ?? []).map(mapPairRecord);
+          inserted = (uploaded.data ?? []).map((record, index) => ({
+            ...mapPairRecord(record),
+            folderId: normalizeFolderId(localOnly[index]?.folderId),
+          }));
         }
 
-        const merged = mergePairsBySignature(remote, inserted);
+        const merged = mergePairsBySignature(remote, inserted, pairsRef.current);
 
         if (active) {
           setPairs(merged);
@@ -1548,7 +1713,7 @@ export default function App() {
   }, [pairs.length]);
 
   const savePairs = async (nextPairs) => {
-    const sorted = sortPairs(nextPairs);
+    const sorted = sortPairs(nextPairs.map(normalizePairFolder));
 
     setPairs(sorted);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
@@ -1563,6 +1728,75 @@ export default function App() {
 
   const addSupportRequest = (nextRequest) => {
     setSupportRequests((currentRequests) => mergeSupportRequests([nextRequest], currentRequests));
+  };
+
+  const getFolderLabel = (folderId) => {
+    const path = getFolderPath(folders, folderId);
+
+    if (!path.length) {
+      return t("folders.root");
+    }
+
+    return [t("folders.root"), ...path.map((folder) => folder.name)].join(" / ");
+  };
+
+  const createFolderInCurrentLocation = (parentId) => {
+    const name = folderNameDraft.trim();
+    const normalizedParentId = normalizeFolderId(parentId);
+
+    if (!name) {
+      Alert.alert(t("folders.nameNeededTitle"), t("folders.nameNeededBody"));
+      return;
+    }
+
+    const duplicateExists = folders.some(
+      (folder) =>
+        normalizeFolderId(folder.parentId) === normalizedParentId &&
+        folder.name.localeCompare(name, language, { sensitivity: "base" }) === 0
+    );
+
+    if (duplicateExists) {
+      Alert.alert(t("folders.duplicateTitle"), t("folders.duplicateBody"));
+      return;
+    }
+
+    setFolders((currentFolders) => [
+      ...currentFolders,
+      createLocalFolder(name, normalizedParentId),
+    ]);
+    setFolderNameDraft("");
+  };
+
+  const selectSaveFolder = (folderId) => {
+    const nextFolderId = normalizeFolderId(folderId);
+
+    setSaveFolderId(nextFolderId);
+    setFolderNameDraft("");
+  };
+
+  const selectQuizFolder = (folderId) => {
+    const nextFolderId = normalizeFolderId(folderId);
+
+    setQuizFolderId(nextFolderId);
+    setFolderNameDraft("");
+    setDeck([]);
+    setQuizIndex(0);
+    setAnswer("");
+    setFeedback("");
+    setResult(null);
+    setRoundComplete(false);
+    setRoundIncorrectIds([]);
+  };
+
+  const selectManageFolder = (folderId) => {
+    const nextFolderId = normalizeFolderId(folderId);
+
+    setManageFolderId(nextFolderId);
+    setFolderNameDraft("");
+    setEditingId(null);
+    setEditingLeft("");
+    setEditingRight("");
+    setEditingFolderId(ROOT_FOLDER_ID);
   };
 
   const closeTutorial = (nextTab = null, { showCompletionAlert = false } = {}) => {
@@ -1636,10 +1870,11 @@ export default function App() {
     return true;
   };
 
-  const saveEntryBatch = async (entries) => {
+  const saveEntryBatch = async (entries, options = {}) => {
+    const targetFolderId = normalizeFolderId(options.folderId ?? saveFolderId);
     const existingPairs = pairsRef.current;
     const knownSignatures = new Set(
-      existingPairs.map((pair) => createSignature(pair.left, pair.right))
+      existingPairs.map((pair) => createFolderScopedSignature(pair.left, pair.right, pair.folderId))
     );
     const uniqueEntries = [];
     let skippedDuplicates = 0;
@@ -1652,7 +1887,8 @@ export default function App() {
         return;
       }
 
-      const signature = createSignature(left, right);
+      const folderId = normalizeFolderId(entry.folderId ?? targetFolderId);
+      const signature = createFolderScopedSignature(left, right, folderId);
 
       if (knownSignatures.has(signature)) {
         skippedDuplicates += 1;
@@ -1660,14 +1896,14 @@ export default function App() {
       }
 
       knownSignatures.add(signature);
-      uniqueEntries.push({ left, right });
+      uniqueEntries.push({ left, right, folderId });
     });
 
     if (!uniqueEntries.length) {
       return { savedCount: 0, skippedDuplicates, cloudSaved: false, savedPairs: [] };
     }
 
-    let savedPairs = uniqueEntries.map((entry) => createLocalPair(entry.left, entry.right));
+    let savedPairs = uniqueEntries.map((entry) => createLocalPair(entry.left, entry.right, { folderId: entry.folderId }));
     let cloudSaved = false;
 
     if (session?.user?.id && supabase) {
@@ -1687,7 +1923,10 @@ export default function App() {
         throw inserted.error;
       }
 
-      savedPairs = (inserted.data ?? []).map(mapPairRecord);
+      savedPairs = (inserted.data ?? []).map((record, index) => ({
+        ...mapPairRecord(record),
+        folderId: normalizeFolderId(uniqueEntries[index]?.folderId),
+      }));
       cloudSaved = true;
     } catch {
       setTranslatedNote("notes.cloudLocalOnly");
@@ -1722,6 +1961,8 @@ export default function App() {
 
     Keyboard.dismiss();
     setDraft({ left: "", right: "" });
+    setQuizFolderId(saveFolderId);
+    setManageFolderId(saveFolderId);
 
     if (saveResult.cloudSaved) {
       setTranslatedNote("notes.cardSavedCloud");
@@ -1820,6 +2061,8 @@ export default function App() {
         return;
       }
 
+      setQuizFolderId(saveFolderId);
+      setManageFolderId(saveFolderId);
       setTranslatedNote(
         saveResult.cloudSaved ? "notes.importSavedCloud" : "notes.importSavedLocal",
         { count: saveResult.savedCount }
@@ -1982,6 +2225,8 @@ export default function App() {
     }
 
     if (saveResult.savedCount) {
+      setQuizFolderId(saveFolderId);
+      setManageFolderId(saveFolderId);
       Alert.alert(t("alerts.photoSavedTitle"), messages.join(" "));
     }
   };
@@ -2010,6 +2255,7 @@ export default function App() {
       totalCards: nextDeck.length,
       mode: options.mode ?? quizMode,
       source: options.source ?? "adaptive",
+      folderId: normalizeFolderId(options.folderId ?? quizFolderId),
     };
     handleTabChange("quiz");
   };
@@ -2028,6 +2274,7 @@ export default function App() {
         totalCards: deck.length,
         mode: roundMetaRef.current?.mode ?? quizMode,
         source: roundMetaRef.current?.source ?? "adaptive",
+        folderId: roundMetaRef.current?.folderId ?? quizFolderId,
         correctCount: deck.length - incorrectCards.length,
         incorrectCount: incorrectCards.length,
         incorrectCards: incorrectCards.map((card) => ({
@@ -2244,7 +2491,7 @@ export default function App() {
   };
 
   const startQuiz = (requestedCount) => {
-    if (!pairs.length) {
+    if (!quizFolderPairs.length) {
       Alert.alert(t("quiz.noQuestionsTitle"), t("quiz.noQuestionsBody"));
       return;
     }
@@ -2257,7 +2504,7 @@ export default function App() {
         : null;
     const finalRequestedCount = quizTutorialStarting ? 1 : resolveRequestedQuizCount(requestedCount);
     const nextDeck = buildPracticeDeck(
-      tutorialPair ? [tutorialPair] : pairs,
+      tutorialPair ? [tutorialPair] : quizFolderPairs,
       finalRequestedCount,
       quizTutorialStarting ? "front" : quizMode,
       studyStatsRef.current
@@ -2267,6 +2514,7 @@ export default function App() {
       requestedCount: finalRequestedCount,
       mode: quizTutorialStarting ? "front" : quizMode,
       source: "adaptive",
+      folderId: quizTutorialStarting ? normalizeFolderId(tutorialPair?.folderId) : quizFolderId,
     });
 
     if (quizTutorialStarting) {
@@ -2419,10 +2667,12 @@ export default function App() {
       return;
     }
 
-    const nextSignature = createSignature(editingLeft.trim(), editingRight.trim());
+    const nextFolderId = normalizeFolderId(editingFolderId);
+    const nextSignature = createFolderScopedSignature(editingLeft.trim(), editingRight.trim(), nextFolderId);
     const duplicateExists = pairs.some(
       (pair) =>
-        pair.id !== target.id && createSignature(pair.left, pair.right) === nextSignature
+        pair.id !== target.id &&
+        createFolderScopedSignature(pair.left, pair.right, pair.folderId) === nextSignature
     );
 
     if (duplicateExists) {
@@ -2430,7 +2680,10 @@ export default function App() {
       return;
     }
 
-    let updated = updatePairValues(target, editingLeft, editingRight);
+    let updated = {
+      ...updatePairValues(target, editingLeft, editingRight),
+      folderId: nextFolderId,
+    };
 
     if (session?.user?.id && supabase && target.source === "cloud") {
       const response = await supabase
@@ -2446,7 +2699,10 @@ export default function App() {
         return;
       }
 
-      updated = mapPairRecord(response.data);
+      updated = {
+        ...mapPairRecord(response.data),
+        folderId: nextFolderId,
+      };
     }
 
     await savePairs(pairs.map((pair) => (pair.id === target.id ? updated : pair)));
@@ -2454,6 +2710,7 @@ export default function App() {
     setEditingId(null);
     setEditingLeft("");
     setEditingRight("");
+    setEditingFolderId(ROOT_FOLDER_ID);
   };
 
   const removePair = async (pair) => {
@@ -2544,6 +2801,137 @@ export default function App() {
     }
   };
 
+  const renderFolderExplorer = ({
+    currentFolderId,
+    onSelectFolder,
+    allowCreate = false,
+    includeChildren = false,
+    pairCount = 0,
+  }) => {
+    const normalizedCurrentFolderId = normalizeFolderId(currentFolderId);
+    const currentFolder = folders.find((folder) => folder.id === normalizedCurrentFolderId);
+    const parentFolderId = currentFolder?.parentId ?? ROOT_FOLDER_ID;
+    const path = getFolderPath(folders, normalizedCurrentFolderId);
+    const children = getFolderChildren(folders, normalizedCurrentFolderId);
+
+    return (
+      <View style={styles.folderPanel}>
+        <View style={styles.folderHeaderRow}>
+          <View style={styles.folderHeaderCopy}>
+            <View style={styles.folderTitleRow}>
+              <MaterialCommunityIcons name="folder-open-outline" size={19} color={theme.accent} />
+              <Text style={styles.folderPanelTitle}>{t("folders.title")}</Text>
+            </View>
+            <Text style={styles.folderPanelBody}>
+              {t(includeChildren ? "folders.currentSummaryNested" : "folders.currentSummary", {
+                path: getFolderLabel(normalizedCurrentFolderId),
+                count: pairCount,
+              })}
+            </Text>
+          </View>
+          {normalizedCurrentFolderId !== ROOT_FOLDER_ID ? (
+            <Pressable
+              onPress={() => onSelectFolder(parentFolderId)}
+              style={({ pressed }) => [styles.folderUpButton, pressed && styles.pressed]}
+            >
+              <MaterialCommunityIcons name="arrow-up-left" size={18} color={theme.accent} />
+              <Text style={styles.folderUpButtonText}>{t("folders.up")}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderBreadcrumbRow}>
+          <Pressable
+            onPress={() => onSelectFolder(ROOT_FOLDER_ID)}
+            style={({ pressed }) => [
+              styles.folderBreadcrumb,
+              normalizedCurrentFolderId === ROOT_FOLDER_ID && styles.folderBreadcrumbActive,
+              pressed && styles.pressed,
+            ]}
+          >
+            <MaterialCommunityIcons name="home-outline" size={14} color={normalizedCurrentFolderId === ROOT_FOLDER_ID ? theme.accent : theme.textSecondary} />
+            <Text style={[styles.folderBreadcrumbText, normalizedCurrentFolderId === ROOT_FOLDER_ID && styles.folderBreadcrumbTextActive]}>
+              {t("folders.root")}
+            </Text>
+          </Pressable>
+          {path.map((folder, index) => {
+            const active = folder.id === normalizedCurrentFolderId;
+
+            return (
+              <React.Fragment key={folder.id}>
+                <MaterialCommunityIcons name="chevron-right" size={15} color={theme.textPlaceholder} />
+                <Pressable
+                  onPress={() => onSelectFolder(folder.id)}
+                  style={({ pressed }) => [
+                    styles.folderBreadcrumb,
+                    active && styles.folderBreadcrumbActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={[styles.folderBreadcrumbText, active && styles.folderBreadcrumbTextActive]}>
+                    {folder.name}
+                  </Text>
+                </Pressable>
+              </React.Fragment>
+            );
+          })}
+        </ScrollView>
+
+        <View style={styles.folderChildList}>
+          {children.length ? (
+            children.map((folder) => {
+              const childCount = getFolderChildren(folders, folder.id).length;
+              const directPairCount = pairs.filter((pair) => normalizeFolderId(pair.folderId) === folder.id).length;
+
+              return (
+                <Pressable
+                  key={folder.id}
+                  onPress={() => onSelectFolder(folder.id)}
+                  style={({ pressed }) => [styles.folderChildItem, pressed && styles.pressed]}
+                >
+                  <View style={styles.folderChildIcon}>
+                    <MaterialCommunityIcons name="folder-outline" size={20} color={theme.accent} />
+                  </View>
+                  <View style={styles.folderChildCopy}>
+                    <Text style={styles.folderChildName} numberOfLines={1}>
+                      {folder.name}
+                    </Text>
+                    <Text style={styles.folderChildMeta}>
+                      {t("folders.folderMeta", { count: directPairCount, childCount })}
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={18} color={theme.textPlaceholder} />
+                </Pressable>
+              );
+            })
+          ) : (
+            <Text style={styles.folderEmptyText}>{t("folders.emptyChildren")}</Text>
+          )}
+        </View>
+
+        {allowCreate ? (
+          <View style={styles.folderCreateRow}>
+            <TextInput
+              value={folderNameDraft}
+              onChangeText={setFolderNameDraft}
+              placeholder={t("folders.newPlaceholder")}
+              placeholderTextColor={theme.textPlaceholder}
+              style={[styles.input, styles.folderCreateInput]}
+              returnKeyType="done"
+              onSubmitEditing={() => createFolderInCurrentLocation(normalizedCurrentFolderId)}
+            />
+            <Pressable
+              onPress={() => createFolderInCurrentLocation(normalizedCurrentFolderId)}
+              style={({ pressed }) => [styles.folderCreateButton, pressed && styles.pressed]}
+            >
+              <MaterialCommunityIcons name="folder-plus-outline" size={20} color={theme.accentText} />
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+
   const renderSaveTab = () => (
     <View style={[styles.scene, styles.saveScene]}>
       <View style={styles.saveModeRow}>
@@ -2583,6 +2971,13 @@ export default function App() {
           );
         })}
       </View>
+
+      {renderFolderExplorer({
+        currentFolderId: saveFolderId,
+        onSelectFolder: selectSaveFolder,
+        allowCreate: true,
+        pairCount: saveFolderPairs.length,
+      })}
 
       {saveInputMode === "single" ? (
         <View style={styles.composerPanel} {...tutorialTargetProps("save-composer")}>
@@ -2835,6 +3230,15 @@ export default function App() {
 
   const renderQuizTab = () => (
     <View style={styles.scene}>
+      {!roundComplete && !current ? (
+        renderFolderExplorer({
+          currentFolderId: quizFolderId,
+          onSelectFolder: selectQuizFolder,
+          includeChildren: true,
+          pairCount: quizFolderPairs.length,
+        })
+      ) : null}
+
       {roundComplete && deck.length ? (
         <View style={styles.quizSummaryCard}>
           <View style={styles.quizSummaryHeader}>
@@ -2953,34 +3357,34 @@ export default function App() {
 
             <View style={styles.quizReadyStats}>
               <View style={styles.quizReadyStat}>
-                <Text style={styles.quizReadyStatValue}>{pairs.length}</Text>
+                <Text style={styles.quizReadyStatValue}>{quizFolderPairs.length}</Text>
                 <Text style={styles.quizReadyStatLabel}>{t("quiz.storedCards")}</Text>
               </View>
               <View
                 style={[
                   styles.quizReadyStat,
-                  pairs.length > 0 && styles.quizReadyStatEditable,
+                  quizFolderPairs.length > 0 && styles.quizReadyStatEditable,
                 ]}
               >
                 <TextInput
-                  value={pairs.length ? quizCountInput : ""}
+                  value={quizFolderPairs.length ? quizCountInput : ""}
                   onBlur={normalizeQuizCountInput}
                   onChangeText={(value) => setQuizCountInput(value.replace(/[^0-9]/g, ""))}
-                  editable={pairs.length > 0}
+                  editable={quizFolderPairs.length > 0}
                   keyboardType="number-pad"
                   maxLength={3}
                   placeholder="-"
                   placeholderTextColor={theme.textPlaceholder}
                   style={[
                     styles.quizReadyStatInput,
-                    pairs.length > 0 && styles.quizReadyStatInputEditable,
-                    !pairs.length && styles.quizCountInputDisabled,
+                    quizFolderPairs.length > 0 && styles.quizReadyStatInputEditable,
+                    !quizFolderPairs.length && styles.quizCountInputDisabled,
                   ]}
                 />
                 <Text
                   style={[
                     styles.quizReadyStatLabel,
-                    pairs.length > 0 && styles.quizReadyStatLabelEditable,
+                    quizFolderPairs.length > 0 && styles.quizReadyStatLabelEditable,
                   ]}
                 >
                   {t("quiz.requestedCount")}
@@ -3034,8 +3438,8 @@ export default function App() {
             styles={styles}
             theme={theme}
             icon="cards-heart-outline"
-            title={t("quiz.emptyTitle")}
-            body={t("quiz.emptyBody")}
+            title={pairs.length ? t("folders.quizEmptyTitle") : t("quiz.emptyTitle")}
+            body={pairs.length ? t("folders.quizEmptyBody") : t("quiz.emptyBody")}
             actionLabel={t("quiz.emptyAction")}
             onPress={() => handleTabChange("save")}
           />
@@ -3278,7 +3682,15 @@ export default function App() {
 
   const renderManageTab = () => (
     <View style={styles.scene}>
-      {pairs.length ? (
+      {renderFolderExplorer({
+        currentFolderId: manageFolderId,
+        onSelectFolder: selectManageFolder,
+        allowCreate: true,
+        includeChildren: true,
+        pairCount: manageFolderPairs.length,
+      })}
+
+      {manageFolderPairs.length ? (
         <>
           <View style={[styles.settingsCard, styles.manageSearchCard]} {...tutorialTargetProps("manage-search-panel")}>
             <View style={styles.settingsHeader}>
@@ -3382,6 +3794,29 @@ export default function App() {
                         textAlignVertical="top"
                       />
 
+                      <Text style={styles.inputLabel}>{t("folders.cardLocation")}</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderPickerRow}>
+                        {selectableFolders.map((folder) => {
+                          const active = normalizeFolderId(editingFolderId) === folder.id;
+
+                          return (
+                            <Pressable
+                              key={folder.id}
+                              onPress={() => setEditingFolderId(folder.id)}
+                              style={({ pressed }) => [
+                                styles.folderPickerChip,
+                                active && styles.folderPickerChipActive,
+                                pressed && styles.pressed,
+                              ]}
+                            >
+                              <Text style={[styles.folderPickerText, active && styles.folderPickerTextActive]}>
+                                {folder.id === ROOT_FOLDER_ID ? folder.name : getFolderLabel(folder.id)}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+
                       <View style={styles.manageActionRow}>
                         <Pressable onPress={() => void saveEdit()} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
                           <Text style={styles.primaryButtonText}>{t("manage.saveEdit")}</Text>
@@ -3391,6 +3826,7 @@ export default function App() {
                             setEditingId(null);
                             setEditingLeft("");
                             setEditingRight("");
+                            setEditingFolderId(ROOT_FOLDER_ID);
                           }}
                           style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
                         >
@@ -3400,6 +3836,10 @@ export default function App() {
                     </>
                   ) : (
                     <>
+                      <View style={styles.manageFolderBadge}>
+                        <MaterialCommunityIcons name="folder-outline" size={14} color={theme.accent} />
+                        <Text style={styles.manageFolderBadgeText}>{getFolderLabel(pair.folderId)}</Text>
+                      </View>
                       <View style={styles.manageDisplayStack}>
                         <View style={styles.manageDisplayRow}>
                           <View style={styles.manageTextBlock}>
@@ -3412,6 +3852,7 @@ export default function App() {
                               setEditingId(pair.id);
                               setEditingLeft(pair.left);
                               setEditingRight(pair.right);
+                              setEditingFolderId(normalizeFolderId(pair.folderId));
                             }}
                             style={({ pressed }) => [
                               styles.secondaryButton,
@@ -3476,8 +3917,8 @@ export default function App() {
           styles={styles}
           theme={theme}
           icon="playlist-remove"
-          title={t("manage.emptyTitle")}
-          body={t("manage.emptyBody")}
+          title={pairs.length ? t("folders.manageEmptyTitle") : t("manage.emptyTitle")}
+          body={pairs.length ? t("folders.manageEmptyBody") : t("manage.emptyBody")}
           actionLabel={t("manage.emptyAction")}
           onPress={() => handleTabChange("save")}
         />
@@ -4755,6 +5196,167 @@ const createStyles = (theme) => StyleSheet.create({
   saveModeChipTextActive: {
     color: theme.accent,
   },
+  folderPanel: {
+    gap: 12,
+    padding: 14,
+    borderRadius: 24,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  folderHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  folderHeaderCopy: {
+    flex: 1,
+    gap: 5,
+  },
+  folderTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  folderPanelTitle: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  folderPanelBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: theme.textSecondary,
+  },
+  folderUpButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    minHeight: 34,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: theme.accentSoft,
+    borderWidth: 1,
+    borderColor: theme.accent,
+  },
+  folderUpButtonText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.accent,
+  },
+  folderBreadcrumbRow: {
+    alignItems: "center",
+    gap: 6,
+    paddingRight: 10,
+  },
+  folderBreadcrumb: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    minHeight: 30,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  folderBreadcrumbActive: {
+    backgroundColor: theme.accentSoft,
+    borderColor: theme.accent,
+  },
+  folderBreadcrumbText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.textSecondary,
+  },
+  folderBreadcrumbTextActive: {
+    color: theme.accent,
+  },
+  folderChildList: {
+    gap: 8,
+  },
+  folderChildItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 11,
+    borderRadius: 18,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  folderChildIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accentSoft,
+  },
+  folderChildCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  folderChildName: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  folderChildMeta: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: theme.textSecondary,
+  },
+  folderEmptyText: {
+    paddingVertical: 3,
+    fontSize: 12,
+    lineHeight: 18,
+    color: theme.textSecondary,
+  },
+  folderCreateRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  folderCreateInput: {
+    flex: 1,
+    minHeight: 46,
+    paddingVertical: 11,
+  },
+  folderCreateButton: {
+    width: 48,
+    minHeight: 46,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accent,
+  },
+  folderPickerRow: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  folderPickerChip: {
+    minHeight: 36,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  folderPickerChipActive: {
+    backgroundColor: theme.accentSoft,
+    borderColor: theme.accent,
+  },
+  folderPickerText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.textSecondary,
+  },
+  folderPickerTextActive: {
+    color: theme.accent,
+  },
   heroStrip: {
     paddingTop: 8,
     gap: 4,
@@ -5522,12 +6124,28 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textPrimary,
   },
   manageCard: {
-    gap: 6,
+    gap: 8,
     padding: 10,
     borderRadius: 18,
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
+  },
+  manageFolderBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: theme.accentSoft,
+  },
+  manageFolderBadgeText: {
+    maxWidth: 220,
+    fontSize: 11,
+    fontWeight: "800",
+    color: theme.accent,
   },
   manageDisplayStack: {
     gap: 4,
