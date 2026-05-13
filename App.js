@@ -760,10 +760,6 @@ export default function App() {
     () => [{ id: ROOT_FOLDER_ID, name: t("folders.root"), parentId: ROOT_FOLDER_ID }, ...folders],
     [folders, t]
   );
-  const saveFolderPairs = useMemo(
-    () => pairs.filter((pair) => normalizeFolderId(pair.folderId) === saveFolderId),
-    [pairs, saveFolderId]
-  );
   const quizFolderPairs = useMemo(
     () => pairs.filter((pair) => quizFolderSubtreeIds.has(normalizeFolderId(pair.folderId))),
     [pairs, quizFolderSubtreeIds]
@@ -3353,8 +3349,6 @@ export default function App() {
     currentFolderId,
     onSelectFolder,
     allowCreate = false,
-    includeChildren = false,
-    pairCount = 0,
     scope = "folders",
   }) => {
     const normalizedCurrentFolderId = normalizeFolderId(currentFolderId);
@@ -3438,12 +3432,6 @@ export default function App() {
               <MaterialCommunityIcons name="folder-open-outline" size={19} color={theme.accent} />
               <Text style={styles.folderPanelTitle}>{t("folders.title")}</Text>
             </View>
-            <Text style={styles.folderPanelBody}>
-              {t(includeChildren ? "folders.currentSummaryNested" : "folders.currentSummary", {
-                path: getFolderLabel(normalizedCurrentFolderId),
-                count: pairCount,
-              })}
-            </Text>
           </View>
           {folderActions.length ? (
             <View style={styles.folderActionWrap}>
@@ -3539,28 +3527,20 @@ export default function App() {
         <View style={styles.folderChildrenSection}>
           {children.length ? (
             <View style={styles.folderChildList}>
-              {children.map((folder) => {
-                const childCount = getFolderChildren(folders, folder.id).length;
-                const childDirectPairCount = pairs.filter((pair) => normalizeFolderId(pair.folderId) === folder.id).length;
-
-                return (
-                  <Pressable
-                    key={folder.id}
-                    onPress={() => onSelectFolder(folder.id)}
-                    style={({ pressed }) => [styles.folderChildItem, pressed && styles.pressed]}
-                  >
-                    <View style={styles.folderChildIcon}>
-                      <MaterialCommunityIcons name="folder" size={39} color={theme.accent} />
-                    </View>
-                    <Text style={styles.folderChildName} numberOfLines={2} ellipsizeMode="tail">
-                      {folder.name}
-                    </Text>
-                    <Text style={styles.folderChildMeta} numberOfLines={1}>
-                      {t("folders.folderMeta", { count: childDirectPairCount, childCount })}
-                    </Text>
-                  </Pressable>
-                );
-              })}
+              {children.map((folder) => (
+                <Pressable
+                  key={folder.id}
+                  onPress={() => onSelectFolder(folder.id)}
+                  style={({ pressed }) => [styles.folderChildItem, pressed && styles.pressed]}
+                >
+                  <View style={styles.folderChildIcon}>
+                    <MaterialCommunityIcons name="folder" size={39} color={theme.accent} />
+                  </View>
+                  <Text style={styles.folderChildName} numberOfLines={2} ellipsizeMode="tail">
+                    {folder.name}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
           ) : (
             <Text style={styles.folderEmptyText}>{t("folders.emptyChildren")}</Text>
@@ -3974,6 +3954,7 @@ export default function App() {
   const renderSaveFloatingAdd = () => {
     const shouldShow =
       tab === "save" &&
+      !launchVisible &&
       !saveComposerVisible &&
       (!guidedTutorialActive || tutorialStep === "save-single-chip");
 
@@ -4019,7 +4000,6 @@ export default function App() {
         currentFolderId: saveFolderId,
         onSelectFolder: selectSaveFolder,
         allowCreate: true,
-        pairCount: saveFolderPairs.length,
         scope: "save",
       })}
       {renderSaveComposerModal()}
@@ -4032,8 +4012,6 @@ export default function App() {
         renderFolderExplorer({
           currentFolderId: quizFolderId,
           onSelectFolder: selectQuizFolder,
-          includeChildren: true,
-          pairCount: quizFolderPairs.length,
           scope: "quiz",
         })
       ) : null}
@@ -4578,21 +4556,26 @@ export default function App() {
           contentContainerStyle={styles.manageSwipeTrack}
         >
           <View style={[styles.manageCard, styles.manageSwipeCard, { width: manageSwipeCardWidth }]}>
-            <View style={styles.manageDisplayStack}>
-              <View style={styles.manageDisplayRow}>
+            <View style={styles.managePairInlineRow}>
+              <View style={styles.managePairColumn}>
                 <View style={styles.manageTextBlock}>
                   <Text style={styles.managePairText} numberOfLines={1} ellipsizeMode="tail">
                     {pair.left}
                   </Text>
                 </View>
               </View>
-              <View style={styles.manageRowDivider} />
-              <View style={styles.manageDisplayRow}>
+              <View style={styles.managePairSeparator}>
+                <MaterialCommunityIcons name="swap-horizontal" size={15} color={theme.textSecondary} />
+              </View>
+              <View style={styles.managePairColumn}>
                 <View style={styles.manageTextBlock}>
                   <Text style={styles.managePairText} numberOfLines={1} ellipsizeMode="tail">
                     {pair.right}
                   </Text>
                 </View>
+              </View>
+              <View style={styles.manageSwipeHint}>
+                <MaterialCommunityIcons name="chevron-left" size={18} color={theme.accent} />
               </View>
             </View>
           </View>
@@ -4623,8 +4606,6 @@ export default function App() {
         currentFolderId: manageFolderId,
         onSelectFolder: selectManageFolder,
         allowCreate: true,
-        includeChildren: true,
-        pairCount: manageFolderPairs.length,
         scope: "manage",
       })}
 
@@ -6139,11 +6120,6 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "800",
     color: theme.textPrimary,
   },
-  folderPanelBody: {
-    fontSize: 12,
-    lineHeight: 18,
-    color: theme.textSecondary,
-  },
   folderUpButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -6199,7 +6175,7 @@ const createStyles = (theme) => StyleSheet.create({
   folderChildItem: {
     width: "30.9%",
     minWidth: 92,
-    minHeight: 124,
+    minHeight: 106,
     alignItems: "center",
     justifyContent: "flex-start",
     gap: 7,
@@ -6228,13 +6204,6 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "800",
     textAlign: "center",
     color: theme.textPrimary,
-  },
-  folderChildMeta: {
-    width: "100%",
-    fontSize: 10,
-    lineHeight: 14,
-    textAlign: "center",
-    color: theme.textSecondary,
   },
   folderEmptyText: {
     paddingVertical: 3,
@@ -7177,7 +7146,7 @@ const createStyles = (theme) => StyleSheet.create({
   },
   manageSwipeAction: {
     width: 76,
-    minHeight: 116,
+    minHeight: 66,
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
@@ -7275,19 +7244,24 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "800",
     color: theme.accent,
   },
-  manageDisplayStack: {
-    gap: 4,
-  },
-  manageDisplayRow: {
+  managePairInlineRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    minHeight: 44,
+    gap: 8,
+    minHeight: 46,
+  },
+  managePairColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
+  managePairSeparator: {
+    width: 20,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
   },
   manageTextBlock: {
-    flexGrow: 1,
-    flexShrink: 1,
-    maxWidth: "100%",
+    width: "100%",
     minWidth: 0,
     paddingHorizontal: 12,
     paddingVertical: 0,
@@ -7298,17 +7272,21 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
+  manageSwipeHint: {
+    width: 28,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
+    backgroundColor: theme.accentSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
   managePairText: {
     fontSize: 15,
     lineHeight: 20,
     fontWeight: "700",
     color: theme.textPrimary,
-  },
-  manageRowDivider: {
-    height: 1,
-    marginLeft: 12,
-    marginRight: 12,
-    backgroundColor: theme.surfaceBorderSoft,
   },
   manageSideButton: {
     flex: 0,
