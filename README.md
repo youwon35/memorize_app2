@@ -83,6 +83,17 @@ Rebuild the dev build only when native config changes, for example:
 6. Add `memoria://auth/callback` to the Supabase redirect allow list.
 7. Add the same redirect URI to your Google / Supabase auth setup before testing a dev build or APK.
 
+## Folder sync migration
+
+If your Supabase project already has the older `memory_pairs` table, run this migration once in the Supabase SQL editor:
+
+```sql
+-- Copy and run the full contents of:
+-- supabase/migrations/20260514_add_memory_folders.sql
+```
+
+This creates `public.memory_folders`, adds `memory_pairs.folder_id`, and applies row-level security so each signed-in user can only see and edit their own folders. New Supabase projects can run the full [supabase/schema.sql](./supabase/schema.sql) instead.
+
 ## Admin role setup on Supabase
 
 The app keeps normal user cards private. The admin role opens an inquiry-management panel plus basic usage metrics for signed-in cloud users, including return rate and recent inquiry volume.

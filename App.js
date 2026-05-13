@@ -123,9 +123,43 @@ const createLocalFolder = (name, parentId = ROOT_FOLDER_ID) => {
     id: createFolderId(),
     name: name.trim(),
     parentId: normalizeFolderId(parentId),
+    source: "local",
     createdAt: now,
     updatedAt: now,
   };
+};
+
+const mapFolderRecord = (record) => ({
+  id: normalizeFolderId(record.id),
+  name: String(record.name ?? "").trim(),
+  parentId: normalizeFolderId(record.parent_id),
+  source: "cloud",
+  userId: record.user_id ?? null,
+  createdAt: record.created_at,
+  updatedAt: record.updated_at,
+});
+
+const mergeFoldersById = (...collections) => {
+  const merged = new Map();
+
+  collections.flat().forEach((folder) => {
+    if (!folder?.id || folder.id === ROOT_FOLDER_ID) {
+      return;
+    }
+
+    const normalizedFolder = {
+      ...folder,
+      id: normalizeFolderId(folder.id),
+      parentId: normalizeFolderId(folder.parentId),
+    };
+    const current = merged.get(normalizedFolder.id);
+
+    if (!current || normalizedFolder.source === "cloud") {
+      merged.set(normalizedFolder.id, normalizedFolder);
+    }
+  });
+
+  return normalizeFolders(Array.from(merged.values()));
 };
 
 const normalizeFolders = (value) => {
@@ -141,6 +175,8 @@ const normalizeFolders = (value) => {
       id: normalizeFolderId(folder.id),
       name: String(folder.name ?? "").trim(),
       parentId: normalizeFolderId(folder.parentId),
+      source: folder.source ?? "local",
+      userId: folder.userId ?? null,
       createdAt: folder.createdAt ?? new Date().toISOString(),
       updatedAt: folder.updatedAt ?? folder.createdAt ?? new Date().toISOString(),
     }))
@@ -204,6 +240,18 @@ const getFolderSubtreeIds = (folders, folderId) => {
 
 const createFolderScopedSignature = (left, right, folderId) =>
   `${normalizeFolderId(folderId)}::${createSignature(left, right)}`;
+
+const isCloudFolderSchemaError = (error) => {
+  const code = String(error?.code ?? "");
+  const message = String(error?.message ?? "").toLowerCase();
+
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    message.includes("memory_folders") ||
+    message.includes("folder_id")
+  );
+};
 
 const getDeviceLocaleCandidates = () => {
   const candidates = [];
@@ -612,6 +660,9 @@ export default function App() {
   const [quizFolderId, setQuizFolderId] = useState(ROOT_FOLDER_ID);
   const [manageFolderId, setManageFolderId] = useState(ROOT_FOLDER_ID);
   const [folderNameDraft, setFolderNameDraft] = useState("");
+  const [renamingFolderId, setRenamingFolderId] = useState(null);
+  const [folderRenameDraft, setFolderRenameDraft] = useState("");
+  const [selectedManagePairIds, setSelectedManagePairIds] = useState([]);
   const [studyStats, setStudyStats] = useState(createEmptyStudyStats());
   const [draft, setDraft] = useState({ left: "", right: "" });
   const [storageReady, setStorageReady] = useState(false);
@@ -670,6 +721,8 @@ export default function App() {
   const tutorialTargetRefs = useRef({});
   const tutorialSavedPairIdRef = useRef(null);
   const pairsRef = useRef(pairs);
+  const foldersRef = useRef(folders);
+  const cloudFoldersReadyRef = useRef(false);
   const studyStatsRef = useRef(studyStats);
   const appOpenTrackedUserRef = useRef(null);
   const roundMetaRef = useRef(null);
@@ -710,6 +763,10 @@ export default function App() {
   const manageFolderPairs = useMemo(
     () => pairs.filter((pair) => manageFolderSubtreeIds.has(normalizeFolderId(pair.folderId))),
     [pairs, manageFolderSubtreeIds]
+  );
+  const selectedManagePairSet = useMemo(
+    () => new Set(selectedManagePairIds),
+    [selectedManagePairIds]
   );
   const hasSavedCards = quizFolderPairs.length > 0;
   const quizModeConfig = getQuizModeConfig(quizMode);
@@ -1213,8 +1270,25 @@ export default function App() {
   }, [pairs]);
 
   useEffect(() => {
+    foldersRef.current = folders;
+  }, [folders]);
+
+  useEffect(() => {
     studyStatsRef.current = studyStats;
   }, [studyStats]);
+
+  useEffect(() => {
+    setSelectedManagePairIds((currentIds) => {
+      if (!currentIds.length) {
+        return currentIds;
+      }
+
+      const visibleIds = new Set(manageFolderPairs.map((pair) => pair.id));
+      const nextIds = currentIds.filter((id) => visibleIds.has(id));
+
+      return nextIds.length === currentIds.length ? currentIds : nextIds;
+    });
+  }, [manageFolderPairs]);
 
   useEffect(() => {
     if (!maxQuizCount) {
@@ -1505,6 +1579,63 @@ export default function App() {
       setSyncing(true);
 
       try {
+        let cloudFoldersReady = false;
+        let syncedFolders = foldersRef.current;
+
+        try {
+          const folderResponse = await supabase
+            .from("memory_folders")
+            .select("*")
+            .order("updated_at", { ascending: false });
+
+          if (folderResponse.error) {
+            throw folderResponse.error;
+          }
+
+          cloudFoldersReady = true;
+          cloudFoldersReadyRef.current = true;
+
+          const remoteFolders = (folderResponse.data ?? []).map(mapFolderRecord);
+          const remoteFolderIds = new Set(remoteFolders.map((folder) => folder.id));
+          const localOnlyFolders = foldersRef.current.filter(
+            (folder) => !remoteFolderIds.has(folder.id)
+          );
+          let insertedFolders = [];
+
+          if (localOnlyFolders.length > 0) {
+            const uploadedFolders = await supabase
+              .from("memory_folders")
+              .insert(
+                localOnlyFolders.map((folder) => ({
+                  id: folder.id,
+                  user_id: session.user.id,
+                  parent_id: normalizeFolderId(folder.parentId),
+                  name: folder.name,
+                }))
+              )
+              .select();
+
+            if (uploadedFolders.error) {
+              throw uploadedFolders.error;
+            }
+
+            insertedFolders = (uploadedFolders.data ?? []).map(mapFolderRecord);
+          }
+
+          syncedFolders = mergeFoldersById(remoteFolders, insertedFolders, foldersRef.current);
+
+          if (active) {
+            setFolders(syncedFolders);
+            await AsyncStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(syncedFolders));
+          }
+        } catch (error) {
+          cloudFoldersReadyRef.current = false;
+
+          if (!isCloudFolderSchemaError(error)) {
+            throw error;
+          }
+        }
+
         const remoteResponse = await supabase
           .from("memory_pairs")
           .select("*")
@@ -1529,13 +1660,19 @@ export default function App() {
             ...mapped,
             folderId:
               localFolderById.get(mapped.id) ??
-              localFolderBySignature.get(createSignature(mapped.left, mapped.right)) ??
+              (cloudFoldersReady
+                ? normalizeFolderId(mapped.folderId)
+                : localFolderBySignature.get(createSignature(mapped.left, mapped.right))) ??
               normalizeFolderId(mapped.folderId),
           };
         });
-        const signatures = new Set(remote.map((pair) => createSignature(pair.left, pair.right)));
+        const createSyncSignature = (pair) =>
+          cloudFoldersReady
+            ? createFolderScopedSignature(pair.left, pair.right, pair.folderId)
+            : createSignature(pair.left, pair.right);
+        const signatures = new Set(remote.map(createSyncSignature));
         const localOnly = pairsRef.current.filter(
-          (pair) => !signatures.has(createSignature(pair.left, pair.right))
+          (pair) => !signatures.has(createSyncSignature(pair))
         );
         let inserted = [];
 
@@ -1543,11 +1680,19 @@ export default function App() {
           const uploaded = await supabase
             .from("memory_pairs")
             .insert(
-              localOnly.map((pair) => ({
-                user_id: session.user.id,
-                prompt_a: pair.left,
-                prompt_b: pair.right,
-              }))
+              localOnly.map((pair) => {
+                const row = {
+                  user_id: session.user.id,
+                  prompt_a: pair.left,
+                  prompt_b: pair.right,
+                };
+
+                if (cloudFoldersReady) {
+                  row.folder_id = normalizeFolderId(pair.folderId);
+                }
+
+                return row;
+              })
             )
             .select();
 
@@ -1564,7 +1709,9 @@ export default function App() {
         const merged = mergePairsBySignature(remote, inserted, pairsRef.current);
 
         if (active) {
+          setFolders(syncedFolders);
           setPairs(merged);
+          await AsyncStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(syncedFolders));
           await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
           setTranslatedNote("notes.synced");
         }
@@ -1719,6 +1866,14 @@ export default function App() {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
   };
 
+  const saveFolders = async (nextFolders) => {
+    const normalized = normalizeFolders(nextFolders);
+
+    foldersRef.current = normalized;
+    setFolders(normalized);
+    await AsyncStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(normalized));
+  };
+
   const updateStudyStats = (nextStudyStats) => {
     const syncedStudyStats = createPersistableStudyStats(nextStudyStats, pairsRef.current);
     studyStatsRef.current = syncedStudyStats;
@@ -1740,7 +1895,7 @@ export default function App() {
     return [t("folders.root"), ...path.map((folder) => folder.name)].join(" / ");
   };
 
-  const createFolderInCurrentLocation = (parentId) => {
+  const createFolderInCurrentLocation = async (parentId) => {
     const name = folderNameDraft.trim();
     const normalizedParentId = normalizeFolderId(parentId);
 
@@ -1760,10 +1915,38 @@ export default function App() {
       return;
     }
 
-    setFolders((currentFolders) => [
-      ...currentFolders,
-      createLocalFolder(name, normalizedParentId),
-    ]);
+    let nextFolder = createLocalFolder(name, normalizedParentId);
+
+    if (session?.user?.id && supabase && cloudFoldersReadyRef.current) {
+      try {
+        const response = await supabase
+          .from("memory_folders")
+          .insert({
+            id: nextFolder.id,
+            user_id: session.user.id,
+            parent_id: normalizedParentId,
+            name,
+          })
+          .select()
+          .single();
+
+        if (response.error) {
+          throw response.error;
+        }
+
+        nextFolder = mapFolderRecord(response.data);
+      } catch (error) {
+        if (!isCloudFolderSchemaError(error)) {
+          Alert.alert(t("folders.createFailTitle"), error?.message || t("common.retryLater"));
+          return;
+        }
+
+        cloudFoldersReadyRef.current = false;
+        setTranslatedNote("notes.cloudLocalOnly");
+      }
+    }
+
+    await saveFolders([...foldersRef.current, nextFolder]);
     setFolderNameDraft("");
   };
 
@@ -1793,10 +1976,284 @@ export default function App() {
 
     setManageFolderId(nextFolderId);
     setFolderNameDraft("");
+    setRenamingFolderId(null);
+    setFolderRenameDraft("");
+    setSelectedManagePairIds([]);
     setEditingId(null);
     setEditingLeft("");
     setEditingRight("");
     setEditingFolderId(ROOT_FOLDER_ID);
+  };
+
+  const beginFolderRename = (folder) => {
+    setRenamingFolderId(folder.id);
+    setFolderRenameDraft(folder.name);
+  };
+
+  const cancelFolderRename = () => {
+    setRenamingFolderId(null);
+    setFolderRenameDraft("");
+  };
+
+  const saveFolderRename = async (folderId) => {
+    const targetFolder = foldersRef.current.find((folder) => folder.id === folderId);
+    const name = folderRenameDraft.trim();
+
+    if (!targetFolder || targetFolder.id === ROOT_FOLDER_ID) {
+      return;
+    }
+
+    if (!name) {
+      Alert.alert(t("folders.nameNeededTitle"), t("folders.nameNeededBody"));
+      return;
+    }
+
+    const duplicateExists = foldersRef.current.some(
+      (folder) =>
+        folder.id !== targetFolder.id &&
+        normalizeFolderId(folder.parentId) === normalizeFolderId(targetFolder.parentId) &&
+        folder.name.localeCompare(name, language, { sensitivity: "base" }) === 0
+    );
+
+    if (duplicateExists) {
+      Alert.alert(t("folders.duplicateTitle"), t("folders.duplicateBody"));
+      return;
+    }
+
+    let renamedFolder = {
+      ...targetFolder,
+      name,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (session?.user?.id && supabase && cloudFoldersReadyRef.current) {
+      try {
+        const response = await supabase
+          .from("memory_folders")
+          .update({ name })
+          .eq("id", targetFolder.id)
+          .eq("user_id", session.user.id)
+          .select()
+          .single();
+
+        if (response.error) {
+          throw response.error;
+        }
+
+        renamedFolder = mapFolderRecord(response.data);
+      } catch (error) {
+        if (!isCloudFolderSchemaError(error)) {
+          Alert.alert(t("folders.renameFailTitle"), error?.message || t("common.retryLater"));
+          return;
+        }
+
+        cloudFoldersReadyRef.current = false;
+        setTranslatedNote("notes.cloudLocalOnly");
+      }
+    }
+
+    await saveFolders(
+      foldersRef.current.map((folder) => (folder.id === targetFolder.id ? renamedFolder : folder))
+    );
+    cancelFolderRename();
+  };
+
+  const deleteFolder = async (folderId) => {
+    const targetFolder = foldersRef.current.find((folder) => folder.id === folderId);
+
+    if (!targetFolder || targetFolder.id === ROOT_FOLDER_ID) {
+      return;
+    }
+
+    const subtreeIds = getFolderSubtreeIds(foldersRef.current, targetFolder.id);
+    const idsToDelete = [...subtreeIds].filter((id) => id !== ROOT_FOLDER_ID);
+    const parentFolderId = normalizeFolderId(targetFolder.parentId);
+    const movedCardCount = pairsRef.current.filter((pair) =>
+      subtreeIds.has(normalizeFolderId(pair.folderId))
+    ).length;
+
+    const commitDelete = async () => {
+      const now = new Date().toISOString();
+      const nextPairs = pairsRef.current.map((pair) =>
+        subtreeIds.has(normalizeFolderId(pair.folderId))
+          ? { ...pair, folderId: parentFolderId, updatedAt: now }
+          : pair
+      );
+      const nextFolders = foldersRef.current.filter((folder) => !subtreeIds.has(folder.id));
+
+      if (session?.user?.id && supabase && cloudFoldersReadyRef.current) {
+        try {
+          const movedCloudPairIds = pairsRef.current
+            .filter((pair) => pair.source === "cloud" && subtreeIds.has(normalizeFolderId(pair.folderId)))
+            .map((pair) => pair.id);
+
+          if (movedCloudPairIds.length) {
+            const movedResponse = await supabase
+              .from("memory_pairs")
+              .update({ folder_id: parentFolderId })
+              .in("id", movedCloudPairIds)
+              .eq("user_id", session.user.id);
+
+            if (movedResponse.error) {
+              throw movedResponse.error;
+            }
+          }
+
+          const deleteResponse = await supabase
+            .from("memory_folders")
+            .delete()
+            .in("id", idsToDelete)
+            .eq("user_id", session.user.id);
+
+          if (deleteResponse.error) {
+            throw deleteResponse.error;
+          }
+        } catch (error) {
+          if (!isCloudFolderSchemaError(error)) {
+            Alert.alert(t("folders.deleteFailTitle"), error?.message || t("common.retryLater"));
+            return;
+          }
+
+          cloudFoldersReadyRef.current = false;
+          setTranslatedNote("notes.cloudLocalOnly");
+        }
+      }
+
+      await savePairs(nextPairs);
+      await saveFolders(nextFolders);
+      setSaveFolderId((currentFolderId) =>
+        subtreeIds.has(normalizeFolderId(currentFolderId)) ? parentFolderId : currentFolderId
+      );
+      setQuizFolderId((currentFolderId) =>
+        subtreeIds.has(normalizeFolderId(currentFolderId)) ? parentFolderId : currentFolderId
+      );
+      setManageFolderId((currentFolderId) =>
+        subtreeIds.has(normalizeFolderId(currentFolderId)) ? parentFolderId : currentFolderId
+      );
+      setSelectedManagePairIds([]);
+      cancelFolderRename();
+    };
+
+    Alert.alert(
+      t("folders.deleteTitle"),
+      t("folders.deleteBody", { count: movedCardCount }),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("folders.deleteConfirm"),
+          style: "destructive",
+          onPress: () => {
+            void commitDelete();
+          },
+        },
+      ]
+    );
+  };
+
+  const toggleManagePairSelection = (pairId) => {
+    setSelectedManagePairIds((currentIds) =>
+      currentIds.includes(pairId)
+        ? currentIds.filter((id) => id !== pairId)
+        : [...currentIds, pairId]
+    );
+  };
+
+  const selectAllVisibleManagePairs = () => {
+    setSelectedManagePairIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      visibleManagePairs.forEach((pair) => nextIds.add(pair.id));
+      return [...nextIds];
+    });
+  };
+
+  const moveSelectedPairsToFolder = async (targetFolderId) => {
+    const normalizedTargetFolderId = normalizeFolderId(targetFolderId);
+
+    if (!selectedManagePairIds.length) {
+      Alert.alert(t("folders.bulkMoveNoneTitle"), t("folders.bulkMoveNoneBody"));
+      return;
+    }
+
+    const selectedIds = new Set(selectedManagePairIds);
+    const targetSignatures = new Set(
+      pairsRef.current
+        .filter(
+          (pair) =>
+            !selectedIds.has(pair.id) &&
+            normalizeFolderId(pair.folderId) === normalizedTargetFolderId
+        )
+        .map((pair) => createSignature(pair.left, pair.right))
+    );
+    const now = new Date().toISOString();
+    const movedIds = [];
+    let skippedCount = 0;
+
+    const nextPairs = pairsRef.current.map((pair) => {
+      if (!selectedIds.has(pair.id)) {
+        return pair;
+      }
+
+      if (normalizeFolderId(pair.folderId) === normalizedTargetFolderId) {
+        skippedCount += 1;
+        return pair;
+      }
+
+      const signature = createSignature(pair.left, pair.right);
+
+      if (targetSignatures.has(signature)) {
+        skippedCount += 1;
+        return pair;
+      }
+
+      targetSignatures.add(signature);
+      movedIds.push(pair.id);
+      return {
+        ...pair,
+        folderId: normalizedTargetFolderId,
+        updatedAt: now,
+      };
+    });
+
+    if (!movedIds.length) {
+      Alert.alert(t("folders.bulkMoveNoneTitle"), t("folders.bulkMoveSkippedBody"));
+      return;
+    }
+
+    if (session?.user?.id && supabase && cloudFoldersReadyRef.current) {
+      try {
+        const movedCloudPairIds = pairsRef.current
+          .filter((pair) => pair.source === "cloud" && movedIds.includes(pair.id))
+          .map((pair) => pair.id);
+
+        if (movedCloudPairIds.length) {
+          const response = await supabase
+            .from("memory_pairs")
+            .update({ folder_id: normalizedTargetFolderId })
+            .in("id", movedCloudPairIds)
+            .eq("user_id", session.user.id);
+
+          if (response.error) {
+            throw response.error;
+          }
+        }
+      } catch (error) {
+        if (!isCloudFolderSchemaError(error)) {
+          Alert.alert(t("folders.bulkMoveFailTitle"), error?.message || t("common.retryLater"));
+          return;
+        }
+
+        cloudFoldersReadyRef.current = false;
+        setTranslatedNote("notes.cloudLocalOnly");
+      }
+    }
+
+    await savePairs(nextPairs);
+    setSelectedManagePairIds([]);
+    setManageFolderId(normalizedTargetFolderId);
+    Alert.alert(
+      t("folders.bulkMoveDoneTitle"),
+      t("folders.bulkMoveDoneBody", { count: movedIds.length, skipped: skippedCount })
+    );
   };
 
   const closeTutorial = (nextTab = null, { showCompletionAlert = false } = {}) => {
@@ -1908,15 +2365,22 @@ export default function App() {
 
     if (session?.user?.id && supabase) {
       try {
+        const rows = uniqueEntries.map((entry) => {
+          const row = {
+            user_id: session.user.id,
+            prompt_a: entry.left,
+            prompt_b: entry.right,
+          };
+
+          if (cloudFoldersReadyRef.current) {
+            row.folder_id = normalizeFolderId(entry.folderId);
+          }
+
+          return row;
+        });
         const inserted = await supabase
           .from("memory_pairs")
-          .insert(
-            uniqueEntries.map((entry) => ({
-              user_id: session.user.id,
-              prompt_a: entry.left,
-              prompt_b: entry.right,
-            }))
-          )
+          .insert(rows)
           .select();
 
       if (inserted.error) {
@@ -2686,23 +3150,37 @@ export default function App() {
     };
 
     if (session?.user?.id && supabase && target.source === "cloud") {
+      const changes = {
+        prompt_a: editingLeft.trim(),
+        prompt_b: editingRight.trim(),
+      };
+
+      if (cloudFoldersReadyRef.current) {
+        changes.folder_id = nextFolderId;
+      }
+
       const response = await supabase
         .from("memory_pairs")
-        .update({ prompt_a: editingLeft.trim(), prompt_b: editingRight.trim() })
+        .update(changes)
         .eq("id", target.id)
         .eq("user_id", session.user.id)
         .select()
         .single();
 
       if (response.error) {
-        Alert.alert(t("manage.editFail"), response.error.message);
-        return;
-      }
+        if (!isCloudFolderSchemaError(response.error)) {
+          Alert.alert(t("manage.editFail"), response.error.message);
+          return;
+        }
 
-      updated = {
-        ...mapPairRecord(response.data),
-        folderId: nextFolderId,
-      };
+        cloudFoldersReadyRef.current = false;
+        setTranslatedNote("notes.cloudLocalOnly");
+      } else {
+        updated = {
+          ...mapPairRecord(response.data),
+          folderId: nextFolderId,
+        };
+      }
     }
 
     await savePairs(pairs.map((pair) => (pair.id === target.id ? updated : pair)));
@@ -2813,6 +3291,8 @@ export default function App() {
     const parentFolderId = currentFolder?.parentId ?? ROOT_FOLDER_ID;
     const path = getFolderPath(folders, normalizedCurrentFolderId);
     const children = getFolderChildren(folders, normalizedCurrentFolderId);
+    const canManageCurrentFolder = allowCreate && currentFolder;
+    const renamingCurrentFolder = renamingFolderId === normalizedCurrentFolderId;
 
     return (
       <View style={styles.folderPanel}>
@@ -2877,6 +3357,55 @@ export default function App() {
           })}
         </ScrollView>
 
+        {canManageCurrentFolder ? (
+          <View style={styles.folderManageBox}>
+            {renamingCurrentFolder ? (
+              <>
+                <TextInput
+                  value={folderRenameDraft}
+                  onChangeText={setFolderRenameDraft}
+                  placeholder={t("folders.renamePlaceholder")}
+                  placeholderTextColor={theme.textPlaceholder}
+                  style={[styles.input, styles.folderRenameInput]}
+                  returnKeyType="done"
+                  onSubmitEditing={() => void saveFolderRename(normalizedCurrentFolderId)}
+                />
+                <View style={styles.folderManageActionRow}>
+                  <Pressable
+                    onPress={() => void saveFolderRename(normalizedCurrentFolderId)}
+                    style={({ pressed }) => [styles.folderSmallPrimaryButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.folderSmallPrimaryText}>{t("folders.renameSave")}</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={cancelFolderRename}
+                    style={({ pressed }) => [styles.folderSmallSecondaryButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.folderSmallSecondaryText}>{t("common.cancel")}</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              <View style={styles.folderManageActionRow}>
+                <Pressable
+                  onPress={() => beginFolderRename(currentFolder)}
+                  style={({ pressed }) => [styles.folderSmallSecondaryButton, pressed && styles.pressed]}
+                >
+                  <MaterialCommunityIcons name="pencil-outline" size={15} color={theme.textPrimary} />
+                  <Text style={styles.folderSmallSecondaryText}>{t("folders.rename")}</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => void deleteFolder(normalizedCurrentFolderId)}
+                  style={({ pressed }) => [styles.folderSmallDangerButton, pressed && styles.pressed]}
+                >
+                  <MaterialCommunityIcons name="trash-can-outline" size={15} color={theme.danger} />
+                  <Text style={styles.folderSmallDangerText}>{t("folders.delete")}</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        ) : null}
+
         <View style={styles.folderChildList}>
           {children.length ? (
             children.map((folder) => {
@@ -2918,10 +3447,10 @@ export default function App() {
               placeholderTextColor={theme.textPlaceholder}
               style={[styles.input, styles.folderCreateInput]}
               returnKeyType="done"
-              onSubmitEditing={() => createFolderInCurrentLocation(normalizedCurrentFolderId)}
+              onSubmitEditing={() => void createFolderInCurrentLocation(normalizedCurrentFolderId)}
             />
             <Pressable
-              onPress={() => createFolderInCurrentLocation(normalizedCurrentFolderId)}
+              onPress={() => void createFolderInCurrentLocation(normalizedCurrentFolderId)}
               style={({ pressed }) => [styles.folderCreateButton, pressed && styles.pressed]}
             >
               <MaterialCommunityIcons name="folder-plus-outline" size={20} color={theme.accentText} />
@@ -3762,6 +4291,63 @@ export default function App() {
             </View>
           </View>
 
+          <View style={styles.bulkMovePanel}>
+            <View style={styles.bulkMoveHeader}>
+              <View style={styles.bulkMoveHeaderCopy}>
+                <Text style={styles.bulkMoveTitle}>{t("folders.bulkMoveTitle")}</Text>
+                <Text style={styles.bulkMoveBody}>
+                  {selectedManagePairIds.length
+                    ? t("folders.bulkMoveSelected", { count: selectedManagePairIds.length })
+                    : t("folders.bulkMoveHint")}
+                </Text>
+              </View>
+              <View style={styles.bulkMoveHeaderActions}>
+                <Pressable
+                  disabled={!visibleManagePairs.length}
+                  onPress={selectAllVisibleManagePairs}
+                  style={({ pressed }) => [
+                    styles.folderSmallSecondaryButton,
+                    !visibleManagePairs.length && styles.secondaryButtonDisabled,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.folderSmallSecondaryText,
+                      !visibleManagePairs.length && styles.secondaryButtonTextDisabled,
+                    ]}
+                  >
+                    {t("folders.selectAll")}
+                  </Text>
+                </Pressable>
+                {selectedManagePairIds.length ? (
+                  <Pressable
+                    onPress={() => setSelectedManagePairIds([])}
+                    style={({ pressed }) => [styles.folderSmallSecondaryButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.folderSmallSecondaryText}>{t("folders.clearSelection")}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+
+            {selectedManagePairIds.length ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderPickerRow}>
+                {selectableFolders.map((folder) => (
+                  <Pressable
+                    key={`bulk-${folder.id}`}
+                    onPress={() => void moveSelectedPairsToFolder(folder.id)}
+                    style={({ pressed }) => [styles.folderPickerChip, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.folderPickerText}>
+                      {folder.id === ROOT_FOLDER_ID ? folder.name : getFolderLabel(folder.id)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ) : null}
+          </View>
+
           {visibleManagePairs.length ? (
             <View style={styles.libraryPanel} {...tutorialTargetProps("manage-list-panel")}>
               {visibleManagePairs.map((pair, index) => (
@@ -3836,9 +4422,33 @@ export default function App() {
                     </>
                   ) : (
                     <>
-                      <View style={styles.manageFolderBadge}>
-                        <MaterialCommunityIcons name="folder-outline" size={14} color={theme.accent} />
-                        <Text style={styles.manageFolderBadgeText}>{getFolderLabel(pair.folderId)}</Text>
+                      <View style={styles.manageCardMetaRow}>
+                        <Pressable
+                          onPress={() => toggleManagePairSelection(pair.id)}
+                          style={({ pressed }) => [
+                            styles.manageSelectButton,
+                            selectedManagePairSet.has(pair.id) && styles.manageSelectButtonActive,
+                            pressed && styles.pressed,
+                          ]}
+                        >
+                          <MaterialCommunityIcons
+                            name={selectedManagePairSet.has(pair.id) ? "checkbox-marked-circle" : "checkbox-blank-circle-outline"}
+                            size={18}
+                            color={selectedManagePairSet.has(pair.id) ? theme.accentText : theme.textSecondary}
+                          />
+                          <Text
+                            style={[
+                              styles.manageSelectText,
+                              selectedManagePairSet.has(pair.id) && styles.manageSelectTextActive,
+                            ]}
+                          >
+                            {t("folders.selectCard")}
+                          </Text>
+                        </Pressable>
+                        <View style={styles.manageFolderBadge}>
+                          <MaterialCommunityIcons name="folder-outline" size={14} color={theme.accent} />
+                          <Text style={styles.manageFolderBadgeText}>{getFolderLabel(pair.folderId)}</Text>
+                        </View>
                       </View>
                       <View style={styles.manageDisplayStack}>
                         <View style={styles.manageDisplayRow}>
@@ -5332,6 +5942,72 @@ const createStyles = (theme) => StyleSheet.create({
     justifyContent: "center",
     backgroundColor: theme.accent,
   },
+  folderManageBox: {
+    gap: 8,
+    padding: 10,
+    borderRadius: 18,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  folderRenameInput: {
+    minHeight: 44,
+    paddingVertical: 10,
+  },
+  folderManageActionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  folderSmallPrimaryButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    minHeight: 36,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: theme.accent,
+  },
+  folderSmallPrimaryText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.accentText,
+  },
+  folderSmallSecondaryButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    minHeight: 36,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  folderSmallSecondaryText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  folderSmallDangerButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    minHeight: 36,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: theme.dangerBgSoft,
+    borderWidth: 1,
+    borderColor: theme.dangerBgSoft,
+  },
+  folderSmallDangerText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.danger,
+  },
   folderPickerRow: {
     gap: 8,
     paddingRight: 8,
@@ -6130,6 +6806,70 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
+  },
+  bulkMovePanel: {
+    gap: 12,
+    padding: 14,
+    borderRadius: 22,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  bulkMoveHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  bulkMoveHeaderCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  bulkMoveHeaderActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: 8,
+  },
+  bulkMoveTitle: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  bulkMoveBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: theme.textSecondary,
+  },
+  manageCardMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  manageSelectButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    minHeight: 30,
+    paddingHorizontal: 9,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  manageSelectButtonActive: {
+    backgroundColor: theme.accent,
+    borderColor: theme.accent,
+  },
+  manageSelectText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: theme.textSecondary,
+  },
+  manageSelectTextActive: {
+    color: theme.accentText,
   },
   manageFolderBadge: {
     flexDirection: "row",
