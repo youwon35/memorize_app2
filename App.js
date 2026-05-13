@@ -721,6 +721,7 @@ export default function App() {
   const [adminUpdatingId, setAdminUpdatingId] = useState(null);
   const [adminNotice, setAdminNotice] = useState("");
   const [launchVisible, setLaunchVisible] = useState(true);
+  const [openManageSwipeId, setOpenManageSwipeId] = useState(null);
 
   const timerRef = useRef(null);
   const appRootRef = useRef(null);
@@ -732,6 +733,7 @@ export default function App() {
   const foldersRef = useRef(folders);
   const cloudFoldersReadyRef = useRef(false);
   const studyStatsRef = useRef(studyStats);
+  const manageSwipeRefs = useRef({});
   const appOpenTrackedUserRef = useRef(null);
   const roundMetaRef = useRef(null);
   const roundSnapshotRef = useRef(null);
@@ -3534,7 +3536,7 @@ export default function App() {
                   style={({ pressed }) => [styles.folderChildItem, pressed && styles.pressed]}
                 >
                   <View style={styles.folderChildIcon}>
-                    <MaterialCommunityIcons name="folder" size={39} color={theme.accent} />
+                    <MaterialCommunityIcons name="folder" size={35} color={theme.accent} />
                   </View>
                   <Text style={styles.folderChildName} numberOfLines={2} ellipsizeMode="tail">
                     {folder.name}
@@ -3550,7 +3552,7 @@ export default function App() {
             style={({ pressed }) => [styles.folderSavedCardsItem, pressed && styles.pressed]}
           >
             <View style={styles.folderSavedCardsIcon}>
-              <MaterialCommunityIcons name="file-document-outline" size={34} color={theme.textSecondary} />
+              <MaterialCommunityIcons name="file-document-outline" size={32} color={theme.textSecondary} />
             </View>
             <Text style={styles.folderSavedCardsName} numberOfLines={2}>
               {t("folders.savedCards")}
@@ -4456,9 +4458,37 @@ export default function App() {
     );
   };
 
+  const closeManageSwipe = (pairId) => {
+    manageSwipeRefs.current[pairId]?.scrollTo({ x: 0, animated: true });
+    setOpenManageSwipeId((currentId) => (currentId === pairId ? null : currentId));
+  };
+
+  const toggleManageSwipe = (pairId) => {
+    const shouldOpen = openManageSwipeId !== pairId;
+
+    if (openManageSwipeId && openManageSwipeId !== pairId) {
+      manageSwipeRefs.current[openManageSwipeId]?.scrollTo({ x: 0, animated: true });
+    }
+
+    manageSwipeRefs.current[pairId]?.scrollTo({ x: shouldOpen ? 152 : 0, animated: true });
+    setOpenManageSwipeId(shouldOpen ? pairId : null);
+  };
+
+  const syncManageSwipeState = (pairId, event) => {
+    const offsetX = event.nativeEvent.contentOffset.x;
+    setOpenManageSwipeId((currentId) => {
+      if (offsetX > 64) {
+        return pairId;
+      }
+
+      return currentId === pairId ? null : currentId;
+    });
+  };
+
   const renderManagePairCard = (pair, index) => {
     const targetProps = index === 0 ? tutorialTargetProps("manage-first-card") : {};
     const beginEdit = () => {
+      closeManageSwipe(pair.id);
       setEditingId(pair.id);
       setEditingLeft(pair.left);
       setEditingRight(pair.right);
@@ -4471,6 +4501,7 @@ export default function App() {
           text: t("common.delete"),
           style: "destructive",
           onPress: () => {
+            closeManageSwipe(pair.id);
             void removePair(pair);
           },
         },
@@ -4547,15 +4578,25 @@ export default function App() {
     return (
       <View key={pair.id} style={styles.manageSwipeShell} {...targetProps}>
         <ScrollView
+          ref={(node) => {
+            if (node) {
+              manageSwipeRefs.current[pair.id] = node;
+              return;
+            }
+
+            delete manageSwipeRefs.current[pair.id];
+          }}
           horizontal
           bounces={false}
           showsHorizontalScrollIndicator={false}
           snapToOffsets={[0, 152]}
           decelerationRate="fast"
           overScrollMode="never"
+          onMomentumScrollEnd={(event) => syncManageSwipeState(pair.id, event)}
+          onScrollEndDrag={(event) => syncManageSwipeState(pair.id, event)}
           contentContainerStyle={styles.manageSwipeTrack}
         >
-          <View style={[styles.manageCard, styles.manageSwipeCard, { width: manageSwipeCardWidth }]}>
+          <View style={[styles.manageCard, styles.manageSwipeCard, styles.manageListCard, { width: manageSwipeCardWidth }]}>
             <View style={styles.managePairInlineRow}>
               <View style={styles.managePairColumn}>
                 <View style={styles.manageTextBlock}>
@@ -4574,9 +4615,13 @@ export default function App() {
                   </Text>
                 </View>
               </View>
-              <View style={styles.manageSwipeHint}>
-                <MaterialCommunityIcons name="chevron-left" size={18} color={theme.accent} />
-              </View>
+              <Pressable
+                accessibilityLabel={t("manage.openActions")}
+                onPress={() => toggleManageSwipe(pair.id)}
+                style={({ pressed }) => [styles.manageSwipeHint, pressed && styles.pressed]}
+              >
+                <MaterialCommunityIcons name="format-list-bulleted" size={20} color={theme.textSecondary} />
+              </Pressable>
             </View>
           </View>
           <View style={styles.manageSwipeActions}>
@@ -4610,7 +4655,12 @@ export default function App() {
       })}
 
       {manageFolderPairs.length ? (
-        <View style={styles.libraryPanel} {...tutorialTargetProps("manage-list-panel")}>
+        <View style={[styles.libraryPanel, styles.manageListPanel]} {...tutorialTargetProps("manage-list-panel")}>
+          <View style={styles.manageListHeader}>
+            <Text style={styles.panelTitle}>{t("manage.listTitle")}</Text>
+            <Text style={styles.panelBody}>{t("manage.listBody")}</Text>
+          </View>
+          <View style={styles.manageListDivider} />
           {sortedManagePairs.map(renderManagePairCard)}
         </View>
       ) : (
@@ -6173,22 +6223,23 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 10,
   },
   folderChildItem: {
-    width: "30.9%",
-    minWidth: 92,
-    minHeight: 106,
+    width: "30.2%",
+    minWidth: 88,
+    minHeight: 96,
     alignItems: "center",
     justifyContent: "flex-start",
-    gap: 7,
+    gap: 4,
     paddingHorizontal: 8,
-    paddingVertical: 12,
+    paddingTop: 18,
+    paddingBottom: 10,
     borderRadius: 16,
     backgroundColor: theme.surfaceSoft,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
   folderChildIcon: {
-    width: 54,
-    height: 46,
+    width: 48,
+    height: 38,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -6198,7 +6249,7 @@ const createStyles = (theme) => StyleSheet.create({
   },
   folderChildName: {
     width: "100%",
-    minHeight: 34,
+    minHeight: 28,
     fontSize: 13,
     lineHeight: 17,
     fontWeight: "800",
@@ -6214,12 +6265,13 @@ const createStyles = (theme) => StyleSheet.create({
   folderSavedCardsItem: {
     width: "30.9%",
     minWidth: 92,
-    minHeight: 118,
+    minHeight: 108,
     alignItems: "center",
     justifyContent: "flex-start",
-    gap: 7,
+    gap: 4,
     paddingHorizontal: 8,
-    paddingVertical: 12,
+    paddingTop: 16,
+    paddingBottom: 10,
     borderRadius: 16,
     backgroundColor: theme.surface,
     borderWidth: 1,
@@ -6227,13 +6279,13 @@ const createStyles = (theme) => StyleSheet.create({
   },
   folderSavedCardsIcon: {
     width: 48,
-    height: 46,
+    height: 40,
     alignItems: "center",
     justifyContent: "center",
   },
   folderSavedCardsName: {
     width: "100%",
-    minHeight: 34,
+    minHeight: 22,
     fontSize: 13,
     lineHeight: 17,
     fontWeight: "800",
@@ -6242,8 +6294,9 @@ const createStyles = (theme) => StyleSheet.create({
   },
   folderSavedCardsMeta: {
     width: "100%",
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "700",
     textAlign: "center",
     color: theme.textSecondary,
   },
@@ -6733,6 +6786,21 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
+  manageListPanel: {
+    gap: 0,
+    paddingHorizontal: 14,
+    paddingTop: 16,
+    paddingBottom: 14,
+  },
+  manageListHeader: {
+    gap: 4,
+    paddingHorizontal: 4,
+    paddingBottom: 12,
+  },
+  manageListDivider: {
+    height: 1,
+    backgroundColor: theme.surfaceBorderSoft,
+  },
   panelHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -7131,7 +7199,9 @@ const createStyles = (theme) => StyleSheet.create({
   },
   manageSwipeShell: {
     overflow: "hidden",
-    borderRadius: 18,
+    borderRadius: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.surfaceBorderSoft,
   },
   manageSwipeTrack: {
     alignItems: "stretch",
@@ -7139,6 +7209,13 @@ const createStyles = (theme) => StyleSheet.create({
   manageSwipeCard: {
     borderTopRightRadius: 0,
     borderBottomRightRadius: 0,
+  },
+  manageListCard: {
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    borderRadius: 0,
+    borderWidth: 0,
+    backgroundColor: theme.surfaceStrong,
   },
   manageSwipeActions: {
     width: 152,
@@ -7273,14 +7350,11 @@ const createStyles = (theme) => StyleSheet.create({
     borderColor: theme.surfaceBorderSoft,
   },
   manageSwipeHint: {
-    width: 28,
+    width: 34,
     height: 44,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 14,
-    backgroundColor: theme.accentSoft,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
+    borderRadius: 10,
   },
   managePairText: {
     fontSize: 15,
