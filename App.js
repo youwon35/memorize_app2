@@ -241,6 +241,9 @@ const getFolderSubtreeIds = (folders, folderId) => {
 const createFolderScopedSignature = (left, right, folderId) =>
   `${normalizeFolderId(folderId)}::${createSignature(left, right)}`;
 
+const createFolderViewKey = (scope, folderId) =>
+  `${scope}:${normalizeFolderId(folderId)}`;
+
 const isCloudFolderSchemaError = (error) => {
   const code = String(error?.code ?? "");
   const message = String(error?.message ?? "").toLowerCase();
@@ -663,6 +666,8 @@ export default function App() {
   const [renamingFolderId, setRenamingFolderId] = useState(null);
   const [folderRenameDraft, setFolderRenameDraft] = useState("");
   const [selectedManagePairIds, setSelectedManagePairIds] = useState([]);
+  const [folderActionMenuKey, setFolderActionMenuKey] = useState(null);
+  const [creatingFolderKey, setCreatingFolderKey] = useState(null);
   const [studyStats, setStudyStats] = useState(createEmptyStudyStats());
   const [draft, setDraft] = useState({ left: "", right: "" });
   const [storageReady, setStorageReady] = useState(false);
@@ -1948,6 +1953,8 @@ export default function App() {
 
     await saveFolders([...foldersRef.current, nextFolder]);
     setFolderNameDraft("");
+    setCreatingFolderKey(null);
+    setFolderActionMenuKey(null);
   };
 
   const selectSaveFolder = (folderId) => {
@@ -1955,6 +1962,8 @@ export default function App() {
 
     setSaveFolderId(nextFolderId);
     setFolderNameDraft("");
+    setCreatingFolderKey(null);
+    setFolderActionMenuKey(null);
   };
 
   const selectQuizFolder = (folderId) => {
@@ -1962,6 +1971,8 @@ export default function App() {
 
     setQuizFolderId(nextFolderId);
     setFolderNameDraft("");
+    setCreatingFolderKey(null);
+    setFolderActionMenuKey(null);
     setDeck([]);
     setQuizIndex(0);
     setAnswer("");
@@ -1976,6 +1987,8 @@ export default function App() {
 
     setManageFolderId(nextFolderId);
     setFolderNameDraft("");
+    setCreatingFolderKey(null);
+    setFolderActionMenuKey(null);
     setRenamingFolderId(null);
     setFolderRenameDraft("");
     setSelectedManagePairIds([]);
@@ -1986,6 +1999,8 @@ export default function App() {
   };
 
   const beginFolderRename = (folder) => {
+    setCreatingFolderKey(null);
+    setFolderActionMenuKey(null);
     setRenamingFolderId(folder.id);
     setFolderRenameDraft(folder.name);
   };
@@ -2055,6 +2070,7 @@ export default function App() {
     await saveFolders(
       foldersRef.current.map((folder) => (folder.id === targetFolder.id ? renamedFolder : folder))
     );
+    setFolderActionMenuKey(null);
     cancelFolderRename();
   };
 
@@ -3004,6 +3020,16 @@ export default function App() {
     });
   };
 
+  const returnToQuizReady = () => {
+    setDeck([]);
+    setQuizIndex(0);
+    setAnswer("");
+    setFeedback("");
+    setResult(null);
+    setRoundComplete(false);
+    setRoundIncorrectIds([]);
+  };
+
   const retryIncorrectCardsFromSession = (sessionItem) => {
     const retryDeck = shuffleItems(
       (sessionItem?.incorrectCards ?? [])
@@ -3285,6 +3311,7 @@ export default function App() {
     allowCreate = false,
     includeChildren = false,
     pairCount = 0,
+    scope = "folders",
   }) => {
     const normalizedCurrentFolderId = normalizeFolderId(currentFolderId);
     const currentFolder = folders.find((folder) => folder.id === normalizedCurrentFolderId);
@@ -3293,6 +3320,68 @@ export default function App() {
     const children = getFolderChildren(folders, normalizedCurrentFolderId);
     const canManageCurrentFolder = allowCreate && currentFolder;
     const renamingCurrentFolder = renamingFolderId === normalizedCurrentFolderId;
+    const folderViewKey = createFolderViewKey(scope, normalizedCurrentFolderId);
+    const creatingCurrentFolder = creatingFolderKey === folderViewKey;
+    const actionMenuOpen = folderActionMenuKey === folderViewKey;
+    const folderActions = [
+      allowCreate
+        ? {
+            key: "create",
+            icon: "folder-plus-outline",
+            label: t("folders.newFolder"),
+            onPress: () => {
+              cancelFolderRename();
+              setFolderNameDraft("");
+              setCreatingFolderKey(folderViewKey);
+              setFolderActionMenuKey(null);
+            },
+          }
+        : null,
+      normalizedCurrentFolderId !== ROOT_FOLDER_ID
+        ? {
+            key: "up",
+            icon: "arrow-up-left",
+            label: t("folders.up"),
+            onPress: () => onSelectFolder(parentFolderId),
+          }
+        : null,
+      canManageCurrentFolder
+        ? {
+            key: "rename",
+            icon: "pencil-outline",
+            label: t("folders.rename"),
+            onPress: () => beginFolderRename(currentFolder),
+          }
+        : null,
+      canManageCurrentFolder
+        ? {
+            key: "delete",
+            icon: "trash-can-outline",
+            label: t("folders.delete"),
+            danger: true,
+            onPress: () => {
+              setFolderActionMenuKey(null);
+              void deleteFolder(normalizedCurrentFolderId);
+            },
+          }
+        : null,
+    ].filter(Boolean);
+    const renderFolderAction = (action) => (
+      <Pressable
+        key={action.key}
+        onPress={action.onPress}
+        style={({ pressed }) => [styles.folderActionMenuItem, pressed && styles.pressed]}
+      >
+        <MaterialCommunityIcons
+          name={action.icon}
+          size={17}
+          color={action.danger ? theme.danger : theme.textPrimary}
+        />
+        <Text style={[styles.folderActionMenuText, action.danger && styles.folderActionMenuTextDanger]}>
+          {action.label}
+        </Text>
+      </Pressable>
+    );
 
     return (
       <View style={styles.folderPanel}>
@@ -3309,14 +3398,29 @@ export default function App() {
               })}
             </Text>
           </View>
-          {normalizedCurrentFolderId !== ROOT_FOLDER_ID ? (
-            <Pressable
-              onPress={() => onSelectFolder(parentFolderId)}
-              style={({ pressed }) => [styles.folderUpButton, pressed && styles.pressed]}
-            >
-              <MaterialCommunityIcons name="arrow-up-left" size={18} color={theme.accent} />
-              <Text style={styles.folderUpButtonText}>{t("folders.up")}</Text>
-            </Pressable>
+          {folderActions.length ? (
+            <View style={styles.folderActionWrap}>
+              <Pressable
+                accessibilityLabel={t("folders.actions")}
+                onPress={() =>
+                  setFolderActionMenuKey((currentKey) =>
+                    currentKey === folderViewKey ? null : folderViewKey
+                  )
+                }
+                style={({ pressed }) => [
+                  styles.folderActionButton,
+                  actionMenuOpen && styles.folderActionButtonActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <MaterialCommunityIcons name="dots-horizontal" size={22} color={theme.textPrimary} />
+              </Pressable>
+              {actionMenuOpen ? (
+                <View style={styles.folderActionMenu}>
+                  {folderActions.map(renderFolderAction)}
+                </View>
+              ) : null}
+            </View>
           ) : null}
         </View>
 
@@ -3357,52 +3461,31 @@ export default function App() {
           })}
         </ScrollView>
 
-        {canManageCurrentFolder ? (
+        {renamingCurrentFolder ? (
           <View style={styles.folderManageBox}>
-            {renamingCurrentFolder ? (
-              <>
-                <TextInput
-                  value={folderRenameDraft}
-                  onChangeText={setFolderRenameDraft}
-                  placeholder={t("folders.renamePlaceholder")}
-                  placeholderTextColor={theme.textPlaceholder}
-                  style={[styles.input, styles.folderRenameInput]}
-                  returnKeyType="done"
-                  onSubmitEditing={() => void saveFolderRename(normalizedCurrentFolderId)}
-                />
-                <View style={styles.folderManageActionRow}>
-                  <Pressable
-                    onPress={() => void saveFolderRename(normalizedCurrentFolderId)}
-                    style={({ pressed }) => [styles.folderSmallPrimaryButton, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.folderSmallPrimaryText}>{t("folders.renameSave")}</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={cancelFolderRename}
-                    style={({ pressed }) => [styles.folderSmallSecondaryButton, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.folderSmallSecondaryText}>{t("common.cancel")}</Text>
-                  </Pressable>
-                </View>
-              </>
-            ) : (
-              <View style={styles.folderManageActionRow}>
-                <Pressable
-                  onPress={() => beginFolderRename(currentFolder)}
-                  style={({ pressed }) => [styles.folderSmallSecondaryButton, pressed && styles.pressed]}
-                >
-                  <MaterialCommunityIcons name="pencil-outline" size={15} color={theme.textPrimary} />
-                  <Text style={styles.folderSmallSecondaryText}>{t("folders.rename")}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => void deleteFolder(normalizedCurrentFolderId)}
-                  style={({ pressed }) => [styles.folderSmallDangerButton, pressed && styles.pressed]}
-                >
-                  <MaterialCommunityIcons name="trash-can-outline" size={15} color={theme.danger} />
-                  <Text style={styles.folderSmallDangerText}>{t("folders.delete")}</Text>
-                </Pressable>
-              </View>
-            )}
+            <TextInput
+              value={folderRenameDraft}
+              onChangeText={setFolderRenameDraft}
+              placeholder={t("folders.renamePlaceholder")}
+              placeholderTextColor={theme.textPlaceholder}
+              style={[styles.input, styles.folderRenameInput]}
+              returnKeyType="done"
+              onSubmitEditing={() => void saveFolderRename(normalizedCurrentFolderId)}
+            />
+            <View style={styles.folderManageActionRow}>
+              <Pressable
+                onPress={() => void saveFolderRename(normalizedCurrentFolderId)}
+                style={({ pressed }) => [styles.folderSmallPrimaryButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.folderSmallPrimaryText}>{t("folders.renameSave")}</Text>
+              </Pressable>
+              <Pressable
+                onPress={cancelFolderRename}
+                style={({ pressed }) => [styles.folderSmallSecondaryButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.folderSmallSecondaryText}>{t("common.cancel")}</Text>
+              </Pressable>
+            </View>
           </View>
         ) : null}
 
@@ -3438,23 +3521,34 @@ export default function App() {
           )}
         </View>
 
-        {allowCreate ? (
-          <View style={styles.folderCreateRow}>
+        {allowCreate && creatingCurrentFolder ? (
+          <View style={styles.folderManageBox}>
             <TextInput
               value={folderNameDraft}
               onChangeText={setFolderNameDraft}
               placeholder={t("folders.newPlaceholder")}
               placeholderTextColor={theme.textPlaceholder}
-              style={[styles.input, styles.folderCreateInput]}
+              style={[styles.input, styles.folderRenameInput]}
               returnKeyType="done"
               onSubmitEditing={() => void createFolderInCurrentLocation(normalizedCurrentFolderId)}
             />
-            <Pressable
-              onPress={() => void createFolderInCurrentLocation(normalizedCurrentFolderId)}
-              style={({ pressed }) => [styles.folderCreateButton, pressed && styles.pressed]}
-            >
-              <MaterialCommunityIcons name="folder-plus-outline" size={20} color={theme.accentText} />
-            </Pressable>
+            <View style={styles.folderManageActionRow}>
+              <Pressable
+                onPress={() => void createFolderInCurrentLocation(normalizedCurrentFolderId)}
+                style={({ pressed }) => [styles.folderSmallPrimaryButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.folderSmallPrimaryText}>{t("folders.create")}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  setFolderNameDraft("");
+                  setCreatingFolderKey(null);
+                }}
+                style={({ pressed }) => [styles.folderSmallSecondaryButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.folderSmallSecondaryText}>{t("common.cancel")}</Text>
+              </Pressable>
+            </View>
           </View>
         ) : null}
       </View>
@@ -3506,6 +3600,7 @@ export default function App() {
         onSelectFolder: selectSaveFolder,
         allowCreate: true,
         pairCount: saveFolderPairs.length,
+        scope: "save",
       })}
 
       {saveInputMode === "single" ? (
@@ -3765,6 +3860,7 @@ export default function App() {
           onSelectFolder: selectQuizFolder,
           includeChildren: true,
           pairCount: quizFolderPairs.length,
+          scope: "quiz",
         })
       ) : null}
 
@@ -3799,7 +3895,7 @@ export default function App() {
           </View>
 
           <View style={styles.actionRow}>
-            <Pressable onPress={() => startQuiz()} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
+            <Pressable onPress={returnToQuizReady} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
               <Text style={styles.secondaryButtonText}>{t("quiz.restartAdaptive")}</Text>
             </Pressable>
             <Pressable
@@ -3966,7 +4062,6 @@ export default function App() {
           <EmptyPanel
             styles={styles}
             theme={theme}
-            icon="cards-heart-outline"
             title={pairs.length ? t("folders.quizEmptyTitle") : t("quiz.emptyTitle")}
             body={pairs.length ? t("folders.quizEmptyBody") : t("quiz.emptyBody")}
             actionLabel={t("quiz.emptyAction")}
@@ -4217,6 +4312,7 @@ export default function App() {
         allowCreate: true,
         includeChildren: true,
         pairCount: manageFolderPairs.length,
+        scope: "manage",
       })}
 
       {manageFolderPairs.length ? (
@@ -5090,9 +5186,11 @@ export default function App() {
 function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) {
   return (
     <View style={styles.emptyPanel}>
-      <View style={styles.emptyIconWrap}>
-        <MaterialCommunityIcons name={icon} size={22} color={theme.accent} />
-      </View>
+      {icon ? (
+        <View style={styles.emptyIconWrap}>
+          <MaterialCommunityIcons name={icon} size={22} color={theme.accent} />
+        </View>
+      ) : null}
       <Text style={styles.emptyTitle}>{title}</Text>
       <Text style={styles.emptyBody}>{body}</Text>
       {actionLabel && onPress ? (
@@ -5807,6 +5905,8 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.accent,
   },
   folderPanel: {
+    position: "relative",
+    zIndex: 20,
     gap: 12,
     padding: 14,
     borderRadius: 24,
@@ -5823,6 +5923,59 @@ const createStyles = (theme) => StyleSheet.create({
   folderHeaderCopy: {
     flex: 1,
     gap: 5,
+  },
+  folderActionWrap: {
+    position: "relative",
+    zIndex: 40,
+    alignItems: "flex-end",
+  },
+  folderActionButton: {
+    width: 38,
+    minHeight: 34,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  folderActionButtonActive: {
+    backgroundColor: theme.accentSoft,
+    borderColor: theme.accent,
+  },
+  folderActionMenu: {
+    position: "absolute",
+    top: 42,
+    right: 0,
+    width: 184,
+    zIndex: 60,
+    elevation: 10,
+    overflow: "hidden",
+    borderRadius: 16,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+    shadowColor: theme.textPrimary,
+    shadowOpacity: theme.mode === "dark" ? 0.2 : 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  folderActionMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    minHeight: 44,
+    paddingHorizontal: 13,
+    backgroundColor: theme.surface,
+  },
+  folderActionMenuText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  folderActionMenuTextDanger: {
+    color: theme.danger,
   },
   folderTitleRow: {
     flexDirection: "row",
