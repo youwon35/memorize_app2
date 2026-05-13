@@ -384,8 +384,8 @@ const TRANSLATIONS = {
       aboutSupportTitle: "언제든 좋은 의견 기다릴게요!",
       aboutSupportBody: "앱에 오류가 있거나 원하는 기능이 있으시면 언제든 보내주세요. 귀 기울여 듣고 더 나은 앱이 되도록 노력하겠습니다!",
       finish: "튜토리얼 끝내기",
-      completionTitle: "축하합니다! 튜토리얼을 마쳤어요",
-      completionBody: "이제 Memoria를 편하게 사용해 주세요. 카드쌍을 저장하고, 외우고, 기록을 보며 꾸준히 복습해봐요!",
+      completionTitle: "튜토리얼이 종료되었어요!",
+      completionBody: "이제 메모리아를 편하게 사용해 주세요.\n이 앱이 사용자님의 학습에 도움이 되길 바래요!",
     },
     alerts: {
       inputNeededTitle: "입력 필요",
@@ -787,8 +787,8 @@ const TRANSLATIONS = {
       aboutSupportTitle: "Your ideas are always welcome!",
       aboutSupportBody: "If you find a bug or want a feature, send it anytime. We will listen closely and keep improving the app.",
       finish: "Finish tutorial",
-      completionTitle: "Congrats! You finished the tutorial",
-      completionBody: "You can now use Memoria comfortably. Save card pairs, memorize them, and keep reviewing through your records.",
+      completionTitle: "The tutorial is complete!",
+      completionBody: "You can now use Memoria comfortably.\nWe hope this app helps your learning.",
     },
     alerts: {
       inputNeededTitle: "Input required",
@@ -1190,8 +1190,8 @@ const TRANSLATIONS = {
       aboutSupportTitle: "いつでもご意見をお待ちしています！",
       aboutSupportBody: "不具合や欲しい機能があれば、いつでも送ってください。いただいた声に耳を傾け、より良いアプリになるよう努めます！",
       finish: "チュートリアル終了",
-      completionTitle: "おめでとうございます！チュートリアル完了です",
-      completionBody: "これからMemoriaを気軽に使ってください。カード組を保存し、覚えて、記録を見ながら復習していきましょう。",
+      completionTitle: "チュートリアルが終了しました！",
+      completionBody: "これからMemoriaを気軽に使ってください。\nこのアプリが学習の役に立つことを願っています。",
     },
     alerts: {
       inputNeededTitle: "入力が必要です",

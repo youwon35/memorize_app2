@@ -297,7 +297,7 @@ const TUTORIAL_STEPS = [
     targetKey: "about-support-panel",
     spotlightRadius: 24,
     spotlightPadding: 4,
-    bubbleGap: 26,
+    bubbleGap: 84,
     bubbleHeight: 300,
     icon: "message-question-outline",
     titleKey: "tutorial.aboutSupportTitle",
@@ -752,7 +752,7 @@ export default function App() {
 
     if (step?.key === "about-support") {
       requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 360, animated: true });
+        scrollRef.current?.scrollTo?.({ y: 420, animated: true });
       });
     }
 
@@ -4068,6 +4068,27 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
 
   return (
     <View style={styles.tutorialOverlay}>
+      <View pointerEvents="none" style={styles.tutorialIntroDecor}>
+        <View style={styles.backgroundOrbPrimary} />
+        <View style={styles.backgroundOrbSecondary} />
+        {STAR_FIELD.map((star, index) => (
+          <View
+            key={`tutorial-star-${index}`}
+            style={[
+              styles.star,
+              {
+                top: star.top,
+                left: star.left,
+                right: star.right,
+                width: star.size,
+                height: star.size,
+                borderRadius: star.size / 2,
+                opacity: star.opacity,
+              },
+            ]}
+          />
+        ))}
+      </View>
       <Pressable
         style={styles.tutorialTapArea}
         onPress={showNextMessage}
@@ -6207,6 +6228,9 @@ const createStyles = (theme) => StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: theme.appBg,
   },
+  tutorialIntroDecor: {
+    ...StyleSheet.absoluteFillObject,
+  },
   tutorialTapArea: {
     flex: 1,
   },
@@ -6217,8 +6241,8 @@ const createStyles = (theme) => StyleSheet.create({
     paddingBottom: 148,
   },
   tutorialHeader: {
-    gap: 8,
-    marginBottom: 28,
+    gap: 10,
+    marginBottom: 30,
   },
   tutorialTitle: {
     fontSize: 30,
@@ -6228,11 +6252,11 @@ const createStyles = (theme) => StyleSheet.create({
   tutorialCaption: {
     fontSize: 15,
     lineHeight: 22,
-    fontWeight: "700",
-    color: theme.textMuted,
+    fontWeight: "800",
+    color: theme.accent,
   },
   tutorialChat: {
-    gap: 14,
+    gap: 16,
   },
   tutorialMessageRow: {
     flexDirection: "row",
@@ -6260,13 +6284,18 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 4,
     paddingHorizontal: 18,
     paddingVertical: 14,
-    borderTopLeftRadius: 8,
+    borderTopLeftRadius: 10,
     borderTopRightRadius: 22,
     borderBottomRightRadius: 22,
     borderBottomLeftRadius: 22,
-    backgroundColor: theme.surfaceStrong,
+    backgroundColor: theme.surface,
     borderWidth: 1,
-    borderColor: theme.surfaceBorder,
+    borderColor: theme.accentSoftStrong,
+    shadowColor: theme.textPrimary,
+    shadowOpacity: theme.mode === "dark" ? 0.22 : 0.06,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 2,
   },
   tutorialBubbleTail: {
     position: "absolute",
@@ -6275,7 +6304,7 @@ const createStyles = (theme) => StyleSheet.create({
     width: 18,
     height: 18,
     borderBottomLeftRadius: 4,
-    backgroundColor: theme.surfaceStrong,
+    backgroundColor: theme.surface,
     borderLeftWidth: 1,
     borderBottomWidth: 1,
     borderColor: theme.surfaceBorder,
@@ -6322,7 +6351,9 @@ const createStyles = (theme) => StyleSheet.create({
     borderTopRightRadius: 28,
     borderBottomLeftRadius: Platform.OS === "android" ? 28 : 0,
     borderBottomRightRadius: Platform.OS === "android" ? 28 : 0,
-    backgroundColor: theme.surfaceStrong,
+    backgroundColor: theme.surface,
+    borderTopWidth: 1,
+    borderColor: theme.surfaceBorder,
   },
   tutorialActionRow: {
     flexDirection: "row",
