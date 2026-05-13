@@ -746,13 +746,13 @@ export default function App() {
     if (step?.key === "history-recent") {
       setHistoryCalendarOpen(false);
       requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 390, animated: true });
+        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
       });
     }
 
     if (step?.key === "about-support") {
       requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 560, animated: true });
+        scrollRef.current?.scrollTo?.({ y: 360, animated: true });
       });
     }
 
@@ -5931,6 +5931,7 @@ const createStyles = (theme) => StyleSheet.create({
     marginTop: -18,
     paddingHorizontal: 18,
     paddingTop: 18,
+    paddingBottom: 6,
     borderRadius: 26,
   },
   historyDateSummary: {
