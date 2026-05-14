@@ -28,14 +28,14 @@
       "expo-secure-store"
     ],
     "android": {
-      "package": "com.memoria.app",
+      "package": "com.youwon35.memoria",
       "adaptiveIcon": {
         "foregroundImage": "./app-icon.png",
         "backgroundColor": "#050814"
       }
     },
     "ios": {
-      "bundleIdentifier": "com.memoria.app"
+      "bundleIdentifier": "com.youwon35.memoria"
     },
     "extra": {
       "eas": {

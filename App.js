@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
   BackHandler,
   Easing,
@@ -92,7 +93,7 @@ const CALENDAR_WEEKDAY_LABELS = {
   ja: ["日", "月", "火", "水", "木", "金", "土"],
 };
 const MAX_SESSION_HISTORY = 60;
-const SUPPORT_CATEGORY_OPTIONS = ["bug", "feature", "other"];
+const SUPPORT_CATEGORY_OPTIONS = ["bug", "feature", "dataDeletion", "other"];
 const SUPPORT_STATUS_OPTIONS = ["received", "reviewing", "resolved"];
 const ADMIN_SUPPORT_PREVIEW_LIMIT = 12;
 const MANAGE_SORT_OPTIONS = [
@@ -2585,6 +2586,45 @@ export default function App() {
     return () => subscription.remove();
   }, [hasActiveQuizRound]);
 
+  const persistSupportRequest = async ({ replyEmail, message, category }) => {
+    let nextRequest = createLocalSupportRequest({
+      replyEmail,
+      message,
+      category,
+      session,
+    });
+    let cloudSaved = false;
+
+    if (supabase && session?.user?.id) {
+      const response = await supabase
+        .from("support_inquiries")
+        .insert({
+          category,
+          user_id: session.user.id,
+          reply_email: replyEmail,
+          sender_email: session.user.email ?? null,
+          message,
+        })
+        .select()
+        .single();
+
+      if (!response.error && response.data) {
+        nextRequest = mapSupportInquiryRecord(response.data);
+        cloudSaved = true;
+      }
+    }
+
+    addSupportRequest(nextRequest);
+    if (cloudSaved && isAdmin) {
+      void refreshAdminDashboard({
+        openOnly: adminOnlyUnresolved,
+        preserveNotice: true,
+      });
+    }
+
+    return cloudSaved;
+  };
+
   const submitSupportRequest = async () => {
     const replyEmail = supportReplyEmail.trim();
     const message = supportMessage.trim();
@@ -2603,40 +2643,12 @@ export default function App() {
     setSupportNotice("");
 
     try {
-      let nextRequest = createLocalSupportRequest({
+      const cloudSaved = await persistSupportRequest({
         replyEmail,
         message,
         category: supportCategory,
-        session,
       });
-      let cloudSaved = false;
 
-      if (supabase && session?.user?.id) {
-        const response = await supabase
-          .from("support_inquiries")
-          .insert({
-            category: supportCategory,
-            user_id: session.user.id,
-            reply_email: replyEmail,
-            sender_email: session.user.email ?? null,
-            message,
-          })
-          .select()
-          .single();
-
-        if (!response.error && response.data) {
-          nextRequest = mapSupportInquiryRecord(response.data);
-          cloudSaved = true;
-        }
-      }
-
-      addSupportRequest(nextRequest);
-      if (cloudSaved && isAdmin) {
-        void refreshAdminDashboard({
-          openOnly: adminOnlyUnresolved,
-          preserveNotice: true,
-        });
-      }
       setSupportMessage("");
       setSupportNotice(
         cloudSaved
@@ -2648,6 +2660,50 @@ export default function App() {
     } finally {
       setSupportSending(false);
     }
+  };
+
+  const confirmDataDeletionRequest = async (replyEmail) => {
+    setSupportSending(true);
+    setSupportNotice("");
+
+    try {
+      const cloudSaved = await persistSupportRequest({
+        replyEmail,
+        category: "dataDeletion",
+        message: t("about.dataDeletionRequestMessage", { email: replyEmail }),
+      });
+
+      setSupportCategory("dataDeletion");
+      setSupportReplyEmail(replyEmail);
+      setSupportMessage("");
+      setSupportNotice(
+        cloudSaved
+          ? t("about.dataDeletionSavedCloud")
+          : t("about.dataDeletionSavedLocal")
+      );
+    } catch (error) {
+      setSupportNotice(error?.message || t("about.supportFail"));
+    } finally {
+      setSupportSending(false);
+    }
+  };
+
+  const requestDataDeletion = () => {
+    const replyEmail = `${session?.user?.email ?? supportReplyEmail}`.trim();
+
+    if (!isValidEmail(replyEmail)) {
+      Alert.alert(t("about.emailCheckTitle"), t("about.emailCheckBody"));
+      return;
+    }
+
+    Alert.alert(t("about.dataDeletionConfirmTitle"), t("about.dataDeletionConfirmBody"), [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("about.dataDeletionButton"),
+        style: "destructive",
+        onPress: () => void confirmDataDeletionRequest(replyEmail),
+      },
+    ]);
   };
 
   const updateAdminSupportStatus = async (requestId, nextStatus) => {
@@ -5152,6 +5208,33 @@ export default function App() {
             </Text>
           </Pressable>
         </View>
+
+        {session?.user ? (
+          <View style={styles.settingsCard}>
+            <View style={styles.settingsHeader}>
+              <Text style={styles.settingsTitle}>{t("about.dataDeletionTitle")}</Text>
+              <Text style={styles.settingsBody}>{t("about.dataDeletionBody")}</Text>
+            </View>
+            <Pressable
+              disabled={supportSending}
+              onPress={requestDataDeletion}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                supportSending && styles.primaryButtonDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.primaryButtonText,
+                  supportSending && styles.primaryButtonTextDisabled,
+                ]}
+              >
+                {t("about.dataDeletionButton")}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         <View style={styles.settingsCard}>
           <View style={styles.settingsHeader}>

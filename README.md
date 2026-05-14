@@ -116,12 +116,13 @@ set role = 'admin',
 
 ## Android release path
 
-1. Replace `com.memoria.app` in `app.json` with your final package name if needed.
-2. Install EAS CLI if needed: `npm install -g eas-cli`
-3. Log in to Expo: `eas login`
-4. Build an installable APK for device testing: `eas build --platform android --profile preview`
-5. Build Android App Bundle for Play Store release: `eas build --platform android --profile production`
-6. Submit the generated `.aab` to Google Play Console.
+1. Review the full Play Store checklist in [PLAY_STORE_RELEASE.md](./PLAY_STORE_RELEASE.md).
+2. The Android package name is currently `com.youwon35.memoria`. Confirm this before the first Play upload because package names are permanent.
+3. Install EAS CLI if needed: `npm install -g eas-cli`
+4. Log in to Expo: `eas login`
+5. Build an installable APK for device testing: `npm run build:preview`
+6. Build Android App Bundle for Play Store release: `npm run build:production`
+7. Submit the generated `.aab` to Google Play Console. First uploads must be done manually in Play Console; later uploads can use `npm run submit:production`.
 
 ## Google login checklist for APK testing
 
@@ -157,4 +158,4 @@ git checkout develop
 
 - The app works locally even without Supabase credentials.
 - When Supabase is configured, Google login is used to sync cards across devices.
-- You still need to prepare Play Store assets such as app icon, screenshots, privacy policy, and store description before publishing.
+- Play Store listing, privacy policy, and data deletion drafts are in [store/google-play-listing.md](./store/google-play-listing.md), [docs/privacy-policy-ko.md](./docs/privacy-policy-ko.md), and [docs/data-deletion-ko.md](./docs/data-deletion-ko.md).
