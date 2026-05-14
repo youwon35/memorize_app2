@@ -709,8 +709,6 @@ export default function App() {
   const [answer, setAnswer] = useState("");
   const [feedback, setFeedback] = useState("");
   const [result, setResult] = useState(null);
-  const [quizFolderPickerOpen, setQuizFolderPickerOpen] = useState(false);
-  const [quizFolderBrowseId, setQuizFolderBrowseId] = useState(ROOT_FOLDER_ID);
   const [retryWindowVisible, setRetryWindowVisible] = useState(false);
   const [retryDaysInput, setRetryDaysInput] = useState("7");
   const [importing, setImporting] = useState(false);
@@ -736,6 +734,8 @@ export default function App() {
   const [launchVisible, setLaunchVisible] = useState(true);
   const [openManageSwipeId, setOpenManageSwipeId] = useState(null);
   const [legalDocKey, setLegalDocKey] = useState(null);
+  const [saveFolderPanelCollapsed, setSaveFolderPanelCollapsed] = useState(false);
+  const [quizFolderPanelCollapsed, setQuizFolderPanelCollapsed] = useState(false);
   const [manageFolderPanelCollapsed, setManageFolderPanelCollapsed] = useState(false);
 
   const timerRef = useRef(null);
@@ -1958,7 +1958,6 @@ export default function App() {
     const nextFolderId = normalizeFolderId(folderId);
 
     setQuizFolderId(nextFolderId);
-    setQuizFolderBrowseId(nextFolderId);
     setFolderNameDraft("");
     setCreatingFolderKey(null);
     setFolderActionMenuKey(null);
@@ -1969,7 +1968,6 @@ export default function App() {
     setResult(null);
     setRoundComplete(false);
     setRoundIncorrectIds([]);
-    setQuizFolderPickerOpen(false);
   };
 
   const selectManageFolder = (folderId) => {
@@ -3212,7 +3210,6 @@ export default function App() {
       }
       setResult("correct");
       setFeedback(t("quiz.feedbackCorrect"));
-      timerRef.current = setTimeout(() => goNext(), 900);
       return;
     }
 
@@ -3224,7 +3221,6 @@ export default function App() {
     setResult("incorrect");
     setFeedback(t("quiz.feedbackIncorrect"));
     setRoundIncorrectIds(nextIncorrectIds);
-    timerRef.current = setTimeout(() => goNext(nextIncorrectIds), 900);
   };
 
   const saveEdit = async () => {
@@ -4158,6 +4154,9 @@ export default function App() {
         onSelectFolder: selectSaveFolder,
         allowCreate: true,
         scope: "save",
+        collapsible: true,
+        collapsed: saveFolderPanelCollapsed,
+        onToggleCollapse: () => setSaveFolderPanelCollapsed((currentValue) => !currentValue),
       })}
       {renderSaveComposerModal()}
     </View>
@@ -4263,17 +4262,8 @@ export default function App() {
       <View style={styles.quizScopeCard}>
         <View style={styles.quizScopeHeader}>
           <Text style={styles.quizScopeTitle}>{t("quiz.scopeTitle")}</Text>
-          <Pressable
-            onPress={() => {
-              setQuizFolderBrowseId(quizFolderId);
-              setQuizFolderPickerOpen((currentValue) => !currentValue);
-            }}
-            style={({ pressed }) => [styles.quizScopeChangeButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.quizScopeChangeText}>{t("quiz.changeScope")}</Text>
-            <MaterialCommunityIcons name="chevron-right" size={15} color={theme.textSecondary} />
-          </Pressable>
         </View>
+        <Text style={styles.quizScopeBody}>{t("quiz.scopeNestedBody")}</Text>
 
         <View style={styles.quizScopePathRow}>
           <MaterialCommunityIcons name="folder" size={22} color={theme.accent} />
@@ -4299,23 +4289,15 @@ export default function App() {
         </View>
       </View>
 
-      {quizFolderPickerOpen ? (
-        <View style={styles.quizFolderPickerPanel}>
-          {renderFolderExplorer({
-            currentFolderId: quizFolderBrowseId,
-            onSelectFolder: (folderId) => setQuizFolderBrowseId(normalizeFolderId(folderId)),
-            scope: "quiz",
-            showSavedCards: false,
-          })}
-          <Pressable
-            onPress={() => selectQuizFolder(quizFolderBrowseId)}
-            style={({ pressed }) => [styles.quizSelectFolderButton, pressed && styles.pressed]}
-          >
-            <MaterialCommunityIcons name="check" size={17} color={theme.accentText} />
-            <Text style={styles.quizSelectFolderButtonText}>{t("quiz.selectThisFolder")}</Text>
-          </Pressable>
-        </View>
-      ) : null}
+      {renderFolderExplorer({
+        currentFolderId: quizFolderId,
+        onSelectFolder: selectQuizFolder,
+        scope: "quiz",
+        showSavedCards: false,
+        collapsible: true,
+        collapsed: quizFolderPanelCollapsed,
+        onToggleCollapse: () => setQuizFolderPanelCollapsed((currentValue) => !currentValue),
+      })}
 
       <View style={styles.quizCountPickerCard}>
         <Text style={styles.quizSetupLabel}>{t("quiz.requestedCount")}</Text>
@@ -4513,72 +4495,157 @@ export default function App() {
           </View>
         </View>
       ) : current ? (
-          <View style={styles.quizCard} {...tutorialTargetProps("quiz-card")}>
-            <View style={styles.quizMetaRow}>
-              <Text style={styles.quizProgress}>
-                {Math.min(quizIndex + 1, deck.length)} / {deck.length}
-              </Text>
-              <Text style={styles.quizBadge}>{t(`directions.${current.direction}`)}</Text>
-            </View>
+        <View style={styles.quizCard} {...tutorialTargetProps("quiz-card")}>
+          <View style={styles.quizTopBar}>
+            <Pressable
+              accessibilityLabel={t("quiz.restartAdaptive")}
+              onPress={returnToQuizReady}
+              style={({ pressed }) => [styles.quizTopIconButton, pressed && styles.pressed]}
+            >
+              <MaterialCommunityIcons name="chevron-left" size={22} color={theme.textPrimary} />
+            </Pressable>
+            <Text style={styles.quizTopProgress}>
+              {Math.min(quizIndex + 1, deck.length)} / {deck.length}
+            </Text>
+            <Pressable
+              accessibilityLabel={t("common.close")}
+              onPress={returnToQuizReady}
+              style={({ pressed }) => [styles.quizTopIconButton, pressed && styles.pressed]}
+            >
+              <MaterialCommunityIcons name="close" size={21} color={theme.textPrimary} />
+            </Pressable>
+          </View>
 
-            <Text style={styles.quizPrompt}>{current.prompt}</Text>
-
-            <TextInput
-              value={answer}
-              onChangeText={(value) => {
-                setAnswer(value);
-
-                if (result === "warning") {
-                  setFeedback("");
-                  setResult(null);
-                }
-              }}
-              placeholder={t("quiz.answerPlaceholder")}
-              placeholderTextColor={theme.textPlaceholder}
-              autoCapitalize="none"
-              style={styles.input}
+          <View style={styles.quizProgressTrackLarge}>
+            <View
+              style={[
+                styles.quizProgressFillLarge,
+                { width: `${deck.length ? ((quizIndex + 1) / deck.length) * 100 : 0}%` },
+              ]}
             />
+          </View>
 
-            {feedback ? (
-              <Text
+          <View style={styles.quizDirectionPillRow}>
+            <Text style={styles.quizBadge}>{t(`directions.${current.direction}`)}</Text>
+          </View>
+
+          <View style={styles.quizQuestionLabelRow}>
+            <MaterialCommunityIcons name="comment-question-outline" size={16} color={theme.accent} />
+            <Text style={styles.quizQuestionLabel}>{t("quiz.questionLabel")}</Text>
+          </View>
+
+          <Text style={styles.quizPrompt}>{current.prompt}</Text>
+
+          {result === "correct" || result === "incorrect" ? (
+            <>
+              <View
                 style={[
-                  styles.feedback,
-                  result === "correct"
-                    ? styles.feedbackGood
-                    : result === "warning"
-                      ? styles.feedbackNeutral
-                      : styles.feedbackBad,
+                  styles.quizResultBox,
+                  result === "correct" ? styles.quizResultGoodBox : styles.quizResultBadBox,
                 ]}
               >
-                {feedback}
-              </Text>
-            ) : null}
+                <View
+                  style={[
+                    styles.quizResultIcon,
+                    result === "correct" ? styles.quizResultGoodIcon : styles.quizResultBadIcon,
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name={result === "correct" ? "check" : "emoticon-sad-outline"}
+                    size={22}
+                    color={theme.accentText}
+                  />
+                </View>
+                <View style={styles.flex}>
+                  <Text
+                    style={[
+                      styles.quizResultTitle,
+                      result === "correct" ? styles.quizResultTitleGood : styles.quizResultTitleBad,
+                    ]}
+                  >
+                    {feedback}
+                  </Text>
+                  <Text style={styles.quizResultBody}>{t("quiz.feedbackReviewPrompt")}</Text>
+                </View>
+              </View>
 
-            {result === "incorrect" ? (
-              <Text style={styles.answerText}>{t("quiz.answerPrefix", { answer: current.answer })}</Text>
-            ) : null}
+              <View style={styles.quizAnswerReviewCard}>
+                <View style={styles.quizAnswerReviewRow}>
+                  <Text style={styles.quizAnswerReviewLabel}>{t("quiz.yourAnswer")}</Text>
+                  <Text style={styles.quizAnswerReviewValue} numberOfLines={2}>
+                    {answer.trim() || "-"}
+                  </Text>
+                </View>
+                <View style={styles.quizAnswerReviewDivider} />
+                <View style={styles.quizAnswerReviewRow}>
+                  <Text style={styles.quizAnswerReviewLabel}>{t("quiz.correctAnswer")}</Text>
+                  <Text
+                    style={[
+                      styles.quizAnswerReviewValue,
+                      result === "incorrect" && styles.quizAnswerReviewCorrectValue,
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {current.answer}
+                  </Text>
+                </View>
+              </View>
 
-            <View style={styles.actionRow}>
-              <Pressable onPress={submitAnswer} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-                <Text style={styles.primaryButtonText}>{t("quiz.submitAnswer")}</Text>
+              <Pressable
+                onPress={() => goNext()}
+                style={({ pressed }) => [styles.quizPrimaryFullAction, pressed && styles.pressed]}
+              >
+                <Text style={styles.quizPrimaryFullActionText}>{t("quiz.nextCard")}</Text>
               </Pressable>
-              <Pressable onPress={skipCurrentCard} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-                <Text style={styles.secondaryButtonText}>{t("quiz.skipNext")}</Text>
+            </>
+          ) : (
+            <>
+              <TextInput
+                value={answer}
+                onChangeText={(value) => {
+                  setAnswer(value);
+
+                  if (result === "warning") {
+                    setFeedback("");
+                    setResult(null);
+                  }
+                }}
+                placeholder={t("quiz.answerPlaceholder")}
+                placeholderTextColor={theme.textPlaceholder}
+                autoCapitalize="none"
+                multiline
+                style={[styles.input, styles.quizAnswerInput]}
+              />
+
+              {feedback ? <Text style={[styles.feedback, styles.feedbackNeutral]}>{feedback}</Text> : null}
+
+              <Pressable
+                onPress={submitAnswer}
+                style={({ pressed }) => [styles.quizPrimaryFullAction, pressed && styles.pressed]}
+              >
+                <Text style={styles.quizPrimaryFullActionText}>{t("quiz.submitAnswer")}</Text>
               </Pressable>
-            </View>
-          </View>
-        ) : hasSavedCards ? (
-          renderQuizReadySetup()
-        ) : (
-          <EmptyPanel
-            styles={styles}
-            theme={theme}
-            title={pairs.length ? t("folders.quizEmptyTitle") : t("quiz.emptyTitle")}
-            body={pairs.length ? t("folders.quizEmptyBody") : t("quiz.emptyBody")}
-            actionLabel={t("quiz.emptyAction")}
-            onPress={() => handleTabChange("save")}
-          />
-        )}
+              <Pressable
+                onPress={skipCurrentCard}
+                style={({ pressed }) => [styles.quizSecondaryFullAction, pressed && styles.pressed]}
+              >
+                <Text style={styles.quizSecondaryFullActionText}>{t("quiz.skipNext")}</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+      ) : hasSavedCards ? (
+        renderQuizReadySetup()
+      ) : (
+        <EmptyPanel
+          styles={styles}
+          theme={theme}
+          title={pairs.length ? t("folders.quizEmptyTitle") : t("quiz.emptyTitle")}
+          body={pairs.length ? t("folders.quizEmptyBody") : t("quiz.emptyBody")}
+          actionLabel={t("quiz.emptyAction")}
+          onPress={() => handleTabChange("save")}
+        />
+      )}
       {renderRecentRetryModal()}
     </View>
   );
@@ -7717,10 +7784,172 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.accentText,
   },
   quizCard: {
-    gap: 14,
-    padding: 18,
-    borderRadius: 24,
+    gap: 16,
+    padding: 22,
+    borderRadius: 26,
     backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  quizTopBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  quizTopIconButton: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 17,
+  },
+  quizTopProgress: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 14,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  quizProgressTrackLarge: {
+    height: 5,
+    overflow: "hidden",
+    borderRadius: 999,
+    backgroundColor: theme.surfaceMuted,
+  },
+  quizProgressFillLarge: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: theme.accent,
+  },
+  quizDirectionPillRow: {
+    alignItems: "flex-end",
+  },
+  quizQuestionLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  quizQuestionLabel: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: theme.textSecondary,
+  },
+  quizAnswerInput: {
+    minHeight: 128,
+    paddingTop: 17,
+    paddingBottom: 17,
+    textAlignVertical: "top",
+    borderRadius: 18,
+    borderColor: theme.accent,
+    backgroundColor: theme.surface,
+  },
+  quizResultBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+  quizResultGoodBox: {
+    backgroundColor: "rgba(29, 143, 84, 0.10)",
+    borderColor: "rgba(29, 143, 84, 0.25)",
+  },
+  quizResultBadBox: {
+    backgroundColor: theme.dangerBg,
+    borderColor: theme.dangerBgSoft,
+  },
+  quizResultIcon: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 21,
+  },
+  quizResultGoodIcon: {
+    backgroundColor: theme.success,
+  },
+  quizResultBadIcon: {
+    backgroundColor: theme.danger,
+  },
+  quizResultTitle: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "900",
+  },
+  quizResultTitleGood: {
+    color: theme.success,
+  },
+  quizResultTitleBad: {
+    color: theme.danger,
+  },
+  quizResultBody: {
+    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 17,
+    color: theme.textSecondary,
+  },
+  quizAnswerReviewCard: {
+    gap: 10,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  quizAnswerReviewRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+  quizAnswerReviewLabel: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "800",
+    color: theme.textSecondary,
+  },
+  quizAnswerReviewValue: {
+    flex: 1,
+    textAlign: "right",
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  quizAnswerReviewCorrectValue: {
+    color: theme.danger,
+  },
+  quizAnswerReviewDivider: {
+    height: 1,
+    backgroundColor: theme.surfaceBorderSoft,
+  },
+  quizPrimaryFullAction: {
+    minHeight: 58,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+    backgroundColor: theme.accent,
+  },
+  quizPrimaryFullActionText: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: theme.accentText,
+  },
+  quizSecondaryFullAction: {
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 16,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  quizSecondaryFullActionText: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: theme.textPrimary,
   },
   quizSummaryCard: {
     gap: 16,
@@ -7790,20 +8019,9 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "900",
     color: theme.textPrimary,
   },
-  quizScopeChangeButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    minHeight: 30,
-    paddingHorizontal: 9,
-    borderRadius: 999,
-    backgroundColor: theme.surfaceSoft,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
-  quizScopeChangeText: {
-    fontSize: 11,
-    fontWeight: "800",
+  quizScopeBody: {
+    fontSize: 12,
+    lineHeight: 18,
     color: theme.textSecondary,
   },
   quizScopePathRow: {
@@ -7844,23 +8062,6 @@ const createStyles = (theme) => StyleSheet.create({
     lineHeight: 26,
     fontWeight: "900",
     color: theme.textSecondary,
-  },
-  quizFolderPickerPanel: {
-    gap: 10,
-  },
-  quizSelectFolderButton: {
-    minHeight: 44,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 7,
-    borderRadius: 16,
-    backgroundColor: theme.accent,
-  },
-  quizSelectFolderButtonText: {
-    fontSize: 13,
-    fontWeight: "900",
-    color: theme.accentText,
   },
   quizCountPickerCard: {
     gap: 13,
@@ -8087,16 +8288,6 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 13,
     color: theme.textSecondary,
   },
-  quizMetaRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  quizProgress: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: theme.textMuted,
-  },
   quizBadge: {
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -8116,19 +8307,8 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
   },
-  feedbackGood: {
-    color: theme.success,
-  },
   feedbackNeutral: {
     color: theme.accent,
-  },
-  feedbackBad: {
-    color: theme.danger,
-  },
-  answerText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: theme.textPrimary,
   },
   manageCard: {
     gap: 8,
