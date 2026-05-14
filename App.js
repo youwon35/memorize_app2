@@ -113,6 +113,8 @@ const LEGAL_DOC_OPTIONS = [
   { key: "terms", titleKey: "about.termsTitle", bodyKey: "about.termsBody" },
   { key: "licenses", titleKey: "about.licensesTitle", bodyKey: "about.licensesBody" },
 ];
+const QUIZ_COUNT_PRESETS = [5, 10, 20];
+const RETRY_DAY_PRESETS = [1, 3, 7, 14, 30];
 
 const createFolderId = () =>
   `folder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -708,6 +710,9 @@ export default function App() {
   const [answer, setAnswer] = useState("");
   const [feedback, setFeedback] = useState("");
   const [result, setResult] = useState(null);
+  const [quizFolderPickerOpen, setQuizFolderPickerOpen] = useState(false);
+  const [retryWindowVisible, setRetryWindowVisible] = useState(false);
+  const [retryDaysInput, setRetryDaysInput] = useState("7");
   const [importing, setImporting] = useState(false);
   const [photoImporting, setPhotoImporting] = useState(false);
   const [photoAsset, setPhotoAsset] = useState(null);
@@ -784,7 +789,6 @@ export default function App() {
     [selectedManagePairIds]
   );
   const hasSavedCards = quizFolderPairs.length > 0;
-  const quizModeConfig = getQuizModeConfig(quizMode);
   const maxQuizCount = quizFolderPairs.length ? quizFolderPairs.length * (quizMode === "both" ? 2 : 1) : 0;
   const contentTopPadding = 18 + (Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0);
   const isTabletLayout = screenWidth >= 768;
@@ -2010,6 +2014,7 @@ export default function App() {
     setResult(null);
     setRoundComplete(false);
     setRoundIncorrectIds([]);
+    setQuizFolderPickerOpen(false);
   };
 
   const selectManageFolder = (folderId) => {
@@ -3021,6 +3026,20 @@ export default function App() {
     return Math.min(normalizedValue, maxQuizCount);
   };
 
+  const setQuizCountSafely = (nextCount) => {
+    if (!maxQuizCount) {
+      return;
+    }
+
+    const normalizedCount = Number.isFinite(nextCount) ? nextCount : DEFAULT_QUIZ_COUNT;
+    setQuizCountInput(`${Math.max(1, Math.min(Math.round(normalizedCount), maxQuizCount))}`);
+  };
+
+  const adjustQuizCount = (amount) => {
+    const currentCount = resolveRequestedQuizCount();
+    setQuizCountSafely(currentCount + amount);
+  };
+
   const startQuiz = (requestedCount) => {
     if (!quizFolderPairs.length) {
       Alert.alert(t("quiz.noQuestionsTitle"), t("quiz.noQuestionsBody"));
@@ -3071,6 +3090,83 @@ export default function App() {
     });
   };
 
+  const buildIncorrectRetryDeck = (sessions, deckIdPrefix = "recent-retry") => {
+    const retryDeckMap = new Map();
+
+    sessions.forEach((sessionItem) => {
+      (sessionItem?.incorrectCards ?? []).forEach((card, index) => {
+        const currentPair = pairsRef.current.find((pair) => createSignature(pair.left, pair.right) === card.signature);
+        const left = currentPair?.left ?? card.left;
+        const right = currentPair?.right ?? card.right;
+        const direction = card.direction === "B_TO_A" ? "B_TO_A" : "A_TO_B";
+
+        if (!left || !right) {
+          return;
+        }
+
+        const signature = createSignature(left, right);
+        const retryKey = `${signature}:${direction}`;
+
+        if (retryDeckMap.has(retryKey)) {
+          return;
+        }
+
+        retryDeckMap.set(retryKey, {
+          id: `${deckIdPrefix}-${sessionItem.id}-${index}-${direction}`,
+          pairId: currentPair?.id ?? `${deckIdPrefix}-${sessionItem.id}-${index}`,
+          left,
+          right,
+          signature,
+          createdAt: currentPair?.createdAt ?? sessionItem.completedAt ?? new Date().toISOString(),
+          prompt: direction === "B_TO_A" ? right : left,
+          answer: direction === "B_TO_A" ? left : right,
+          direction,
+        });
+      });
+    });
+
+    return shuffleItems(Array.from(retryDeckMap.values()));
+  };
+
+  const getRecentIncorrectSessions = (dayCount) => {
+    const normalizedDayCount = Math.max(1, Math.min(365, Number.parseInt(`${dayCount}`, 10) || 1));
+    const cutoff = new Date();
+
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setDate(cutoff.getDate() - normalizedDayCount + 1);
+
+    return studyStatsRef.current.sessions.filter((sessionItem) => {
+      const completedAt = new Date(sessionItem?.completedAt ?? 0);
+
+      return completedAt >= cutoff && (sessionItem?.incorrectCards ?? []).length > 0;
+    });
+  };
+
+  const startRecentIncorrectRetry = (dayCount = retryDaysInput) => {
+    const normalizedDayCount = Math.max(1, Math.min(365, Number.parseInt(`${dayCount}`, 10) || 1));
+    const retryDeck = buildIncorrectRetryDeck(
+      getRecentIncorrectSessions(normalizedDayCount),
+      `recent-retry-${normalizedDayCount}d`
+    );
+
+    setRetryDaysInput(`${normalizedDayCount}`);
+
+    if (!retryDeck.length) {
+      Alert.alert(
+        t("quiz.noRetryTitle"),
+        t("quiz.noRetryWindowBody", { count: normalizedDayCount })
+      );
+      return;
+    }
+
+    setRetryWindowVisible(false);
+    beginQuizRound(retryDeck, {
+      requestedCount: retryDeck.length,
+      mode: "retry",
+      source: "retry",
+    });
+  };
+
   const returnToQuizReady = () => {
     setDeck([]);
     setQuizIndex(0);
@@ -3082,32 +3178,7 @@ export default function App() {
   };
 
   const retryIncorrectCardsFromSession = (sessionItem) => {
-    const retryDeck = shuffleItems(
-      (sessionItem?.incorrectCards ?? [])
-        .map((card, index) => {
-          const currentPair = pairsRef.current.find((pair) => createSignature(pair.left, pair.right) === card.signature);
-          const left = currentPair?.left ?? card.left;
-          const right = currentPair?.right ?? card.right;
-          const direction = card.direction === "B_TO_A" ? "B_TO_A" : "A_TO_B";
-
-          if (!left || !right) {
-            return null;
-          }
-
-          return {
-            id: `history-retry-${sessionItem.id}-${index}-${direction}`,
-            pairId: currentPair?.id ?? `history-${sessionItem.id}-${index}`,
-            left,
-            right,
-            signature: createSignature(left, right),
-            createdAt: currentPair?.createdAt ?? sessionItem.completedAt ?? new Date().toISOString(),
-            prompt: direction === "B_TO_A" ? right : left,
-            answer: direction === "B_TO_A" ? left : right,
-            direction,
-          };
-        })
-        .filter(Boolean)
-    );
+    const retryDeck = buildIncorrectRetryDeck([sessionItem], "history-retry");
 
     if (!retryDeck.length) {
       Alert.alert(t("quiz.noRetryTitle"), t("quiz.noRetryBody"));
@@ -4107,9 +4178,281 @@ export default function App() {
     </View>
   );
 
+  const renderRecentRetryModal = () => {
+    const retryDayCount = Math.max(1, Math.min(365, Number.parseInt(retryDaysInput, 10) || 1));
+    const retryPreviewCount = buildIncorrectRetryDeck(
+      getRecentIncorrectSessions(retryDayCount),
+      "recent-retry-preview"
+    ).length;
+
+    return (
+      <Modal
+        visible={retryWindowVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRetryWindowVisible(false)}
+      >
+        <View style={styles.legalModalOverlay}>
+          <Pressable style={styles.legalModalBackdrop} onPress={() => setRetryWindowVisible(false)} />
+          <View style={[styles.retryModalCard, contentMaxWidth ? { maxWidth: Math.min(contentMaxWidth, 520) } : null]}>
+            <View style={styles.legalModalHeader}>
+              <Text style={styles.legalModalTitle}>{t("quiz.retryWindowTitle")}</Text>
+              <Pressable
+                onPress={() => setRetryWindowVisible(false)}
+                style={({ pressed }) => [styles.legalModalCloseButton, pressed && styles.pressed]}
+              >
+                <MaterialCommunityIcons name="close" size={20} color={theme.textPrimary} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.retryModalBody}>{t("quiz.retryWindowBody")}</Text>
+
+            <View style={styles.retryDaysInputRow}>
+              <TextInput
+                value={retryDaysInput}
+                onChangeText={(value) => setRetryDaysInput(value.replace(/[^0-9]/g, "").slice(0, 3))}
+                onBlur={() => setRetryDaysInput(`${retryDayCount}`)}
+                keyboardType="number-pad"
+                placeholder="7"
+                placeholderTextColor={theme.textPlaceholder}
+                style={[styles.input, styles.retryDaysInput]}
+              />
+              <Text style={styles.retryDaysUnit}>{t("quiz.retryDaysUnit")}</Text>
+            </View>
+
+            <View style={styles.retryPresetRow}>
+              {RETRY_DAY_PRESETS.map((dayCount) => {
+                const active = retryDayCount === dayCount;
+
+                return (
+                  <Pressable
+                    key={`retry-day-${dayCount}`}
+                    onPress={() => setRetryDaysInput(`${dayCount}`)}
+                    style={({ pressed }) => [
+                      styles.retryPresetChip,
+                      active && styles.retryPresetChipActive,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={[styles.retryPresetText, active && styles.retryPresetTextActive]}>
+                      {t("quiz.retryDayPreset", { count: dayCount })}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Text style={styles.retryPreviewText}>
+              {t("quiz.retryWindowPreview", {
+                days: retryDayCount,
+                count: retryPreviewCount,
+              })}
+            </Text>
+
+            <View style={styles.actionRow}>
+              <Pressable
+                onPress={() => setRetryWindowVisible(false)}
+                style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.secondaryButtonText}>{t("common.cancel")}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => startRecentIncorrectRetry(retryDayCount)}
+                style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.primaryButtonText}>{t("quiz.retryWindowStart")}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderQuizReadySetup = () => (
+    <>
+      <View style={styles.quizReadyHero}>
+        <Text style={styles.quizReadyHeroTitle}>{t("quiz.readyTitle")}</Text>
+      </View>
+
+      <View style={styles.quizScopeCard}>
+        <View style={styles.quizScopeHeader}>
+          <Text style={styles.quizScopeTitle}>{t("quiz.scopeTitle")}</Text>
+          <Pressable
+            onPress={() => setQuizFolderPickerOpen((currentValue) => !currentValue)}
+            style={({ pressed }) => [styles.quizScopeChangeButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.quizScopeChangeText}>{t("quiz.changeScope")}</Text>
+            <MaterialCommunityIcons name="chevron-right" size={15} color={theme.textSecondary} />
+          </Pressable>
+        </View>
+
+        <View style={styles.quizScopePathRow}>
+          <MaterialCommunityIcons name="folder" size={22} color={theme.accent} />
+          <Text style={styles.quizScopePathText} numberOfLines={1} ellipsizeMode="tail">
+            {getFolderLabel(quizFolderId)}
+          </Text>
+        </View>
+
+        <View style={styles.quizScopeStatsRow}>
+          <View style={styles.quizScopeStat}>
+            <Text style={styles.quizScopeStatLabel}>{t("quiz.scopeSavedCards")}</Text>
+            <Text style={styles.quizScopeStatValue}>
+              {t("quiz.cardCount", { count: quizFolderPairs.length })}
+            </Text>
+          </View>
+          <View style={styles.quizScopeDivider} />
+          <View style={styles.quizScopeStat}>
+            <Text style={styles.quizScopeStatLabel}>{t("quiz.scopeAvailableQuestions")}</Text>
+            <Text style={styles.quizScopeStatValue}>
+              {t("quiz.questionCount", { count: maxQuizCount })}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {quizFolderPickerOpen ? (
+        renderFolderExplorer({
+          currentFolderId: quizFolderId,
+          onSelectFolder: selectQuizFolder,
+          scope: "quiz",
+        })
+      ) : null}
+
+      <View style={styles.quizCountPickerCard}>
+        <Text style={styles.quizSetupLabel}>{t("quiz.requestedCount")}</Text>
+        <View style={styles.quizCountStepperRow}>
+          <Pressable
+            accessibilityLabel={t("quiz.decreaseCount")}
+            onPress={() => adjustQuizCount(-1)}
+            style={({ pressed }) => [styles.quizCountRoundButton, pressed && styles.pressed]}
+          >
+            <MaterialCommunityIcons name="minus" size={18} color={theme.textSecondary} />
+          </Pressable>
+          <Text style={styles.quizCountValue}>
+            {t("quiz.questionCount", { count: resolvedQuizCount })}
+          </Text>
+          <Pressable
+            accessibilityLabel={t("quiz.increaseCount")}
+            onPress={() => adjustQuizCount(1)}
+            style={({ pressed }) => [styles.quizCountRoundButton, pressed && styles.pressed]}
+          >
+            <MaterialCommunityIcons name="plus" size={18} color={theme.accent} />
+          </Pressable>
+        </View>
+        <View style={styles.quizPresetRow}>
+          {QUIZ_COUNT_PRESETS.map((count) => {
+            const presetValue = Math.min(count, maxQuizCount);
+            const active = resolvedQuizCount === presetValue;
+
+            return (
+              <Pressable
+                key={`quiz-count-${count}`}
+                onPress={() => setQuizCountSafely(count)}
+                style={({ pressed }) => [
+                  styles.quizPresetChip,
+                  active && styles.quizPresetChipActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={[styles.quizPresetText, active && styles.quizPresetTextActive]}>
+                  {count}
+                </Text>
+              </Pressable>
+            );
+          })}
+          <Pressable
+            onPress={() => setQuizCountSafely(maxQuizCount)}
+            style={({ pressed }) => [
+              styles.quizPresetChip,
+              resolvedQuizCount === maxQuizCount && styles.quizPresetChipActive,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text
+              style={[
+                styles.quizPresetText,
+                resolvedQuizCount === maxQuizCount && styles.quizPresetTextActive,
+              ]}
+            >
+              {t("quiz.countAll")}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.quizDirectionCard}>
+        <Text style={styles.quizSetupLabel}>{t("quiz.modeLabel")}</Text>
+        <View style={styles.quizDirectionRow}>
+          {QUIZ_MODE_OPTIONS.map((option) => {
+            const active = quizMode === option.key;
+            const iconName =
+              option.key === "both"
+                ? "swap-horizontal"
+                : option.key === "front"
+                  ? "arrow-right"
+                  : "arrow-left";
+
+            return (
+              <Pressable
+                key={option.key}
+                onPress={() => setQuizMode(option.key)}
+                style={({ pressed }) => [
+                  styles.quizDirectionChip,
+                  active && styles.quizDirectionChipActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name={iconName}
+                  size={17}
+                  color={active ? theme.accentText : theme.textSecondary}
+                />
+                <Text style={[styles.quizDirectionText, active && styles.quizDirectionTextActive]}>
+                  {t(option.chipLabelKey)}
+                </Text>
+                <Text style={[styles.quizDirectionSubtext, active && styles.quizDirectionSubtextActive]}>
+                  {t(`quiz.modes.${option.key}.shortDescription`)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      <Pressable
+        {...tutorialTargetProps("quiz-start-button")}
+        onPress={() => startQuiz()}
+        style={({ pressed }) => [styles.quizStartFullButton, pressed && styles.pressed]}
+      >
+        <Text style={styles.quizStartFullText}>
+          {t("quiz.startButtonWithCount", { count: resolvedQuizCount })}
+        </Text>
+        <MaterialCommunityIcons name="arrow-right" size={18} color={theme.accentText} />
+      </Pressable>
+
+      <View style={styles.quizSecondaryActionRow}>
+        <Pressable
+          onPress={() => setRetryWindowVisible(true)}
+          style={({ pressed }) => [styles.quizSecondaryAction, pressed && styles.pressed]}
+        >
+          <MaterialCommunityIcons name="reload" size={16} color={theme.textSecondary} />
+          <Text style={styles.quizSecondaryActionText}>{t("quiz.retryIncorrect")}</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => handleTabChange("manage")}
+          style={({ pressed }) => [styles.quizSecondaryAction, pressed && styles.pressed]}
+        >
+          <MaterialCommunityIcons name="card-text-outline" size={16} color={theme.textSecondary} />
+          <Text style={styles.quizSecondaryActionText}>{t("quiz.manageCards")}</Text>
+        </Pressable>
+      </View>
+    </>
+  );
+
   const renderQuizTab = () => (
     <View style={styles.scene}>
-      {!roundComplete && !current ? (
+      {!roundComplete && !current && !hasSavedCards ? (
         renderFolderExplorer({
           currentFolderId: quizFolderId,
           onSelectFolder: selectQuizFolder,
@@ -4227,90 +4570,7 @@ export default function App() {
             </View>
           </View>
         ) : hasSavedCards ? (
-          <View style={[styles.quizReadyCard, styles.quizReadyCardOffset]} {...tutorialTargetProps("quiz-ready-card")}>
-            <View style={styles.historySummaryHeader}>
-              <Text style={styles.panelTitle}>{t("quiz.readyTitle")}</Text>
-              <Text style={styles.panelBody}>{t("quiz.readyBody")}</Text>
-            </View>
-
-            <View style={styles.quizReadyStats}>
-              <View style={styles.quizReadyStat}>
-                <Text style={styles.quizReadyStatValue}>{quizFolderPairs.length}</Text>
-                <Text style={styles.quizReadyStatLabel}>{t("quiz.storedCards")}</Text>
-              </View>
-              <View
-                style={[
-                  styles.quizReadyStat,
-                  quizFolderPairs.length > 0 && styles.quizReadyStatEditable,
-                ]}
-              >
-                <TextInput
-                  value={quizFolderPairs.length ? quizCountInput : ""}
-                  onBlur={normalizeQuizCountInput}
-                  onChangeText={(value) => setQuizCountInput(value.replace(/[^0-9]/g, ""))}
-                  editable={quizFolderPairs.length > 0}
-                  keyboardType="number-pad"
-                  maxLength={3}
-                  placeholder="-"
-                  placeholderTextColor={theme.textPlaceholder}
-                  style={[
-                    styles.quizReadyStatInput,
-                    quizFolderPairs.length > 0 && styles.quizReadyStatInputEditable,
-                    !quizFolderPairs.length && styles.quizCountInputDisabled,
-                  ]}
-                />
-                <Text
-                  style={[
-                    styles.quizReadyStatLabel,
-                    quizFolderPairs.length > 0 && styles.quizReadyStatLabelEditable,
-                  ]}
-                >
-                  {t("quiz.requestedCount")}
-                </Text>
-              </View>
-              <View style={styles.quizReadyStat}>
-                <Text style={styles.quizReadyStatValue}>{maxQuizCount}</Text>
-                <Text style={styles.quizReadyStatLabel}>{t("quiz.availableCount")}</Text>
-              </View>
-            </View>
-
-            <View style={[styles.quizModeCard, styles.quizModeCardEmbedded]}>
-              <Text style={styles.quizSetupLabel}>{t("quiz.modeLabel")}</Text>
-              <Text style={styles.quizSetupHint}>{t(quizModeConfig.descriptionKey)}</Text>
-              <View style={styles.quizModeRow}>
-                {QUIZ_MODE_OPTIONS.map((option) => {
-                  const active = quizMode === option.key;
-
-                  return (
-                    <Pressable
-                      key={option.key}
-                      onPress={() => setQuizMode(option.key)}
-                      style={({ pressed }) => [
-                        styles.quizModeChip,
-                        active && styles.quizModeChipActive,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      <Text style={[styles.quizModeChipText, active && styles.quizModeChipTextActive]}>{t(option.chipLabelKey)}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-
-            <View style={styles.actionRow}>
-              <Pressable
-                {...tutorialTargetProps("quiz-start-button")}
-                onPress={() => startQuiz()}
-                style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
-              >
-                <Text style={styles.primaryButtonText}>{t("quiz.startButton")}</Text>
-              </Pressable>
-              <Pressable onPress={() => handleTabChange("manage")} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-                <Text style={styles.secondaryButtonText}>{t("quiz.openLibrary")}</Text>
-              </Pressable>
-            </View>
-          </View>
+          renderQuizReadySetup()
         ) : (
           <EmptyPanel
             styles={styles}
@@ -4321,6 +4581,7 @@ export default function App() {
             onPress={() => handleTabChange("save")}
           />
         )}
+      {renderRecentRetryModal()}
     </View>
   );
 
@@ -7440,6 +7701,242 @@ const createStyles = (theme) => StyleSheet.create({
     lineHeight: 22,
     color: theme.textSecondary,
   },
+  quizReadyHero: {
+    gap: 4,
+    paddingHorizontal: 2,
+    paddingTop: 2,
+  },
+  quizReadyHeroTitle: {
+    fontSize: 20,
+    lineHeight: 27,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  quizScopeCard: {
+    gap: 12,
+    padding: 16,
+    borderRadius: 20,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  quizScopeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  quizScopeTitle: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  quizScopeChangeButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    minHeight: 30,
+    paddingHorizontal: 9,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  quizScopeChangeText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: theme.textSecondary,
+  },
+  quizScopePathRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  quizScopePathText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  quizScopeStatsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 58,
+  },
+  quizScopeStat: {
+    flex: 1,
+    alignItems: "center",
+    gap: 4,
+  },
+  quizScopeDivider: {
+    width: 1,
+    height: 42,
+    backgroundColor: theme.surfaceBorderSoft,
+  },
+  quizScopeStatLabel: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: theme.textSecondary,
+  },
+  quizScopeStatValue: {
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  quizCountPickerCard: {
+    gap: 13,
+    padding: 16,
+    borderRadius: 20,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  quizCountStepperRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+  quizCountRoundButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  quizCountValue: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 24,
+    lineHeight: 31,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  quizPresetRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  quizPresetChip: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 36,
+    borderRadius: 999,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  quizPresetChipActive: {
+    backgroundColor: theme.accent,
+    borderColor: theme.accent,
+  },
+  quizPresetText: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: theme.textSecondary,
+  },
+  quizPresetTextActive: {
+    color: theme.accentText,
+  },
+  quizDirectionCard: {
+    gap: 12,
+    padding: 16,
+    borderRadius: 20,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  quizDirectionRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  quizDirectionChip: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    minHeight: 76,
+    paddingHorizontal: 8,
+    borderRadius: 16,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  quizDirectionChipActive: {
+    backgroundColor: theme.accent,
+    borderColor: theme.accent,
+  },
+  quizDirectionText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "900",
+    textAlign: "center",
+    color: theme.textPrimary,
+  },
+  quizDirectionTextActive: {
+    color: theme.accentText,
+  },
+  quizDirectionSubtext: {
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: "700",
+    textAlign: "center",
+    color: theme.textSecondary,
+  },
+  quizDirectionSubtextActive: {
+    color: theme.accentText,
+    opacity: 0.9,
+  },
+  quizStartFullButton: {
+    minHeight: 54,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    borderRadius: 17,
+    backgroundColor: theme.accent,
+    shadowColor: theme.accent,
+    shadowOpacity: theme.mode === "dark" ? 0.24 : 0.24,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  quizStartFullText: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "900",
+    color: theme.accentText,
+  },
+  quizSecondaryActionRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  quizSecondaryAction: {
+    flex: 1,
+    minHeight: 46,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    borderRadius: 15,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  quizSecondaryActionText: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
   quizReadyStats: {
     flexDirection: "row",
     gap: 8,
@@ -8187,6 +8684,72 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 14,
     fontWeight: "900",
     color: theme.accentText,
+  },
+  retryModalCard: {
+    width: "100%",
+    gap: 14,
+    padding: 18,
+    borderRadius: 24,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  retryModalBody: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: theme.textSecondary,
+  },
+  retryDaysInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  retryDaysInput: {
+    flex: 0,
+    width: 86,
+    minHeight: 46,
+    paddingVertical: 10,
+    textAlign: "center",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  retryDaysUnit: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  retryPresetRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  retryPresetChip: {
+    minHeight: 34,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  retryPresetChipActive: {
+    backgroundColor: theme.accentSoft,
+    borderColor: theme.accent,
+  },
+  retryPresetText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.textSecondary,
+  },
+  retryPresetTextActive: {
+    color: theme.accent,
+  },
+  retryPreviewText: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "800",
+    color: theme.accent,
   },
   inlineActionButtonText: {
     fontSize: 13,
