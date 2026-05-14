@@ -100,9 +100,8 @@ const SUPPORT_CATEGORY_OPTIONS = ["bug", "feature", "other"];
 const SUPPORT_STATUS_OPTIONS = ["received", "reviewing", "resolved"];
 const ADMIN_SUPPORT_PREVIEW_LIMIT = 12;
 const MANAGE_SORT_OPTIONS = [
-  { key: "recent", labelKey: "manage.sortRecent" },
-  { key: "alphabetical", labelKey: "manage.sortAlphabetical" },
-  { key: "missed", labelKey: "manage.sortMissed" },
+  { key: "recent", labelKey: "manage.sortRegistered" },
+  { key: "missed", labelKey: "manage.sortMissedShort" },
 ];
 const THEME_OPTIONS = [
   { key: "light", labelKey: "theme.light", icon: "white-balance-sunny" },
@@ -711,6 +710,7 @@ export default function App() {
   const [feedback, setFeedback] = useState("");
   const [result, setResult] = useState(null);
   const [quizFolderPickerOpen, setQuizFolderPickerOpen] = useState(false);
+  const [quizFolderBrowseId, setQuizFolderBrowseId] = useState(ROOT_FOLDER_ID);
   const [retryWindowVisible, setRetryWindowVisible] = useState(false);
   const [retryDaysInput, setRetryDaysInput] = useState("7");
   const [importing, setImporting] = useState(false);
@@ -736,6 +736,7 @@ export default function App() {
   const [launchVisible, setLaunchVisible] = useState(true);
   const [openManageSwipeId, setOpenManageSwipeId] = useState(null);
   const [legalDocKey, setLegalDocKey] = useState(null);
+  const [manageFolderPanelCollapsed, setManageFolderPanelCollapsed] = useState(false);
 
   const timerRef = useRef(null);
   const appRootRef = useRef(null);
@@ -1158,18 +1159,7 @@ export default function App() {
     [historyCalendarMonth, historySessionCountsByDate]
   );
   const normalizedManageSearch = manageSearch.trim().toLocaleLowerCase(language);
-  const activeManageSortOption =
-    MANAGE_SORT_OPTIONS.find((option) => option.key === manageSort) ?? MANAGE_SORT_OPTIONS[0];
   const sortedManagePairs = useMemo(() => {
-    if (manageSort === "alphabetical") {
-      return [...manageFolderPairs].sort((leftPair, rightPair) => {
-        const leftText = `${leftPair.left} ${leftPair.right}`.trim();
-        const rightText = `${rightPair.left} ${rightPair.right}`.trim();
-
-        return leftText.localeCompare(rightText, language, { sensitivity: "base" });
-      });
-    }
-
     if (manageSort === "missed") {
       return [...manageFolderPairs].sort((leftPair, rightPair) => {
         const leftStats = studyStats.cards[createSignature(leftPair.left, leftPair.right)] ?? {};
@@ -1196,8 +1186,12 @@ export default function App() {
       });
     }
 
-    return sortPairs(manageFolderPairs);
-  }, [language, manageFolderPairs, manageSort, studyStats.cards]);
+    return [...manageFolderPairs].sort(
+      (leftPair, rightPair) =>
+        new Date(rightPair.createdAt || rightPair.updatedAt || 0) -
+        new Date(leftPair.createdAt || leftPair.updatedAt || 0)
+    );
+  }, [manageFolderPairs, manageSort, studyStats.cards]);
   const visibleManagePairs = useMemo(() => {
     if (!normalizedManageSearch) {
       return sortedManagePairs;
@@ -1209,46 +1203,6 @@ export default function App() {
       )
     );
   }, [language, normalizedManageSearch, sortedManagePairs]);
-  const todayMissedCards = useMemo(() => {
-    const counter = new Map();
-
-    todaySessions.forEach((item) => {
-      (item.incorrectCards ?? []).forEach((card, index) => {
-        const signature =
-          (typeof card?.signature === "string" && card.signature) ||
-          createSignature(card?.left ?? "", card?.right ?? "") ||
-          `missed-${item.id}-${index}`;
-        const currentCount = counter.get(signature) ?? {
-          ...card,
-          signature,
-          count: 0,
-        };
-
-        currentCount.count += 1;
-        counter.set(signature, currentCount);
-      });
-    });
-
-    return Array.from(counter.values()).sort((a, b) => b.count - a.count).slice(0, 5);
-  }, [todaySessions]);
-  const topMissedCards = useMemo(
-    () =>
-      Object.entries(studyStats.cards)
-        .map(([signature, item]) => ({
-          ...item,
-          signature,
-        }))
-        .filter((item) => (item.incorrect ?? 0) > 0)
-        .sort((a, b) => {
-          if ((b.incorrect ?? 0) !== (a.incorrect ?? 0)) {
-            return (b.incorrect ?? 0) - (a.incorrect ?? 0);
-          }
-
-          return (b.attempts ?? 0) - (a.attempts ?? 0);
-        })
-        .slice(0, 5),
-    [studyStats.cards]
-  );
   const hasStudyHistory =
     studyStats.sessions.length > 0 ||
     Object.values(studyStats.cards).some((item) => (item.attempts ?? 0) > 0);
@@ -2004,6 +1958,7 @@ export default function App() {
     const nextFolderId = normalizeFolderId(folderId);
 
     setQuizFolderId(nextFolderId);
+    setQuizFolderBrowseId(nextFolderId);
     setFolderNameDraft("");
     setCreatingFolderKey(null);
     setFolderActionMenuKey(null);
@@ -3432,6 +3387,10 @@ export default function App() {
     onSelectFolder,
     allowCreate = false,
     scope = "folders",
+    showSavedCards = true,
+    collapsible = false,
+    collapsed = false,
+    onToggleCollapse,
   }) => {
     const normalizedCurrentFolderId = normalizeFolderId(currentFolderId);
     const currentFolder = folders.find((folder) => folder.id === normalizedCurrentFolderId);
@@ -3515,26 +3474,48 @@ export default function App() {
               <Text style={styles.folderPanelTitle}>{t("folders.title")}</Text>
             </View>
           </View>
-          {folderActions.length ? (
-            <View style={styles.folderActionWrap}>
-              <Pressable
-                accessibilityLabel={t("folders.actions")}
-                onPress={() =>
-                  setFolderActionMenuKey((currentKey) =>
-                    currentKey === folderViewKey ? null : folderViewKey
-                  )
-                }
-                style={({ pressed }) => [
-                  styles.folderActionButton,
-                  actionMenuOpen && styles.folderActionButtonActive,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <MaterialCommunityIcons name="dots-horizontal" size={22} color={theme.textPrimary} />
-              </Pressable>
-              {actionMenuOpen ? (
-                <View style={styles.folderActionMenu}>
-                  {folderActions.map(renderFolderAction)}
+          {folderActions.length || collapsible ? (
+            <View style={styles.folderHeaderActions}>
+              {collapsible ? (
+                <Pressable
+                  accessibilityLabel={collapsed ? t("folders.expand") : t("folders.collapse")}
+                  onPress={onToggleCollapse}
+                  style={({ pressed }) => [
+                    styles.folderActionButton,
+                    styles.folderCollapseButton,
+                    collapsed && styles.folderActionButtonActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name={collapsed ? "chevron-down" : "chevron-up"}
+                    size={22}
+                    color={collapsed ? theme.accent : theme.textSecondary}
+                  />
+                </Pressable>
+              ) : null}
+              {folderActions.length ? (
+                <View style={styles.folderActionWrap}>
+                  <Pressable
+                    accessibilityLabel={t("folders.actions")}
+                    onPress={() =>
+                      setFolderActionMenuKey((currentKey) =>
+                        currentKey === folderViewKey ? null : folderViewKey
+                      )
+                    }
+                    style={({ pressed }) => [
+                      styles.folderActionButton,
+                      actionMenuOpen && styles.folderActionButtonActive,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <MaterialCommunityIcons name="dots-horizontal" size={22} color={theme.textPrimary} />
+                  </Pressable>
+                  {actionMenuOpen ? (
+                    <View style={styles.folderActionMenu}>
+                      {folderActions.map(renderFolderAction)}
+                    </View>
+                  ) : null}
                 </View>
               ) : null}
             </View>
@@ -3606,51 +3587,55 @@ export default function App() {
           </View>
         ) : null}
 
-        <View style={styles.folderChildrenSection}>
-          {children.length ? (
-            <View style={styles.folderChildList}>
-              {children.map((folder) => {
-                const folderPairCount = pairs.filter(
-                  (pair) => normalizeFolderId(pair.folderId) === folder.id
-                ).length;
+        {!collapsed ? (
+          <View style={styles.folderChildrenSection}>
+            {children.length ? (
+              <View style={styles.folderChildList}>
+                {children.map((folder) => {
+                  const folderPairCount = pairs.filter(
+                    (pair) => normalizeFolderId(pair.folderId) === folder.id
+                  ).length;
 
-                return (
-                  <Pressable
-                    key={folder.id}
-                    onPress={() => onSelectFolder(folder.id)}
-                    style={({ pressed }) => [styles.folderChildItem, pressed && styles.pressed]}
-                  >
-                    <View style={styles.folderChildIcon}>
-                      <MaterialCommunityIcons name="folder" size={40} color={theme.accent} />
-                    </View>
-                    <Text style={styles.folderChildName} numberOfLines={2} ellipsizeMode="tail">
-                      {folder.name}
-                    </Text>
-                    <Text style={styles.folderChildMeta}>
-                      {t("folders.folderCardCount", { count: folderPairCount })}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : (
-            <Text style={styles.folderEmptyText}>{t("folders.emptyChildren")}</Text>
-          )}
-          <Pressable
-            onPress={() => openFolderCards(normalizedCurrentFolderId)}
-            style={({ pressed }) => [styles.folderSavedCardsItem, pressed && styles.pressed]}
-          >
-            <View style={styles.folderSavedCardsIcon}>
-              <MaterialCommunityIcons name="file-document-outline" size={36} color={theme.textSecondary} />
-            </View>
-            <Text style={styles.folderSavedCardsName} numberOfLines={2}>
-              {t("folders.savedCards")}
-            </Text>
-            <Text style={styles.folderSavedCardsMeta}>
-              {t("folders.folderCardCount", { count: directPairCount })}
-            </Text>
-          </Pressable>
-        </View>
+                  return (
+                    <Pressable
+                      key={folder.id}
+                      onPress={() => onSelectFolder(folder.id)}
+                      style={({ pressed }) => [styles.folderChildItem, pressed && styles.pressed]}
+                    >
+                      <View style={styles.folderChildIcon}>
+                        <MaterialCommunityIcons name="folder" size={40} color={theme.accent} />
+                      </View>
+                      <Text style={styles.folderChildName} numberOfLines={2} ellipsizeMode="tail">
+                        {folder.name}
+                      </Text>
+                      <Text style={styles.folderChildMeta}>
+                        {t("folders.folderCardCount", { count: folderPairCount })}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : (
+              <Text style={styles.folderEmptyText}>{t("folders.emptyChildren")}</Text>
+            )}
+            {showSavedCards ? (
+              <Pressable
+                onPress={() => openFolderCards(normalizedCurrentFolderId)}
+                style={({ pressed }) => [styles.folderSavedCardsItem, pressed && styles.pressed]}
+              >
+                <View style={styles.folderSavedCardsIcon}>
+                  <MaterialCommunityIcons name="file-document-outline" size={36} color={theme.textSecondary} />
+                </View>
+                <Text style={styles.folderSavedCardsName} numberOfLines={2}>
+                  {t("folders.savedCards")}
+                </Text>
+                <Text style={styles.folderSavedCardsMeta}>
+                  {t("folders.folderCardCount", { count: directPairCount })}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
 
         {allowCreate && creatingCurrentFolder ? (
           <View style={styles.folderManageBox}>
@@ -4279,7 +4264,10 @@ export default function App() {
         <View style={styles.quizScopeHeader}>
           <Text style={styles.quizScopeTitle}>{t("quiz.scopeTitle")}</Text>
           <Pressable
-            onPress={() => setQuizFolderPickerOpen((currentValue) => !currentValue)}
+            onPress={() => {
+              setQuizFolderBrowseId(quizFolderId);
+              setQuizFolderPickerOpen((currentValue) => !currentValue);
+            }}
             style={({ pressed }) => [styles.quizScopeChangeButton, pressed && styles.pressed]}
           >
             <Text style={styles.quizScopeChangeText}>{t("quiz.changeScope")}</Text>
@@ -4312,11 +4300,21 @@ export default function App() {
       </View>
 
       {quizFolderPickerOpen ? (
-        renderFolderExplorer({
-          currentFolderId: quizFolderId,
-          onSelectFolder: selectQuizFolder,
-          scope: "quiz",
-        })
+        <View style={styles.quizFolderPickerPanel}>
+          {renderFolderExplorer({
+            currentFolderId: quizFolderBrowseId,
+            onSelectFolder: (folderId) => setQuizFolderBrowseId(normalizeFolderId(folderId)),
+            scope: "quiz",
+            showSavedCards: false,
+          })}
+          <Pressable
+            onPress={() => selectQuizFolder(quizFolderBrowseId)}
+            style={({ pressed }) => [styles.quizSelectFolderButton, pressed && styles.pressed]}
+          >
+            <MaterialCommunityIcons name="check" size={17} color={theme.accentText} />
+            <Text style={styles.quizSelectFolderButtonText}>{t("quiz.selectThisFolder")}</Text>
+          </Pressable>
+        </View>
       ) : null}
 
       <View style={styles.quizCountPickerCard}>
@@ -4586,7 +4584,6 @@ export default function App() {
   );
 
   const renderHistoryTab = () => {
-    const missedCards = todayMissedCards.length ? todayMissedCards : topMissedCards;
     const historySessionPreview = selectedHistorySessions.slice(0, 3);
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -4599,32 +4596,26 @@ export default function App() {
     const historyMetrics = [
       {
         key: "sessions",
-        icon: "book-open-variant",
         value: todaySessionCount,
         label: t("history.sessions"),
         delta: todaySessionCount - yesterdaySessions.length,
         deltaKey: "history.sessionDelta",
-        iconColor: theme.accent,
         trendTone: "good",
       },
       {
         key: "solved",
-        icon: "check-circle",
         value: todaySolvedCount,
         label: t("history.solved"),
         delta: todaySolvedCount - yesterdaySolvedCount,
         deltaKey: "history.cardDelta",
-        iconColor: theme.success,
         trendTone: "good",
       },
       {
         key: "incorrect",
-        icon: "clock-outline",
         value: todayIncorrectCount,
         label: t("history.incorrect"),
         delta: todayIncorrectCount - yesterdayIncorrectCount,
         deltaKey: "history.cardDelta",
-        iconColor: theme.danger,
         trendTone: "bad",
       },
     ];
@@ -4634,9 +4625,6 @@ export default function App() {
 
       return (
         <View key={metric.key} style={styles.historyMetricCard}>
-          <View style={[styles.historyMetricIcon, { backgroundColor: `${metric.iconColor}1F` }]}>
-            <MaterialCommunityIcons name={metric.icon} size={18} color={metric.iconColor} />
-          </View>
           <Text style={[styles.historyMetricValue, metric.key === "incorrect" && todayIncorrectCount > 0 && styles.historyMetricValueBad]}>
             {metric.value}
           </Text>
@@ -4656,11 +4644,6 @@ export default function App() {
       setHistoryCalendarMonth(getStartOfLocalMonth(parseLocalDayKey(historyDateKey)));
       setHistoryCalendarOpen((currentValue) => !currentValue);
     };
-    const openMissedCardsInLibrary = () => {
-      setManageFolderId(ROOT_FOLDER_ID);
-      setManageSort("missed");
-      handleTabChange("manage");
-    };
     const renderHistoryActionRow = (label, onPress) => (
       <Pressable onPress={onPress} style={({ pressed }) => [styles.historyActionRow, pressed && styles.pressed]}>
         <Text style={styles.historyActionText}>{label}</Text>
@@ -4678,18 +4661,12 @@ export default function App() {
             <Text style={styles.historyItemTitle}>{formatSessionLabelForLanguage(item.completedAt, language)}</Text>
             <Text style={styles.historyItemCaption}>
               {t("history.recentSessionCaption", {
-                source: t(item.source === "retry" ? "quiz.sourceRetry" : "quiz.sourceAdaptive"),
-                total: item.totalCards,
-                correct: item.correctCount,
+                total: item.totalCards ?? 0,
+                incorrect: item.incorrectCount ?? 0,
               })}
             </Text>
           </View>
           <View style={styles.historyItemSide}>
-            <View style={[styles.historyBadge, item.incorrectCount > 0 && styles.historyBadgeBad]}>
-              <Text style={[styles.historyBadgeText, item.incorrectCount > 0 && styles.historyBadgeTextBad]}>
-                {t("history.incorrectBadge", { count: item.incorrectCount })}
-              </Text>
-            </View>
             {item.incorrectCount > 0 ? (
               <Pressable
                 onPress={() => retryIncorrectCardsFromSession(item)}
@@ -4705,41 +4682,6 @@ export default function App() {
         </View>
       </View>
     );
-    const renderMissedCardItem = (card) => {
-      const matchingPair = pairs.find((pair) => createSignature(pair.left, pair.right) === card.signature);
-      const folderLabel = getFolderLabel(normalizeFolderId(matchingPair?.folderId));
-      const missCount = todayMissedCards.length ? card.count : card.incorrect ?? 0;
-      const title = card.direction === "B_TO_A" ? card.right : card.left;
-
-      return (
-        <View key={`missed-${card.signature}`} style={styles.historyMissedCard}>
-          <View style={styles.historyMissedIcon}>
-            <MaterialCommunityIcons name="folder-outline" size={18} color={theme.accent} />
-          </View>
-          <View style={styles.historyItemBody}>
-            <Text style={styles.historyMissedPath} numberOfLines={1} ellipsizeMode="tail">
-              {folderLabel}
-            </Text>
-            <Text style={styles.historyItemTitle} numberOfLines={1} ellipsizeMode="tail">
-              {title || card.left || card.right || card.signature}
-            </Text>
-            <Text style={styles.historyItemCaption}>
-              {todayMissedCards.length
-                ? t("history.todayMissedCaption", { count: missCount })
-                : t("history.totalMissedCaption", {
-                    incorrect: card.incorrect,
-                    attempts: card.attempts,
-                  })}
-            </Text>
-          </View>
-          <View style={[styles.historyBadge, styles.historyBadgeBad]}>
-            <Text style={[styles.historyBadgeText, styles.historyBadgeTextBad]}>
-              {t("history.countTimes", { count: missCount })}
-            </Text>
-          </View>
-        </View>
-      );
-    };
 
     return (
       <View style={styles.scene}>
@@ -4891,21 +4833,6 @@ export default function App() {
                 </View>
                 {renderHistoryActionRow(t("history.viewAllHistory"), openHistoryCalendar)}
               </View>
-            </View>
-
-            <View style={styles.libraryPanel} {...tutorialTargetProps("history-missed-panel")}>
-              <View style={styles.panelHeader}>
-                <Text style={styles.panelTitle}>{todayMissedCards.length ? t("history.todayMissed") : t("history.topMissed")}</Text>
-                <Text style={styles.historyChipText}>{todayMissedCards.length ? t("history.todayBasis") : t("history.totalBasis")}</Text>
-              </View>
-              <View style={styles.historyList}>
-                {missedCards.length ? (
-                  missedCards.slice(0, 3).map(renderMissedCardItem)
-                ) : (
-                  <Text style={styles.historyEmptyText}>{t("history.noMissed")}</Text>
-                )}
-              </View>
-              {renderHistoryActionRow(t("history.viewAllMissed"), openMissedCardsInLibrary)}
             </View>
           </>
         ) : (
@@ -5112,37 +5039,92 @@ export default function App() {
     );
   };
 
-  const renderManageTab = () => (
-    <View style={styles.scene}>
-      {renderFolderExplorer({
-        currentFolderId: manageFolderId,
-        onSelectFolder: selectManageFolder,
-        allowCreate: true,
-        scope: "manage",
-      })}
+  const renderManageTab = () => {
+    const activeSortOption =
+      MANAGE_SORT_OPTIONS.find((option) => option.key === manageSort) ?? MANAGE_SORT_OPTIONS[0];
+    const selectManageSort = (sortKey) => {
+      setManageSort(sortKey);
+      setManageSortMenuOpen(false);
+    };
 
-      {manageFolderPairs.length ? (
-        <View style={[styles.libraryPanel, styles.manageListPanel]} {...tutorialTargetProps("manage-list-panel")}>
-          <View style={styles.manageListHeader}>
-            <Text style={styles.panelTitle}>{t("manage.listTitle")}</Text>
-            <Text style={styles.panelBody}>{t("manage.listBody")}</Text>
+    return (
+      <View style={styles.scene}>
+        {renderFolderExplorer({
+          currentFolderId: manageFolderId,
+          onSelectFolder: selectManageFolder,
+          allowCreate: true,
+          scope: "manage",
+          collapsible: true,
+          collapsed: manageFolderPanelCollapsed,
+          onToggleCollapse: () => setManageFolderPanelCollapsed((currentValue) => !currentValue),
+        })}
+
+        {manageFolderPairs.length ? (
+          <View style={[styles.libraryPanel, styles.manageListPanel]} {...tutorialTargetProps("manage-list-panel")}>
+            <View style={styles.manageListHeader}>
+              <View style={styles.manageListHeaderText}>
+                <Text style={styles.panelTitle}>{t("manage.listTitle")}</Text>
+                <Text style={styles.panelBody}>{t("manage.listBody")}</Text>
+              </View>
+              <View style={styles.manageSortControl}>
+                <Pressable
+                  onPress={() => setManageSortMenuOpen((currentValue) => !currentValue)}
+                  style={({ pressed }) => [
+                    styles.manageSortButton,
+                    manageSortMenuOpen && styles.manageSortButtonActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <MaterialCommunityIcons name="sort-variant" size={16} color={theme.accent} />
+                  <Text style={styles.manageSortButtonText}>{t(activeSortOption.labelKey)}</Text>
+                  <MaterialCommunityIcons
+                    name={manageSortMenuOpen ? "chevron-up" : "chevron-down"}
+                    size={16}
+                    color={theme.textSecondary}
+                  />
+                </Pressable>
+                {manageSortMenuOpen ? (
+                  <View style={styles.manageSortMenu}>
+                    {MANAGE_SORT_OPTIONS.map((option) => {
+                      const active = manageSort === option.key;
+
+                      return (
+                        <Pressable
+                          key={option.key}
+                          onPress={() => selectManageSort(option.key)}
+                          style={({ pressed }) => [
+                            styles.manageSortMenuItem,
+                            active && styles.manageSortMenuItemActive,
+                            pressed && styles.pressed,
+                          ]}
+                        >
+                          <Text style={[styles.manageSortMenuText, active && styles.manageSortMenuTextActive]}>
+                            {t(option.labelKey)}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </View>
+            </View>
+            <View style={styles.manageListDivider} />
+            {sortedManagePairs.map(renderManagePairCard)}
           </View>
-          <View style={styles.manageListDivider} />
-          {sortedManagePairs.map(renderManagePairCard)}
-        </View>
-      ) : (
-        <EmptyPanel
-          styles={styles}
-          theme={theme}
-          icon="playlist-remove"
-          title={pairs.length ? t("folders.manageEmptyTitle") : t("manage.emptyTitle")}
-          body={pairs.length ? t("folders.manageEmptyBody") : t("manage.emptyBody")}
-          actionLabel={t("manage.emptyAction")}
-          onPress={() => handleTabChange("save")}
-        />
-      )}
-    </View>
-  );
+        ) : (
+          <EmptyPanel
+            styles={styles}
+            theme={theme}
+            icon="playlist-remove"
+            title={pairs.length ? t("folders.manageEmptyTitle") : t("manage.emptyTitle")}
+            body={pairs.length ? t("folders.manageEmptyBody") : t("manage.emptyBody")}
+            actionLabel={t("manage.emptyAction")}
+            onPress={() => handleTabChange("save")}
+          />
+        )}
+      </View>
+    );
+  };
 
   const activeLegalDoc = LEGAL_DOC_OPTIONS.find((option) => option.key === legalDocKey);
 
@@ -6689,6 +6671,11 @@ const createStyles = (theme) => StyleSheet.create({
     flex: 1,
     gap: 5,
   },
+  folderHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   folderActionWrap: {
     position: "relative",
     zIndex: 40,
@@ -6707,6 +6694,9 @@ const createStyles = (theme) => StyleSheet.create({
   folderActionButtonActive: {
     backgroundColor: theme.accentSoft,
     borderColor: theme.accent,
+  },
+  folderCollapseButton: {
+    backgroundColor: theme.surface,
   },
   folderActionMenu: {
     position: "absolute",
@@ -7424,9 +7414,76 @@ const createStyles = (theme) => StyleSheet.create({
     paddingBottom: 14,
   },
   manageListHeader: {
-    gap: 4,
+    position: "relative",
+    zIndex: 30,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
     paddingHorizontal: 4,
     paddingBottom: 12,
+  },
+  manageListHeaderText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  manageSortControl: {
+    position: "relative",
+    zIndex: 50,
+    alignItems: "flex-end",
+  },
+  manageSortButton: {
+    minHeight: 34,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  manageSortButtonActive: {
+    backgroundColor: theme.accentSoft,
+    borderColor: theme.accent,
+  },
+  manageSortButtonText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: theme.accent,
+  },
+  manageSortMenu: {
+    position: "absolute",
+    top: 40,
+    right: 0,
+    width: 136,
+    overflow: "hidden",
+    borderRadius: 14,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+    shadowColor: theme.textPrimary,
+    shadowOpacity: theme.mode === "dark" ? 0.2 : 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 8,
+  },
+  manageSortMenuItem: {
+    minHeight: 38,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  manageSortMenuItemActive: {
+    backgroundColor: theme.accentSoft,
+  },
+  manageSortMenuText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.textSecondary,
+  },
+  manageSortMenuTextActive: {
+    color: theme.accent,
   },
   manageListDivider: {
     height: 1,
@@ -7786,7 +7843,24 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 20,
     lineHeight: 26,
     fontWeight: "900",
-    color: theme.textPrimary,
+    color: theme.textSecondary,
+  },
+  quizFolderPickerPanel: {
+    gap: 10,
+  },
+  quizSelectFolderButton: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    borderRadius: 16,
+    backgroundColor: theme.accent,
+  },
+  quizSelectFolderButtonText: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: theme.accentText,
   },
   quizCountPickerCard: {
     gap: 13,
@@ -7818,7 +7892,7 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 24,
     lineHeight: 31,
     fontWeight: "900",
-    color: theme.textPrimary,
+    color: theme.textSecondary,
   },
   quizPresetRow: {
     flexDirection: "row",
@@ -8789,8 +8863,9 @@ const createStyles = (theme) => StyleSheet.create({
   },
   historyMetricCard: {
     flex: 1,
-    gap: 5,
-    padding: 12,
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderRadius: 18,
     backgroundColor: theme.surface,
     borderWidth: 1,
@@ -8917,7 +8992,7 @@ const createStyles = (theme) => StyleSheet.create({
   historyTimelineDot: {
     width: 7,
     height: 7,
-    marginTop: 22,
+    marginTop: 18,
     borderRadius: 999,
     backgroundColor: theme.surfaceBorder,
   },
@@ -9012,11 +9087,11 @@ const createStyles = (theme) => StyleSheet.create({
   historyItem: {
     flex: 1,
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
-    marginBottom: 10,
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 8,
     paddingHorizontal: 12,
-    paddingVertical: 14,
+    paddingVertical: 11,
     borderRadius: 18,
     backgroundColor: theme.surface,
     borderWidth: 1,
@@ -9028,7 +9103,7 @@ const createStyles = (theme) => StyleSheet.create({
   },
   historyItemSide: {
     alignItems: "flex-end",
-    gap: 8,
+    justifyContent: "center",
   },
   historyItemTitle: {
     fontSize: 14,
@@ -9058,8 +9133,8 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.danger,
   },
   historyRetryButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
     borderRadius: 999,
     backgroundColor: theme.accentSoft,
     borderWidth: 1,
