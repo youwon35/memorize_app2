@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   Animated,
   BackHandler,
   Easing,
@@ -79,7 +78,7 @@ const DAILY_STUDY_GOAL_KEY = "@memoria/daily-study-goal";
 const THEME_MODE_KEY = "@memoria/theme-mode";
 const LANGUAGE_KEY = "@memoria/language";
 const STUDY_STATS_KEY = "@memoria/study-stats";
-const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen-v3";
+const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen-v4";
 const SUPPORT_REQUESTS_KEY = "@memoria/support-requests";
 const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
@@ -339,72 +338,12 @@ const TUTORIAL_STEPS = [
     bodyKey: "tutorial.saveTabBody",
   },
   {
-    key: "save-folder-manage",
-    type: "spotlight",
-    tab: "save",
-    targetKey: "folder-create-save",
-    spotlightRadius: 18,
-    bubbleHeight: 280,
-    icon: "folder-open-outline",
-    titleKey: "tutorial.saveFolderTitle",
-    bodyKey: "tutorial.saveFolderBody",
-    actionKey: "tutorial.next",
-  },
-  {
-    key: "save-single-chip",
-    type: "spotlight",
-    tab: "save",
-    targetKey: "save-mode-single",
-    spotlightRadius: 16,
-    icon: "cards-outline",
-    titleKey: "tutorial.saveSingleChipTitle",
-    bodyKey: "tutorial.saveSingleChipBody",
-    actionKey: "tutorial.next",
-  },
-  {
-    key: "save-single-practice",
-    type: "spotlight",
-    tab: "save",
-    targetKey: "save-composer",
-    spotlightRadius: 18,
-    bubbleGap: 42,
-    bubbleHeight: 170,
-    icon: "cards-outline",
-    titleKey: "tutorial.savePracticeTitle",
-    bodyKey: "tutorial.savePracticeBody",
-    actionKey: "tutorial.next",
-  },
-  {
     key: "quiz-tab",
     type: "tab",
     tab: "quiz",
     icon: "brain",
     titleKey: "tutorial.quizTabTitle",
     bodyKey: "tutorial.quizTabBody",
-  },
-  {
-    key: "quiz-folder-setting",
-    type: "spotlight",
-    tab: "quiz",
-    targetKey: "folder-panel-quiz",
-    spotlightRadius: 24,
-    bubbleHeight: 280,
-    icon: "brain",
-    titleKey: "tutorial.quizUseTitle",
-    bodyKey: "tutorial.quizUseBody",
-    actionKey: "tutorial.nextQuizStart",
-  },
-  {
-    key: "quiz-start-overview",
-    type: "spotlight",
-    tab: "quiz",
-    targetKey: "quiz-start-button",
-    spotlightRadius: 18,
-    bubbleHeight: 250,
-    icon: "brain",
-    titleKey: "tutorial.quizStartTitle",
-    bodyKey: "tutorial.quizStartBody",
-    actionKey: "tutorial.nextHistory",
   },
   {
     key: "history-tab",
@@ -415,18 +354,6 @@ const TUTORIAL_STEPS = [
     bodyKey: "tutorial.historyTabBody",
   },
   {
-    key: "history-summary",
-    type: "spotlight",
-    tab: "history",
-    targetKey: "history-summary-panel",
-    spotlightRadius: 26,
-    bubbleHeight: 320,
-    icon: "chart-timeline-variant",
-    titleKey: "tutorial.historySummaryTitle",
-    bodyKey: "tutorial.historySummaryBody",
-    actionKey: "tutorial.next",
-  },
-  {
     key: "manage-tab",
     type: "tab",
     tab: "manage",
@@ -435,37 +362,12 @@ const TUTORIAL_STEPS = [
     bodyKey: "tutorial.manageTabBody",
   },
   {
-    key: "manage-use",
-    type: "spotlight",
-    tab: "manage",
-    targetKey: "manage-list-panel",
-    spotlightRadius: 26,
-    bubbleHeight: 360,
-    icon: "playlist-edit",
-    titleKey: "tutorial.manageUseTitle",
-    bodyKey: "tutorial.manageUseBody",
-    actionKey: "tutorial.next",
-  },
-  {
     key: "about-tab",
     type: "tab",
     tab: "about",
     icon: "information-outline",
     titleKey: "tutorial.aboutTabTitle",
     bodyKey: "tutorial.aboutTabBody",
-  },
-  {
-    key: "about-support",
-    type: "spotlight",
-    tab: "about",
-    targetKey: "about-support-panel",
-    spotlightRadius: 24,
-    spotlightPadding: 4,
-    bubbleGap: 84,
-    bubbleHeight: 300,
-    icon: "message-question-outline",
-    titleKey: "tutorial.aboutSupportTitle",
-    bodyKey: "tutorial.aboutSupportBody",
     actionKey: "tutorial.finish",
   },
 ];
@@ -690,7 +592,7 @@ export default function App() {
   const [tutorialSeen, setTutorialSeen] = useState(true);
   const [tutorialReady, setTutorialReady] = useState(false);
   const [tutorialVisible, setTutorialVisible] = useState(false);
-  const [tutorialStep, setTutorialStep] = useState("intro");
+  const [tutorialStep, setTutorialStep] = useState(TUTORIAL_STEPS[0].key);
   const [tutorialTargetRect, setTutorialTargetRect] = useState(null);
   const [session, setSession] = useState(null);
   const [userRole, setUserRole] = useState("user");
@@ -738,8 +640,10 @@ export default function App() {
   const [openManageSwipeId, setOpenManageSwipeId] = useState(null);
   const [legalDocKey, setLegalDocKey] = useState(null);
   const [stopQuizModalVisible, setStopQuizModalVisible] = useState(false);
+  const [tutorialCompletionVisible, setTutorialCompletionVisible] = useState(false);
+  const [appAlertConfig, setAppAlertConfig] = useState(null);
   const [saveFolderPanelCollapsed, setSaveFolderPanelCollapsed] = useState(false);
-  const [quizFolderPanelCollapsed, setQuizFolderPanelCollapsed] = useState(false);
+  const [quizFolderPanelCollapsed, setQuizFolderPanelCollapsed] = useState(true);
   const [manageFolderPanelCollapsed, setManageFolderPanelCollapsed] = useState(false);
 
   const timerRef = useRef(null);
@@ -812,6 +716,20 @@ export default function App() {
   const guidedTutorialActive = tutorialVisible && tutorialStep !== "intro";
   const currentTutorialStep = guidedTutorialActive ? TUTORIAL_STEP_MAP[tutorialStep] : null;
   const displayedTutorialStep = currentTutorialStep;
+  const Alert = useMemo(
+    () => ({
+      alert: (title, message, buttons) => {
+        setAppAlertConfig({
+          title,
+          message,
+          buttons: Array.isArray(buttons) && buttons.length
+            ? buttons
+            : [{ text: t("common.confirm") }],
+        });
+      },
+    }),
+    [t]
+  );
   tutorialStepRef.current = tutorialStep;
 
   const registerTutorialTarget = (key) => (node) => {
@@ -916,74 +834,29 @@ export default function App() {
     setTab(nextTab);
     setSaveActionMenuOpen(false);
     setManageSortMenuOpen(false);
+
+    if (nextTab === "quiz" && nextTab !== tab) {
+      setQuizFolderPanelCollapsed(true);
+    }
+
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo?.({ y: 0, animated: false });
     });
   };
 
   const applyTutorialStepSideEffects = (step) => {
-    if (step?.key === "save-folder-manage") {
-      setSaveComposerVisible(false);
-      setSaveActionMenuOpen(false);
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-      });
-    }
-
-    if (step?.key === "save-single-chip") {
-      setSaveInputMode("single");
-      setSaveComposerVisible(false);
-      setSaveActionMenuOpen(true);
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-      });
-    }
-
-    if (step?.key === "save-single-practice") {
-      setSaveInputMode("single");
-      setSaveActionMenuOpen(false);
-      setSaveComposerVisible(true);
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-      });
-    }
+    setSaveComposerVisible(false);
+    setSaveActionMenuOpen(false);
+    setManageSortMenuOpen(false);
+    setHistoryCalendarOpen(false);
 
     if (step?.key === "quiz-tab") {
-      setSaveActionMenuOpen(false);
-      setSaveComposerVisible(false);
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-      });
+      setQuizFolderPanelCollapsed(true);
     }
 
-    if (step?.key === "quiz-folder-setting" || step?.key === "quiz-start-overview") {
-      setQuizMode("front");
-      setQuizCountInput("1");
-      setQuizFolderPanelCollapsed(false);
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-      });
-    }
-
-    if (step?.key === "history-summary") {
-      setHistoryCalendarOpen(false);
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-      });
-    }
-
-    if (step?.key === "about-support") {
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 420, animated: true });
-      });
-    }
-
-    if (step?.key === "manage-use") {
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-      });
-    }
-
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo?.({ y: 0, animated: true });
+    });
     queueTutorialTargetMeasure(step?.targetKey);
   };
 
@@ -1024,6 +897,10 @@ export default function App() {
   ]);
 
   const handleTabChange = (nextTab) => {
+    if (guidedTutorialActive) {
+      return;
+    }
+
     const completeTabChange = () => {
       selectTab(nextTab);
 
@@ -1454,7 +1331,7 @@ export default function App() {
       return;
     }
 
-    setTutorialStep("intro");
+    setTutorialStep(TUTORIAL_STEPS[0].key);
     setTutorialVisible(true);
   }, [launchVisible, storageReady, tutorialReady, tutorialSeen]);
 
@@ -2296,7 +2173,7 @@ export default function App() {
 
   const closeTutorial = (nextTab = null, { showCompletionAlert = false } = {}) => {
     setTutorialVisible(false);
-    setTutorialStep("intro");
+    setTutorialStep(TUTORIAL_STEPS[0].key);
     setTutorialSeen(true);
     void AsyncStorage.setItem(TUTORIAL_SEEN_KEY, "1");
 
@@ -2306,13 +2183,14 @@ export default function App() {
 
     if (showCompletionAlert) {
       setTimeout(() => {
-        Alert.alert(t("tutorial.completionTitle"), t("tutorial.completionBody"));
+        setTutorialCompletionVisible(true);
       }, 250);
     }
   };
 
   const openTutorial = () => {
-    setTutorialStep("intro");
+    selectTab("save");
+    setTutorialStep(TUTORIAL_STEPS[0].key);
     setTutorialVisible(true);
   };
 
@@ -2324,7 +2202,7 @@ export default function App() {
     const nextStep = getNextTutorialStep(tutorialStep);
 
     if (!nextStep) {
-      closeTutorial(null, { showCompletionAlert: tutorialStep === "about-support" });
+      closeTutorial(null, { showCompletionAlert: tutorialStep === "about-tab" });
       return;
     }
 
@@ -4417,40 +4295,125 @@ export default function App() {
     </Modal>
   );
 
+  const renderTutorialCompletionModal = () => (
+    <Modal
+      visible={tutorialCompletionVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setTutorialCompletionVisible(false)}
+    >
+      <View style={styles.focusModalOverlay}>
+        <Pressable
+          style={styles.focusModalBackdrop}
+          onPress={() => setTutorialCompletionVisible(false)}
+        />
+        <View style={[styles.focusModalCard, contentMaxWidth ? { maxWidth: Math.min(contentMaxWidth, 420) } : null]}>
+          <View style={styles.focusModalSparkleRow}>
+            <MaterialCommunityIcons name="star-four-points" size={18} color={theme.accentSoftStrong} />
+            <View style={styles.focusModalIconWrap}>
+              <MaterialCommunityIcons name="book-check-outline" size={30} color={theme.accent} />
+            </View>
+            <MaterialCommunityIcons name="star-four-points" size={18} color={theme.accentSoftStrong} />
+          </View>
+          <Text style={styles.focusModalTitle}>{t("tutorial.completionTitle")}</Text>
+          <Text style={styles.focusModalBody}>{t("tutorial.completionBody")}</Text>
+          <Pressable
+            onPress={() => setTutorialCompletionVisible(false)}
+            style={({ pressed }) => [styles.focusModalPrimaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.focusModalPrimaryText}>{t("tutorial.completionConfirm")}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderAppAlertModal = () => {
+    if (!appAlertConfig) {
+      return null;
+    }
+
+    const buttons = appAlertConfig.buttons?.length
+      ? appAlertConfig.buttons
+      : [{ text: t("common.confirm") }];
+    const hasDestructiveButton = buttons.some((button) => button.style === "destructive");
+    const iconColor = hasDestructiveButton ? theme.danger : theme.accent;
+    const iconName = hasDestructiveButton ? "trash-can-outline" : "information-outline";
+    const closeAlert = () => setAppAlertConfig(null);
+    const pressAlertButton = (button) => {
+      closeAlert();
+
+      if (button?.onPress) {
+        setTimeout(() => button.onPress(), 0);
+      }
+    };
+    const getButtonVariant = (button, index) => {
+      if (button.style === "destructive") {
+        return "danger";
+      }
+
+      if (button.style === "cancel") {
+        return hasDestructiveButton ? "primary" : "secondary";
+      }
+
+      return index === 0 ? "primary" : "secondary";
+    };
+
+    return (
+      <Modal
+        visible={Boolean(appAlertConfig)}
+        transparent
+        animationType="fade"
+        onRequestClose={closeAlert}
+      >
+        <View style={styles.focusModalOverlay}>
+          <Pressable style={styles.focusModalBackdrop} onPress={closeAlert} />
+          <View style={[styles.focusModalCard, contentMaxWidth ? { maxWidth: Math.min(contentMaxWidth, 420) } : null]}>
+            <View style={styles.focusModalSparkleRow}>
+              <MaterialCommunityIcons name="star-four-points" size={18} color={theme.accentSoftStrong} />
+              <View style={[styles.focusModalIconWrap, hasDestructiveButton && styles.focusModalDangerIconWrap]}>
+                <MaterialCommunityIcons name={iconName} size={30} color={iconColor} />
+              </View>
+              <MaterialCommunityIcons name="star-four-points" size={18} color={theme.accentSoftStrong} />
+            </View>
+            <Text style={styles.focusModalTitle}>{appAlertConfig.title}</Text>
+            {appAlertConfig.message ? (
+              <Text style={styles.focusModalBody}>{appAlertConfig.message}</Text>
+            ) : null}
+            {buttons.map((button, index) => {
+              const variant = getButtonVariant(button, index);
+
+              return (
+                <Pressable
+                  key={`${button.text ?? "alert-button"}-${index}`}
+                  onPress={() => pressAlertButton(button)}
+                  style={({ pressed }) => [
+                    variant === "primary" ? styles.focusModalPrimaryButton : styles.focusModalSecondaryButton,
+                    variant === "danger" && styles.focusModalDangerButton,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      variant === "primary" ? styles.focusModalPrimaryText : styles.focusModalSecondaryText,
+                      variant === "danger" && styles.focusModalDangerText,
+                    ]}
+                  >
+                    {button.text ?? t("common.confirm")}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   const renderQuizReadySetup = () => (
     <>
       <View style={styles.quizReadyHero}>
         <Text style={styles.quizReadyHeroTitle}>{t("quiz.readyTitle")}</Text>
-      </View>
-
-      <View style={styles.quizScopeCard} {...tutorialTargetProps("quiz-scope-card")}>
-        <View style={styles.quizScopeHeader}>
-          <Text style={styles.quizScopeTitle}>{t("quiz.scopeTitle")}</Text>
-        </View>
-        <Text style={styles.quizScopeBody}>{t("quiz.scopeNestedBody")}</Text>
-
-        <View style={styles.quizScopePathRow}>
-          <MaterialCommunityIcons name="folder" size={22} color={theme.accent} />
-          <Text style={styles.quizScopePathText} numberOfLines={1} ellipsizeMode="tail">
-            {getFolderLabel(quizFolderId)}
-          </Text>
-        </View>
-
-        <View style={styles.quizScopeStatsRow}>
-          <View style={styles.quizScopeStat}>
-            <Text style={styles.quizScopeStatLabel}>{t("quiz.scopeSavedCards")}</Text>
-            <Text style={styles.quizScopeStatValue}>
-              {t("quiz.cardCount", { count: quizFolderPairs.length })}
-            </Text>
-          </View>
-          <View style={styles.quizScopeDivider} />
-          <View style={styles.quizScopeStat}>
-            <Text style={styles.quizScopeStatLabel}>{t("quiz.scopeAvailableQuestions")}</Text>
-            <Text style={styles.quizScopeStatValue}>
-              {t("quiz.questionCount", { count: maxQuizCount })}
-            </Text>
-          </View>
-        </View>
       </View>
 
       {renderFolderExplorer({
@@ -4465,7 +4428,12 @@ export default function App() {
       })}
 
       <View style={styles.quizCountPickerCard}>
-        <Text style={styles.quizSetupLabel}>{t("quiz.requestedCount")}</Text>
+        <View style={styles.quizCountHeader}>
+          <Text style={styles.quizSetupLabel}>{t("quiz.requestedCount")}</Text>
+          <Text style={styles.quizAvailableCountText}>
+            {t("quiz.availableQuestionCount", { count: maxQuizCount })}
+          </Text>
+        </View>
         <View style={styles.quizCountStepperRow}>
           <Pressable
             accessibilityLabel={t("quiz.decreaseCount")}
@@ -4603,6 +4571,10 @@ export default function App() {
           onSelectFolder: selectQuizFolder,
           allowCreate: true,
           scope: "quiz",
+          showSavedCards: false,
+          collapsible: true,
+          collapsed: quizFolderPanelCollapsed,
+          onToggleCollapse: () => setQuizFolderPanelCollapsed((currentValue) => !currentValue),
         })
       ) : null}
 
@@ -5922,7 +5894,7 @@ export default function App() {
             return (
               <Pressable
                 key={item.key}
-                disabled={guidedTutorialActive && !tutorialTarget}
+                disabled={guidedTutorialActive}
                 onPress={() => handleTabChange(item.key)}
                 style={({ pressed }) => [
                   styles.tab,
@@ -5953,23 +5925,14 @@ export default function App() {
 
       {renderDailyGoalModal()}
       {renderStopQuizModal()}
+      {renderTutorialCompletionModal()}
+      {renderAppAlertModal()}
 
       {launchVisible ? (
         <LaunchScreen opacity={launchOpacity} scale={launchScale} glow={moonGlow} styles={styles} />
       ) : null}
-      {tutorialVisible && tutorialStep === "intro" ? (
-        <TutorialOverlay
-          styles={styles}
-          theme={theme}
-          t={t}
-          maxWidth={tutorialMaxWidth}
-          onClose={() => closeTutorial()}
-          onStart={startGuidedTutorial}
-        />
-      ) : null}
       {guidedTutorialActive &&
-      displayedTutorialStep &&
-      !(tutorialStep === "save-single-practice" && saveComposerVisible) ? (
+      displayedTutorialStep ? (
         <TutorialCoach
           step={displayedTutorialStep}
           styles={styles}
@@ -5984,7 +5947,6 @@ export default function App() {
           onClose={() => closeTutorial()}
           onNext={advanceTutorial}
           onSaveDemo={saveTutorialCard}
-          onTargetTabPress={handleTabChange}
         />
       ) : null}
     </SafeAreaView>
@@ -8397,6 +8359,15 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
+  quizCountHeader: {
+    gap: 4,
+  },
+  quizAvailableCountText: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "800",
+    color: theme.textSecondary,
+  },
   quizCountStepperRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -9389,6 +9360,9 @@ const createStyles = (theme) => StyleSheet.create({
     borderRadius: 29,
     backgroundColor: theme.accentSoft,
   },
+  focusModalDangerIconWrap: {
+    backgroundColor: theme.dangerBgSoft,
+  },
   focusModalTitle: {
     textAlign: "center",
     fontSize: 18,
@@ -9434,10 +9408,17 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
+  focusModalDangerButton: {
+    backgroundColor: theme.dangerBgSoft,
+    borderColor: theme.dangerBgSoft,
+  },
   focusModalSecondaryText: {
     fontSize: 14,
     fontWeight: "900",
     color: theme.textSecondary,
+  },
+  focusModalDangerText: {
+    color: theme.danger,
   },
   goalStepperCard: {
     width: "100%",
