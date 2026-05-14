@@ -73,6 +73,7 @@ const APP_NAME = "MEMORIA";
 const STORAGE_KEY = "@memoria/cards";
 const FOLDERS_STORAGE_KEY = "@memoria/folders";
 const ROOT_FOLDER_ID = "root";
+const DAILY_STUDY_GOAL = 5;
 const THEME_MODE_KEY = "@memoria/theme-mode";
 const LANGUAGE_KEY = "@memoria/language";
 const STUDY_STATS_KEY = "@memoria/study-stats";
@@ -4227,39 +4228,159 @@ export default function App() {
 
   const renderHistoryTab = () => {
     const missedCards = todayMissedCards.length ? todayMissedCards : topMissedCards;
-    const [firstSelectedHistorySession, ...remainingSelectedHistorySessions] = selectedHistorySessions;
-    const renderHistorySessionItem = (item) => (
-      <View key={item.id} style={styles.historyItem}>
-        <View style={styles.historyItemBody}>
-          <Text style={styles.historyItemTitle}>{formatSessionLabelForLanguage(item.completedAt, language)}</Text>
-          <Text style={styles.historyItemCaption}>
-            {t("history.recentSessionCaption", {
-              source: t(item.source === "retry" ? "quiz.sourceRetry" : "quiz.sourceAdaptive"),
-              total: item.totalCards,
-              correct: item.correctCount,
-            })}
+    const historySessionPreview = selectedHistorySessions.slice(0, 3);
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayKey = getLocalDayKey(yesterday);
+    const yesterdaySessions = studyStats.sessions.filter((item) => getLocalDayKey(item.completedAt) === yesterdayKey);
+    const yesterdaySolvedCount = yesterdaySessions.reduce((sum, item) => sum + (item.totalCards ?? 0), 0);
+    const yesterdayIncorrectCount = yesterdaySessions.reduce((sum, item) => sum + (item.incorrectCount ?? 0), 0);
+    const progressRatio = Math.min(1, todaySessionCount / DAILY_STUDY_GOAL);
+    const progressPercent = Math.round(progressRatio * 100);
+    const historyMetrics = [
+      {
+        key: "sessions",
+        icon: "book-open-variant",
+        value: todaySessionCount,
+        label: t("history.sessions"),
+        delta: todaySessionCount - yesterdaySessions.length,
+        deltaKey: "history.sessionDelta",
+        iconColor: theme.accent,
+        trendTone: "good",
+      },
+      {
+        key: "solved",
+        icon: "check-circle",
+        value: todaySolvedCount,
+        label: t("history.solved"),
+        delta: todaySolvedCount - yesterdaySolvedCount,
+        deltaKey: "history.cardDelta",
+        iconColor: theme.success,
+        trendTone: "good",
+      },
+      {
+        key: "incorrect",
+        icon: "clock-outline",
+        value: todayIncorrectCount,
+        label: t("history.incorrect"),
+        delta: todayIncorrectCount - yesterdayIncorrectCount,
+        deltaKey: "history.cardDelta",
+        iconColor: theme.danger,
+        trendTone: "bad",
+      },
+    ];
+    const renderMetricCard = (metric) => {
+      const deltaSymbol = metric.delta === 0 ? "•" : metric.delta > 0 ? "▲" : "▼";
+      const deltaValue = Math.abs(metric.delta);
+
+      return (
+        <View key={metric.key} style={styles.historyMetricCard}>
+          <View style={[styles.historyMetricIcon, { backgroundColor: `${metric.iconColor}1F` }]}>
+            <MaterialCommunityIcons name={metric.icon} size={18} color={metric.iconColor} />
+          </View>
+          <Text style={[styles.historyMetricValue, metric.key === "incorrect" && todayIncorrectCount > 0 && styles.historyMetricValueBad]}>
+            {metric.value}
+          </Text>
+          <Text style={styles.historyMetricLabel}>{metric.label}</Text>
+          <Text
+            style={[
+              styles.historyMetricTrend,
+              metric.trendTone === "bad" ? styles.historyMetricTrendBad : styles.historyMetricTrendGood,
+            ]}
+          >
+            {deltaSymbol} {t(metric.deltaKey, { count: deltaValue })}
           </Text>
         </View>
-        <View style={styles.historyItemSide}>
-          <View style={[styles.historyBadge, item.incorrectCount > 0 && styles.historyBadgeBad]}>
-            <Text style={[styles.historyBadgeText, item.incorrectCount > 0 && styles.historyBadgeTextBad]}>
-              {t("history.incorrectBadge", { count: item.incorrectCount })}
+      );
+    };
+    const openHistoryCalendar = () => {
+      setHistoryCalendarMonth(getStartOfLocalMonth(parseLocalDayKey(historyDateKey)));
+      setHistoryCalendarOpen((currentValue) => !currentValue);
+    };
+    const openMissedCardsInLibrary = () => {
+      setManageFolderId(ROOT_FOLDER_ID);
+      setManageSort("missed");
+      handleTabChange("manage");
+    };
+    const renderHistoryActionRow = (label, onPress) => (
+      <Pressable onPress={onPress} style={({ pressed }) => [styles.historyActionRow, pressed && styles.pressed]}>
+        <Text style={styles.historyActionText}>{label}</Text>
+        <MaterialCommunityIcons name="chevron-right" size={18} color={theme.textSecondary} />
+      </Pressable>
+    );
+    const renderHistorySessionItem = (item, index, collection) => (
+      <View key={item.id} style={styles.historyTimelineItem}>
+        <View style={styles.historyTimelineRail}>
+          <View style={[styles.historyTimelineDot, item.incorrectCount > 0 && styles.historyTimelineDotActive]} />
+          {index < collection.length - 1 ? <View style={styles.historyTimelineLine} /> : null}
+        </View>
+        <View style={styles.historyItem}>
+          <View style={styles.historyItemBody}>
+            <Text style={styles.historyItemTitle}>{formatSessionLabelForLanguage(item.completedAt, language)}</Text>
+            <Text style={styles.historyItemCaption}>
+              {t("history.recentSessionCaption", {
+                source: t(item.source === "retry" ? "quiz.sourceRetry" : "quiz.sourceAdaptive"),
+                total: item.totalCards,
+                correct: item.correctCount,
+              })}
             </Text>
           </View>
-          {item.incorrectCount > 0 ? (
-            <Pressable
-              onPress={() => retryIncorrectCardsFromSession(item)}
-              style={({ pressed }) => [
-                styles.historyRetryButton,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text style={styles.historyRetryButtonText}>{t("history.retrySession")}</Text>
-            </Pressable>
-          ) : null}
+          <View style={styles.historyItemSide}>
+            <View style={[styles.historyBadge, item.incorrectCount > 0 && styles.historyBadgeBad]}>
+              <Text style={[styles.historyBadgeText, item.incorrectCount > 0 && styles.historyBadgeTextBad]}>
+                {t("history.incorrectBadge", { count: item.incorrectCount })}
+              </Text>
+            </View>
+            {item.incorrectCount > 0 ? (
+              <Pressable
+                onPress={() => retryIncorrectCardsFromSession(item)}
+                style={({ pressed }) => [
+                  styles.historyRetryButton,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.historyRetryButtonText}>{t("history.retrySession")}</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
       </View>
     );
+    const renderMissedCardItem = (card) => {
+      const matchingPair = pairs.find((pair) => createSignature(pair.left, pair.right) === card.signature);
+      const folderLabel = getFolderLabel(normalizeFolderId(matchingPair?.folderId));
+      const missCount = todayMissedCards.length ? card.count : card.incorrect ?? 0;
+      const title = card.direction === "B_TO_A" ? card.right : card.left;
+
+      return (
+        <View key={`missed-${card.signature}`} style={styles.historyMissedCard}>
+          <View style={styles.historyMissedIcon}>
+            <MaterialCommunityIcons name="folder-outline" size={18} color={theme.accent} />
+          </View>
+          <View style={styles.historyItemBody}>
+            <Text style={styles.historyMissedPath} numberOfLines={1} ellipsizeMode="tail">
+              {folderLabel}
+            </Text>
+            <Text style={styles.historyItemTitle} numberOfLines={1} ellipsizeMode="tail">
+              {title || card.left || card.right || card.signature}
+            </Text>
+            <Text style={styles.historyItemCaption}>
+              {todayMissedCards.length
+                ? t("history.todayMissedCaption", { count: missCount })
+                : t("history.totalMissedCaption", {
+                    incorrect: card.incorrect,
+                    attempts: card.attempts,
+                  })}
+            </Text>
+          </View>
+          <View style={[styles.historyBadge, styles.historyBadgeBad]}>
+            <Text style={[styles.historyBadgeText, styles.historyBadgeTextBad]}>
+              {t("history.countTimes", { count: missCount })}
+            </Text>
+          </View>
+        </View>
+      );
+    };
 
     return (
       <View style={styles.scene}>
@@ -4267,23 +4388,37 @@ export default function App() {
           <>
             <View style={styles.historySummaryCard} {...tutorialTargetProps("history-summary-panel")}>
               <View style={styles.historySummaryHeader}>
-                <Text style={styles.panelTitle}>{t("history.todayTitle")}</Text>
+                <View style={styles.historySummaryTitleRow}>
+                  <Text style={styles.panelTitle}>{t("history.todayTitle")}</Text>
+                  <Pressable
+                    accessibilityLabel={t("history.helpTitle")}
+                    onPress={() => Alert.alert(t("history.helpTitle"), t("history.helpBody"))}
+                    style={({ pressed }) => [styles.historyHelpButton, pressed && styles.pressed]}
+                  >
+                    <MaterialCommunityIcons name="help-circle-outline" size={18} color={theme.textSecondary} />
+                  </Pressable>
+                </View>
                 <Text style={styles.panelBody}>{t("history.todayBody")}</Text>
               </View>
               <View style={styles.historySummaryGrid}>
-                <View style={styles.historyMetricCard}>
-                  <Text style={styles.historyMetricValue}>{todaySessionCount}</Text>
-                  <Text style={styles.historyMetricLabel}>{t("history.sessions")}</Text>
+                {historyMetrics.map(renderMetricCard)}
+              </View>
+              <View style={styles.historyProgressCard}>
+                <View style={styles.historyProgressHeader}>
+                  <Text style={styles.historyProgressTitle}>{t("history.progressTitle")}</Text>
+                  <Text style={styles.historyProgressPercent}>{progressPercent}%</Text>
                 </View>
-                <View style={styles.historyMetricCard}>
-                  <Text style={styles.historyMetricValue}>{todaySolvedCount}</Text>
-                  <Text style={styles.historyMetricLabel}>{t("history.solved")}</Text>
+                <View style={styles.historyProgressTrack}>
+                  <View style={[styles.historyProgressFill, { width: `${progressPercent}%` }]} />
                 </View>
-                <View style={styles.historyMetricCard}>
-                  <Text style={[styles.historyMetricValue, todayIncorrectCount > 0 && styles.historyMetricValueBad]}>
-                    {todayIncorrectCount}
+                <View style={styles.historyProgressFooter}>
+                  <Text style={styles.historyDateSummary}>
+                    {t("history.goalStatus", {
+                      goal: DAILY_STUDY_GOAL,
+                      count: Math.min(todaySessionCount, DAILY_STUDY_GOAL),
+                    })}
                   </Text>
-                  <Text style={styles.historyMetricLabel}>{t("history.incorrect")}</Text>
+                  <Text style={styles.historyGoalChip}>{t("history.goalSetting")}</Text>
                 </View>
               </View>
             </View>
@@ -4301,10 +4436,7 @@ export default function App() {
                     </Text>
                   </View>
                   <Pressable
-                    onPress={() => {
-                      setHistoryCalendarMonth(getStartOfLocalMonth(parseLocalDayKey(historyDateKey)));
-                      setHistoryCalendarOpen((currentValue) => !currentValue);
-                    }}
+                    onPress={openHistoryCalendar}
                     style={({ pressed }) => [
                       styles.historyCalendarButton,
                       historyCalendarOpen && styles.historyCalendarButtonActive,
@@ -4391,19 +4523,15 @@ export default function App() {
                     </View>
                   </View>
                 ) : null}
-                <View style={styles.historyList}>
-                  {firstSelectedHistorySession ? (
-                    renderHistorySessionItem(firstSelectedHistorySession)
+                <View style={styles.historyTimeline}>
+                  {historySessionPreview.length ? (
+                    historySessionPreview.map(renderHistorySessionItem)
                   ) : (
                     <Text style={styles.historyEmptyText}>{t("history.noSessionsForDate")}</Text>
                   )}
                 </View>
+                {renderHistoryActionRow(t("history.viewAllHistory"), openHistoryCalendar)}
               </View>
-              {remainingSelectedHistorySessions.length ? (
-                <View style={styles.historyList}>
-                  {remainingSelectedHistorySessions.map(renderHistorySessionItem)}
-                </View>
-              ) : null}
             </View>
 
             <View style={styles.libraryPanel} {...tutorialTargetProps("history-missed-panel")}>
@@ -4413,32 +4541,12 @@ export default function App() {
               </View>
               <View style={styles.historyList}>
                 {missedCards.length ? (
-                  missedCards.map((card) => (
-                    <View key={`missed-${card.signature}`} style={styles.historyItem}>
-                      <View style={styles.historyItemBody}>
-                        <Text style={styles.historyItemTitle}>
-                          {card.left} ↔ {card.right}
-                        </Text>
-                        <Text style={styles.historyItemCaption}>
-                          {todayMissedCards.length
-                            ? t("history.todayMissedCaption", { count: card.count })
-                            : t("history.totalMissedCaption", {
-                                incorrect: card.incorrect,
-                                attempts: card.attempts,
-                              })}
-                        </Text>
-                      </View>
-                      <View style={styles.historyBadge}>
-                        <Text style={styles.historyBadgeText}>
-                          {todayMissedCards.length ? `${card.count}` : `${card.incorrect}`}
-                        </Text>
-                      </View>
-                    </View>
-                  ))
+                  missedCards.slice(0, 3).map(renderMissedCardItem)
                 ) : (
                   <Text style={styles.historyEmptyText}>{t("history.noMissed")}</Text>
                 )}
               </View>
+              {renderHistoryActionRow(t("history.viewAllMissed"), openMissedCardsInLibrary)}
             </View>
           </>
         ) : (
@@ -7706,7 +7814,7 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textPrimary,
   },
   historySummaryCard: {
-    gap: 16,
+    gap: 14,
     padding: 18,
     borderRadius: 26,
     backgroundColor: theme.surfaceStrong,
@@ -7716,18 +7824,41 @@ const createStyles = (theme) => StyleSheet.create({
   historySummaryHeader: {
     gap: 6,
   },
+  historySummaryTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  historyHelpButton: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
   historySummaryGrid: {
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
   },
   historyMetricCard: {
     flex: 1,
-    gap: 6,
-    padding: 14,
+    gap: 5,
+    padding: 12,
     borderRadius: 18,
-    backgroundColor: theme.surfaceCard,
+    backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
+  },
+  historyMetricIcon: {
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
   },
   historyMetricValue: {
     fontSize: 24,
@@ -7741,16 +7872,73 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 12,
     color: theme.textSecondary,
   },
+  historyMetricTrend: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: "800",
+  },
+  historyMetricTrendGood: {
+    color: theme.success,
+  },
+  historyMetricTrendBad: {
+    color: theme.danger,
+  },
+  historyProgressCard: {
+    gap: 8,
+    padding: 12,
+    borderRadius: 18,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  historyProgressHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  historyProgressTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  historyProgressPercent: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.accent,
+  },
+  historyProgressTrack: {
+    height: 8,
+    overflow: "hidden",
+    borderRadius: 999,
+    backgroundColor: theme.accentSoft,
+  },
+  historyProgressFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: theme.accent,
+  },
+  historyProgressFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  historyGoalChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    overflow: "hidden",
+    backgroundColor: theme.accentSoft,
+    fontSize: 11,
+    fontWeight: "800",
+    color: theme.accent,
+  },
   historyList: {
     gap: 12,
   },
   historyRecentTutorialTarget: {
     gap: 12,
-    marginHorizontal: -18,
-    marginTop: -18,
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 6,
     borderRadius: 26,
   },
   historyDateSummary: {
@@ -7771,6 +7959,33 @@ const createStyles = (theme) => StyleSheet.create({
   historyCalendarButtonActive: {
     backgroundColor: theme.accent,
     borderColor: theme.accent,
+  },
+  historyTimeline: {
+    gap: 0,
+  },
+  historyTimelineItem: {
+    flexDirection: "row",
+    alignItems: "stretch",
+  },
+  historyTimelineRail: {
+    width: 20,
+    alignItems: "center",
+  },
+  historyTimelineDot: {
+    width: 7,
+    height: 7,
+    marginTop: 22,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceBorder,
+  },
+  historyTimelineDotActive: {
+    backgroundColor: theme.accent,
+  },
+  historyTimelineLine: {
+    flex: 1,
+    width: 2,
+    marginTop: 4,
+    backgroundColor: theme.surfaceBorderSoft,
   },
   historyCalendarPanel: {
     gap: 10,
@@ -7852,11 +8067,13 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.accentText,
   },
   historyItem: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 18,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
     borderRadius: 18,
     backgroundColor: theme.surface,
     borderWidth: 1,
@@ -7909,6 +8126,47 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     color: theme.accent,
+  },
+  historyActionRow: {
+    minHeight: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  historyActionText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.textSecondary,
+  },
+  historyMissedCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 12,
+    borderRadius: 18,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  historyMissedIcon: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    backgroundColor: theme.accentSoft,
+  },
+  historyMissedPath: {
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: "700",
+    color: theme.textSecondary,
   },
   historyChipText: {
     fontSize: 12,
