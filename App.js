@@ -83,6 +83,7 @@ const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
 const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
 const DEFAULT_QUIZ_COUNT = 10;
+const SAVE_INPUT_MAX_LENGTH = 300;
 const DATE_FILTER_LOCALES = {
   ko: "ko-KR",
   en: "en-US",
@@ -3530,20 +3531,29 @@ export default function App() {
         <View style={styles.folderChildrenSection}>
           {children.length ? (
             <View style={styles.folderChildList}>
-              {children.map((folder) => (
-                <Pressable
-                  key={folder.id}
-                  onPress={() => onSelectFolder(folder.id)}
-                  style={({ pressed }) => [styles.folderChildItem, pressed && styles.pressed]}
-                >
-                  <View style={styles.folderChildIcon}>
-                    <MaterialCommunityIcons name="folder" size={35} color={theme.accent} />
-                  </View>
-                  <Text style={styles.folderChildName} numberOfLines={2} ellipsizeMode="tail">
-                    {folder.name}
-                  </Text>
-                </Pressable>
-              ))}
+              {children.map((folder) => {
+                const folderPairCount = pairs.filter(
+                  (pair) => normalizeFolderId(pair.folderId) === folder.id
+                ).length;
+
+                return (
+                  <Pressable
+                    key={folder.id}
+                    onPress={() => onSelectFolder(folder.id)}
+                    style={({ pressed }) => [styles.folderChildItem, pressed && styles.pressed]}
+                  >
+                    <View style={styles.folderChildIcon}>
+                      <MaterialCommunityIcons name="folder" size={40} color={theme.accent} />
+                    </View>
+                    <Text style={styles.folderChildName} numberOfLines={2} ellipsizeMode="tail">
+                      {folder.name}
+                    </Text>
+                    <Text style={styles.folderChildMeta}>
+                      {t("folders.folderCardCount", { count: folderPairCount })}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
           ) : (
             <Text style={styles.folderEmptyText}>{t("folders.emptyChildren")}</Text>
@@ -3553,13 +3563,13 @@ export default function App() {
             style={({ pressed }) => [styles.folderSavedCardsItem, pressed && styles.pressed]}
           >
             <View style={styles.folderSavedCardsIcon}>
-              <MaterialCommunityIcons name="file-document-outline" size={32} color={theme.textSecondary} />
+              <MaterialCommunityIcons name="file-document-outline" size={36} color={theme.textSecondary} />
             </View>
             <Text style={styles.folderSavedCardsName} numberOfLines={2}>
               {t("folders.savedCards")}
             </Text>
             <Text style={styles.folderSavedCardsMeta}>
-              {t("folders.savedCardsMeta", { count: directPairCount })}
+              {t("folders.folderCardCount", { count: directPairCount })}
             </Text>
           </Pressable>
         </View>
@@ -3618,6 +3628,22 @@ export default function App() {
     }
   };
 
+  const swapDraftSides = () => {
+    setDraft((currentDraft) => ({
+      left: currentDraft.right,
+      right: currentDraft.left,
+    }));
+  };
+
+  const focusSaveFolderPicker = () => {
+    Keyboard.dismiss();
+    setSaveComposerVisible(false);
+    setSaveActionMenuOpen(false);
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo?.({ y: 0, animated: true });
+    });
+  };
+
   const renderSaveModeOption = (option, variant = "modal") => {
     const active = saveInputMode === option.key;
     const targetProps = variant === "fab" ? tutorialTargetProps(`save-mode-${option.key}`) : {};
@@ -3633,11 +3659,13 @@ export default function App() {
           pressed && styles.pressed,
         ]}
       >
-        <MaterialCommunityIcons
-          name={option.icon}
-          size={variant === "fab" ? 19 : 18}
-          color={active ? theme.accent : theme.textSecondary}
-        />
+        {variant === "fab" ? (
+          <MaterialCommunityIcons
+            name={option.icon}
+            size={19}
+            color={active ? theme.accent : theme.textSecondary}
+          />
+        ) : null}
         <Text
           style={[
             variant === "fab" ? styles.saveFabMenuText : styles.saveModeChipText,
@@ -3656,36 +3684,85 @@ export default function App() {
     </View>
   );
 
+  const renderSaveLocationStrip = () => (
+    <View style={styles.saveLocationStrip}>
+      <View style={styles.saveLocationCopy}>
+        <MaterialCommunityIcons name="map-marker-outline" size={14} color={theme.accent} />
+        <Text style={styles.saveLocationText} numberOfLines={1} ellipsizeMode="tail">
+          {t("save.location", { path: getFolderLabel(saveFolderId) })}
+        </Text>
+      </View>
+      <Pressable
+        onPress={focusSaveFolderPicker}
+        style={({ pressed }) => [styles.saveLocationButton, pressed && styles.pressed]}
+      >
+        <Text style={styles.saveLocationButtonText}>{t("save.changeLocation")}</Text>
+      </Pressable>
+    </View>
+  );
+
+  const renderSaveTextField = ({ side, labelKey, placeholderKey }) => {
+    const value = draft[side] ?? "";
+
+    return (
+      <View style={styles.saveFieldGroup}>
+        <Text style={styles.inputLabel}>{t(labelKey)}</Text>
+        <View style={styles.saveTextInputWrap}>
+          <TextInput
+            value={value}
+            onChangeText={(nextValue) =>
+              setDraft((currentDraft) => ({ ...currentDraft, [side]: nextValue }))
+            }
+            placeholder={t(placeholderKey)}
+            placeholderTextColor={theme.textPlaceholder}
+            maxLength={SAVE_INPUT_MAX_LENGTH}
+            style={[styles.input, styles.saveTextArea]}
+            multiline
+            textAlignVertical="top"
+          />
+          <Text style={styles.saveInputCounter}>
+            {t("save.characterCount", {
+              count: value.length,
+              max: SAVE_INPUT_MAX_LENGTH,
+            })}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
   const renderSaveInputContent = () => (
     <>
       {saveInputMode === "single" ? (
-        <View style={[styles.composerPanel, styles.saveModalInnerPanel]} {...tutorialTargetProps("save-composer")}>
-          <View style={styles.importHeader}>
-            <View style={styles.importTitleRow}>
-              <Text style={styles.importTitle}>{t("save.title")}</Text>
+        <View style={styles.saveSingleContent} {...tutorialTargetProps("save-composer")}>
+          <View style={[styles.composerPanel, styles.saveModalInnerPanel]}>
+            <View style={styles.importHeader}>
+              <View style={styles.importTitleRow}>
+                <Text style={styles.importTitle}>{t("save.title")}</Text>
+              </View>
+              <Text style={styles.importBodyCompact}>{t("save.singleBody")}</Text>
             </View>
-            <Text style={styles.importBodyCompact}>{t("save.singleBody")}</Text>
+
+            {renderSaveTextField({
+              side: "left",
+              labelKey: "common.front",
+              placeholderKey: "save.frontPlaceholder",
+            })}
+
+            <Pressable
+              accessibilityLabel={t("save.swapSides")}
+              onPress={swapDraftSides}
+              style={({ pressed }) => [styles.saveSwapButton, pressed && styles.pressed]}
+            >
+              <MaterialCommunityIcons name="swap-vertical" size={17} color={theme.accent} />
+            </Pressable>
+
+            {renderSaveTextField({
+              side: "right",
+              labelKey: "common.back",
+              placeholderKey: "save.backPlaceholder",
+            })}
           </View>
-
-          <View style={styles.subtleDivider} />
-
-          <Text style={styles.inputLabel}>{t("common.front")}</Text>
-          <TextInput
-            value={draft.left}
-            onChangeText={(value) => setDraft((currentDraft) => ({ ...currentDraft, left: value }))}
-            style={[styles.input, styles.multilineInput]}
-            multiline
-            textAlignVertical="top"
-          />
-
-          <Text style={styles.inputLabel}>{t("common.back")}</Text>
-          <TextInput
-            value={draft.right}
-            onChangeText={(value) => setDraft((currentDraft) => ({ ...currentDraft, right: value }))}
-            style={[styles.input, styles.multilineInput]}
-            multiline
-            textAlignVertical="top"
-          />
 
           <Pressable
             onPress={() => void saveCard()}
@@ -3907,52 +3984,56 @@ export default function App() {
     </>
   );
 
-  const renderSaveComposerModal = () => (
-    <Modal
-      visible={saveComposerVisible}
-      transparent
-      animationType="fade"
-      onRequestClose={closeSaveComposer}
-    >
-      <View style={styles.saveModalOverlay}>
-        <Pressable style={styles.saveModalBackdrop} onPress={closeSaveComposer} />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.saveModalKeyboard}
-        >
-          <View style={[styles.saveModalSheet, contentMaxWidth ? { maxWidth: contentMaxWidth } : null]}>
-            <View style={styles.saveModalHandle} />
-            <View style={styles.saveModalHeader}>
-              <View style={styles.saveModalTitleRow}>
-                <MaterialCommunityIcons
-                  name={saveInputMode === "single" ? "cards-outline" : "file-document-plus-outline"}
-                  size={19}
-                  color={theme.accent}
-                />
-                <Text style={styles.saveModalTitle}>
-                  {t(saveInputMode === "single" ? "saveModes.single" : "saveModes.text")}
-                </Text>
+  const renderSaveComposerModal = () => {
+    const activeSaveMode =
+      SAVE_INPUT_OPTIONS.find((option) => option.key === saveInputMode) ?? SAVE_INPUT_OPTIONS[0];
+
+    return (
+      <Modal
+        visible={saveComposerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeSaveComposer}
+      >
+        <View style={styles.saveModalOverlay}>
+          <Pressable style={styles.saveModalBackdrop} onPress={closeSaveComposer} />
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={styles.saveModalKeyboard}
+          >
+            <View style={[styles.saveModalSheet, contentMaxWidth ? { maxWidth: contentMaxWidth } : null]}>
+              <View style={styles.saveModalHandle} />
+              <View style={styles.saveModalHeader}>
+                <View style={styles.saveModalTitleRow}>
+                  <MaterialCommunityIcons
+                    name={activeSaveMode.icon}
+                    size={18}
+                    color={theme.accent}
+                  />
+                  <Text style={styles.saveModalTitle}>{t(activeSaveMode.labelKey)}</Text>
+                </View>
+                <Pressable
+                  onPress={closeSaveComposer}
+                  style={({ pressed }) => [styles.saveModalCloseButton, pressed && styles.pressed]}
+                >
+                  <MaterialCommunityIcons name="close" size={20} color={theme.textPrimary} />
+                </Pressable>
               </View>
-              <Pressable
-                onPress={closeSaveComposer}
-                style={({ pressed }) => [styles.saveModalCloseButton, pressed && styles.pressed]}
+              {renderSaveModeSelector()}
+              {renderSaveLocationStrip()}
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.saveModalScrollContent}
               >
-                <MaterialCommunityIcons name="close" size={20} color={theme.textPrimary} />
-              </Pressable>
+                {renderSaveInputContent()}
+              </ScrollView>
             </View>
-            {renderSaveModeSelector()}
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={styles.saveModalScrollContent}
-            >
-              {renderSaveInputContent()}
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
-  );
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+    );
+  };
 
   const renderSaveFloatingAdd = () => {
     const shouldShow =
@@ -3973,22 +4054,32 @@ export default function App() {
           tabBarLeft !== null ? { right: Math.max(24, tabBarLeft + 24) } : null,
         ]}
       >
-        {saveActionMenuOpen ? (
+        {saveActionMenuOpen && guidedTutorialActive && tutorialStep === "save-single-chip" ? (
           <View style={styles.saveFabMenu}>
             {SAVE_INPUT_OPTIONS.map((option) => renderSaveModeOption(option, "fab"))}
           </View>
         ) : null}
         <Pressable
           accessibilityLabel={t("folders.actions")}
-          onPress={() => setSaveActionMenuOpen((currentValue) => !currentValue)}
+          onPress={() => {
+            if (guidedTutorialActive && tutorialStep === "save-single-chip") {
+              setSaveActionMenuOpen((currentValue) => !currentValue);
+              return;
+            }
+
+            handleSaveModeSelect("single");
+          }}
           style={({ pressed }) => [
             styles.saveFabButton,
-            saveActionMenuOpen && styles.saveFabButtonActive,
+            saveActionMenuOpen &&
+              guidedTutorialActive &&
+              tutorialStep === "save-single-chip" &&
+              styles.saveFabButtonActive,
             pressed && styles.pressed,
           ]}
         >
           <MaterialCommunityIcons
-            name={saveActionMenuOpen ? "close" : "plus"}
+            name={saveActionMenuOpen && guidedTutorialActive && tutorialStep === "save-single-chip" ? "close" : "plus"}
             size={30}
             color={theme.accentText}
           />
@@ -6030,29 +6121,33 @@ const createStyles = (theme) => StyleSheet.create({
   },
   saveModeRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  saveModeChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    minHeight: 38,
+    flexWrap: "nowrap",
+    overflow: "hidden",
     borderRadius: 999,
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
+  },
+  saveModeChip: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 32,
+    borderRadius: 999,
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: "transparent",
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
   saveModeChipActive: {
     backgroundColor: theme.accentSoft,
     borderColor: theme.accent,
   },
   saveModeChipText: {
-    fontSize: 13,
-    fontWeight: "700",
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "800",
     textAlign: "center",
     color: theme.textSecondary,
   },
@@ -6131,7 +6226,7 @@ const createStyles = (theme) => StyleSheet.create({
   },
   saveModalBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: theme.mode === "dark" ? "rgba(2, 5, 14, 0.68)" : "rgba(24, 32, 51, 0.32)",
+    backgroundColor: theme.mode === "dark" ? "rgba(2, 5, 14, 0.7)" : "rgba(24, 32, 51, 0.42)",
   },
   saveModalKeyboard: {
     flex: 1,
@@ -6139,20 +6234,20 @@ const createStyles = (theme) => StyleSheet.create({
   },
   saveModalSheet: {
     width: "100%",
-    maxHeight: "88%",
+    maxHeight: "84%",
     alignSelf: "center",
-    gap: 12,
-    paddingTop: 10,
-    paddingHorizontal: 18,
-    paddingBottom: Platform.OS === "android" ? 28 : 18,
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
+    gap: 10,
+    paddingTop: 12,
+    paddingHorizontal: 22,
+    paddingBottom: Platform.OS === "android" ? 26 : 18,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
   saveModalHandle: {
-    width: 42,
+    width: 40,
     height: 4,
     borderRadius: 2,
     alignSelf: "center",
@@ -6163,24 +6258,25 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
+    marginTop: 3,
   },
   saveModalTitleRow: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 7,
   },
   saveModalTitle: {
     flex: 1,
-    fontSize: 16,
-    lineHeight: 21,
+    fontSize: 15,
+    lineHeight: 20,
     fontWeight: "900",
     color: theme.textPrimary,
   },
   saveModalCloseButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: theme.surfaceSoft,
@@ -6188,17 +6284,58 @@ const createStyles = (theme) => StyleSheet.create({
     borderColor: theme.surfaceBorderSoft,
   },
   saveModalScrollContent: {
-    gap: 12,
-    paddingBottom: 8,
+    gap: 10,
+    paddingBottom: 6,
   },
   saveModalInnerPanel: {
-    borderRadius: 22,
+    borderRadius: 18,
+  },
+  saveLocationStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 31,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: theme.accentSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  saveLocationCopy: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  saveLocationText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "800",
+    color: theme.accent,
+  },
+  saveLocationButton: {
+    minHeight: 22,
+    justifyContent: "center",
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  saveLocationButtonText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: theme.accent,
   },
   folderPanel: {
     position: "relative",
     zIndex: 20,
     gap: 12,
-    padding: 14,
+    padding: 16,
     borderRadius: 24,
     backgroundColor: theme.surface,
     borderWidth: 1,
@@ -6323,31 +6460,32 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.accent,
   },
   folderChildrenSection: {
-    gap: 10,
+    gap: 12,
   },
   folderChildList: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 10,
+    justifyContent: "space-between",
+    rowGap: 12,
   },
   folderChildItem: {
-    width: "30.2%",
-    minWidth: 88,
-    minHeight: 96,
+    width: "48%",
+    minWidth: 0,
+    minHeight: 142,
     alignItems: "center",
     justifyContent: "flex-start",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingTop: 18,
-    paddingBottom: 10,
-    borderRadius: 16,
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingTop: 28,
+    paddingBottom: 16,
+    borderRadius: 18,
     backgroundColor: theme.surfaceSoft,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
   folderChildIcon: {
-    width: 48,
-    height: 38,
+    width: 56,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -6357,12 +6495,20 @@ const createStyles = (theme) => StyleSheet.create({
   },
   folderChildName: {
     width: "100%",
-    minHeight: 28,
-    fontSize: 13,
-    lineHeight: 17,
+    minHeight: 20,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: "800",
     textAlign: "center",
     color: theme.textPrimary,
+  },
+  folderChildMeta: {
+    width: "100%",
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "700",
+    textAlign: "center",
+    color: theme.textSecondary,
   },
   folderEmptyText: {
     paddingVertical: 3,
@@ -6371,31 +6517,31 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textSecondary,
   },
   folderSavedCardsItem: {
-    width: "30.9%",
-    minWidth: 92,
-    minHeight: 108,
+    width: "48%",
+    minWidth: 0,
+    minHeight: 142,
     alignItems: "center",
     justifyContent: "flex-start",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingTop: 16,
-    paddingBottom: 10,
-    borderRadius: 16,
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingTop: 25,
+    paddingBottom: 16,
+    borderRadius: 18,
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
   folderSavedCardsIcon: {
-    width: 48,
-    height: 40,
+    width: 56,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },
   folderSavedCardsName: {
     width: "100%",
-    minHeight: 22,
-    fontSize: 13,
-    lineHeight: 17,
+    minHeight: 20,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: "800",
     textAlign: "center",
     color: theme.textPrimary,
@@ -6587,15 +6733,22 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textPrimary,
   },
   composerPanel: {
-    padding: 22,
-    gap: 14,
-    borderRadius: 30,
+    padding: 14,
+    gap: 10,
+    borderRadius: 18,
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
+  saveSingleContent: {
+    gap: 10,
+  },
+  saveFieldGroup: {
+    gap: 7,
+  },
   inputLabel: {
-    fontSize: 13,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: "700",
     color: theme.textStrong,
   },
@@ -6611,6 +6764,36 @@ const createStyles = (theme) => StyleSheet.create({
   },
   multilineInput: {
     minHeight: 96,
+  },
+  saveTextInputWrap: {
+    position: "relative",
+  },
+  saveTextArea: {
+    minHeight: 92,
+    paddingTop: 12,
+    paddingBottom: 30,
+  },
+  saveInputCounter: {
+    position: "absolute",
+    right: 13,
+    bottom: 11,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: "700",
+    color: theme.textSecondary,
+  },
+  saveSwapButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "center",
+    marginVertical: -3,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+    zIndex: 2,
   },
   actionRow: {
     flexDirection: "row",
@@ -6632,7 +6815,9 @@ const createStyles = (theme) => StyleSheet.create({
   },
   savePrimaryButton: {
     flex: 0,
-    marginTop: 8,
+    minHeight: 50,
+    marginTop: 0,
+    borderRadius: 16,
   },
   primaryButtonDisabled: {
     backgroundColor: theme.mutedBg,
