@@ -70,6 +70,7 @@ import {
 WebBrowser.maybeCompleteAuthSession();
 
 const APP_NAME = "MEMORIA";
+const APP_VERSION = "1.0.0";
 const STORAGE_KEY = "@memoria/cards";
 const FOLDERS_STORAGE_KEY = "@memoria/folders";
 const ROOT_FOLDER_ID = "root";
@@ -106,6 +107,11 @@ const MANAGE_SORT_OPTIONS = [
 const THEME_OPTIONS = [
   { key: "light", labelKey: "theme.light", icon: "white-balance-sunny" },
   { key: "dark", labelKey: "theme.dark", icon: "weather-night" },
+];
+const LEGAL_DOC_OPTIONS = [
+  { key: "privacy", titleKey: "about.privacyTitle", bodyKey: "about.privacyBody" },
+  { key: "terms", titleKey: "about.termsTitle", bodyKey: "about.termsBody" },
+  { key: "licenses", titleKey: "about.licensesTitle", bodyKey: "about.licensesBody" },
 ];
 
 const createFolderId = () =>
@@ -724,6 +730,7 @@ export default function App() {
   const [adminNotice, setAdminNotice] = useState("");
   const [launchVisible, setLaunchVisible] = useState(true);
   const [openManageSwipeId, setOpenManageSwipeId] = useState(null);
+  const [legalDocKey, setLegalDocKey] = useState(null);
 
   const timerRef = useRef(null);
   const appRootRef = useRef(null);
@@ -4876,9 +4883,76 @@ export default function App() {
     </View>
   );
 
+  const activeLegalDoc = LEGAL_DOC_OPTIONS.find((option) => option.key === legalDocKey);
+
+  const renderLegalModal = () => (
+    <Modal
+      visible={Boolean(activeLegalDoc)}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setLegalDocKey(null)}
+    >
+      <View style={styles.legalModalOverlay}>
+        <Pressable style={styles.legalModalBackdrop} onPress={() => setLegalDocKey(null)} />
+        <View style={[styles.legalModalCard, contentMaxWidth ? { maxWidth: Math.min(contentMaxWidth, 560) } : null]}>
+          <View style={styles.legalModalHeader}>
+            <Text style={styles.legalModalTitle}>
+              {activeLegalDoc ? t(activeLegalDoc.titleKey) : ""}
+            </Text>
+            <Pressable
+              onPress={() => setLegalDocKey(null)}
+              style={({ pressed }) => [styles.legalModalCloseButton, pressed && styles.pressed]}
+            >
+              <MaterialCommunityIcons name="close" size={20} color={theme.textPrimary} />
+            </Pressable>
+          </View>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.legalModalScroll}>
+            <Text style={styles.legalModalBody}>
+              {activeLegalDoc ? t(activeLegalDoc.bodyKey) : ""}
+            </Text>
+          </ScrollView>
+          <Pressable
+            onPress={() => setLegalDocKey(null)}
+            style={({ pressed }) => [styles.legalModalDoneButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.legalModalDoneText}>{t("common.close")}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderAppInfoCard = () => (
+    <View style={styles.settingsCard}>
+      <Text style={styles.settingsTitle}>{t("about.appInfoTitle")}</Text>
+      <View style={styles.aboutInfoList}>
+        <View style={styles.aboutInfoRow}>
+          <Text style={styles.aboutInfoLabel}>{t("about.versionLabel")}</Text>
+          <Text style={styles.aboutInfoValue}>{APP_VERSION}</Text>
+        </View>
+
+        {LEGAL_DOC_OPTIONS.map((option) => (
+          <Pressable
+            key={option.key}
+            onPress={() => setLegalDocKey(option.key)}
+            style={({ pressed }) => [styles.aboutInfoRow, styles.aboutInfoPressable, pressed && styles.pressed]}
+          >
+            <Text style={styles.aboutInfoLabel}>{t(option.titleKey)}</Text>
+            <MaterialCommunityIcons name="chevron-right" size={19} color={theme.textSecondary} />
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+
   const renderAboutTab = () => (
     <View style={styles.scene}>
       <View style={styles.aboutStack}>
+        <View style={styles.aboutHero}>
+          <Text style={styles.aboutHeroTitle}>{t("about.heroTitle")}</Text>
+          <Text style={styles.aboutHeroBody}>{t("about.heroBody")}</Text>
+        </View>
+
         <View style={styles.syncStrip}>
           <View style={styles.syncLead}>
             <View style={styles.syncIconWrap}>
@@ -4948,7 +5022,7 @@ export default function App() {
                   <MaterialCommunityIcons
                     name={option.icon}
                     size={16}
-                    color={active ? theme.accentText : theme.textSecondary}
+                    color={active ? theme.accent : theme.textSecondary}
                   />
                   <Text style={[styles.modeChipText, active && styles.modeChipTextActive]}>
                     {t(option.labelKey)}
@@ -5287,7 +5361,10 @@ export default function App() {
             </View>
           </>
         ) : null}
+
+        {renderAppInfoCard()}
       </View>
+      {renderLegalModal()}
     </View>
   );
 
@@ -7667,6 +7744,23 @@ const createStyles = (theme) => StyleSheet.create({
   aboutStack: {
     gap: 12,
   },
+  aboutHero: {
+    gap: 5,
+    paddingHorizontal: 4,
+    paddingTop: 4,
+    paddingBottom: 2,
+  },
+  aboutHeroTitle: {
+    fontSize: 20,
+    lineHeight: 27,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  aboutHeroBody: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: theme.textSecondary,
+  },
   aboutSupportTutorialTarget: {
     gap: 14,
     borderRadius: 22,
@@ -7775,31 +7869,69 @@ const createStyles = (theme) => StyleSheet.create({
   },
   modeSwitchRow: {
     flexDirection: "row",
-    gap: 10,
+    gap: 0,
+    overflow: "hidden",
+    padding: 3,
+    borderRadius: 16,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
   },
   modeChip: {
     flex: 1,
-    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    minHeight: 48,
-    borderRadius: 16,
-    backgroundColor: theme.surfaceMuted,
+    gap: 5,
+    minHeight: 66,
+    borderRadius: 13,
+    backgroundColor: "transparent",
     borderWidth: 1,
-    borderColor: theme.surfaceBorder,
+    borderColor: "transparent",
   },
   modeChipActive: {
-    backgroundColor: theme.accent,
+    backgroundColor: theme.accentSoft,
     borderColor: theme.accent,
   },
   modeChipText: {
-    fontSize: 14,
-    fontWeight: "700",
+    fontSize: 13,
+    fontWeight: "800",
     color: theme.textSecondary,
   },
   modeChipTextActive: {
-    color: theme.accentText,
+    color: theme.accent,
+  },
+  aboutInfoList: {
+    overflow: "hidden",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+    backgroundColor: theme.surface,
+  },
+  aboutInfoRow: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.surfaceBorderSoft,
+  },
+  aboutInfoPressable: {
+    backgroundColor: theme.surface,
+  },
+  aboutInfoLabel: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  aboutInfoValue: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "800",
+    color: theme.textSecondary,
   },
   appSummaryCard: {
     gap: 8,
@@ -7992,6 +8124,69 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     color: theme.textSecondary,
+  },
+  legalModalOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  legalModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: theme.mode === "dark" ? "rgba(2, 5, 14, 0.72)" : "rgba(24, 32, 51, 0.38)",
+  },
+  legalModalCard: {
+    width: "100%",
+    maxHeight: "78%",
+    gap: 14,
+    padding: 18,
+    borderRadius: 24,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  legalModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  legalModalTitle: {
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  legalModalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  legalModalScroll: {
+    paddingBottom: 4,
+  },
+  legalModalBody: {
+    fontSize: 13,
+    lineHeight: 21,
+    color: theme.textSecondary,
+  },
+  legalModalDoneButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 46,
+    borderRadius: 16,
+    backgroundColor: theme.accent,
+  },
+  legalModalDoneText: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: theme.accentText,
   },
   inlineActionButtonText: {
     fontSize: 13,
