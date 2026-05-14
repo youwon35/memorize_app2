@@ -3,7 +3,6 @@ import {
   Animated,
   BackHandler,
   Easing,
-  Image,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -22,14 +21,11 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
-import * as ImagePicker from "expo-image-picker";
 import { makeRedirectUri } from "expo-auth-session";
 import { File } from "expo-file-system";
 import { EncodingType, readAsStringAsync } from "expo-file-system/legacy";
 import * as WebBrowser from "expo-web-browser";
 
-import { APP_FEATURES } from "./src/config/features";
-import { recognizePhotoCardPairs } from "./src/lib/photo-ocr";
 import { isSupabaseConfigured, supabase } from "./src/lib/supabase";
 import {
   extractDocxTextFromBase64,
@@ -78,7 +74,7 @@ const DAILY_STUDY_GOAL_KEY = "@memoria/daily-study-goal";
 const THEME_MODE_KEY = "@memoria/theme-mode";
 const LANGUAGE_KEY = "@memoria/language";
 const STUDY_STATS_KEY = "@memoria/study-stats";
-const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen-v4";
+const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen-v5";
 const SUPPORT_REQUESTS_KEY = "@memoria/support-requests";
 const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
@@ -375,8 +371,7 @@ const TUTORIAL_STEP_MAP = Object.fromEntries(TUTORIAL_STEPS.map((step) => [step.
 const SAVE_INPUT_OPTIONS = [
   { key: "single", labelKey: "saveModes.single", icon: "cards-outline" },
   { key: "text", labelKey: "saveModes.text", icon: "file-document-plus-outline" },
-  { key: "photo", labelKey: "saveModes.photo", icon: "camera-outline" },
-].filter((option) => APP_FEATURES.photoImport || option.key !== "photo");
+];
 const STAR_FIELD = [
   { top: 34, left: 28, size: 4, opacity: 0.45 },
   { top: 112, right: 44, size: 6, opacity: 0.32 },
@@ -592,7 +587,7 @@ export default function App() {
   const [tutorialSeen, setTutorialSeen] = useState(true);
   const [tutorialReady, setTutorialReady] = useState(false);
   const [tutorialVisible, setTutorialVisible] = useState(false);
-  const [tutorialStep, setTutorialStep] = useState(TUTORIAL_STEPS[0].key);
+  const [tutorialStep, setTutorialStep] = useState("intro");
   const [tutorialTargetRect, setTutorialTargetRect] = useState(null);
   const [session, setSession] = useState(null);
   const [userRole, setUserRole] = useState("user");
@@ -617,11 +612,6 @@ export default function App() {
   const [retryWindowVisible, setRetryWindowVisible] = useState(false);
   const [retryDaysInput, setRetryDaysInput] = useState("7");
   const [importing, setImporting] = useState(false);
-  const [photoImporting, setPhotoImporting] = useState(false);
-  const [photoAsset, setPhotoAsset] = useState(null);
-  const [photoImportedPairs, setPhotoImportedPairs] = useState([]);
-  const [photoInvalidRowIndexes, setPhotoInvalidRowIndexes] = useState([]);
-  const [photoImportNotice, setPhotoImportNotice] = useState("");
   const [roundComplete, setRoundComplete] = useState(false);
   const [roundIncorrectIds, setRoundIncorrectIds] = useState([]);
   const [supportCategory, setSupportCategory] = useState(SUPPORT_CATEGORY_OPTIONS[0]);
@@ -644,7 +634,7 @@ export default function App() {
   const [appAlertConfig, setAppAlertConfig] = useState(null);
   const [saveFolderPanelCollapsed, setSaveFolderPanelCollapsed] = useState(false);
   const [quizFolderPanelCollapsed, setQuizFolderPanelCollapsed] = useState(true);
-  const [manageFolderPanelCollapsed, setManageFolderPanelCollapsed] = useState(false);
+  const [manageFolderPanelCollapsed, setManageFolderPanelCollapsed] = useState(true);
 
   const timerRef = useRef(null);
   const pendingStopActionRef = useRef(null);
@@ -839,6 +829,10 @@ export default function App() {
       setQuizFolderPanelCollapsed(true);
     }
 
+    if (nextTab === "manage" && nextTab !== tab) {
+      setManageFolderPanelCollapsed(true);
+    }
+
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo?.({ y: 0, animated: false });
     });
@@ -852,6 +846,10 @@ export default function App() {
 
     if (step?.key === "quiz-tab") {
       setQuizFolderPanelCollapsed(true);
+    }
+
+    if (step?.key === "manage-tab") {
+      setManageFolderPanelCollapsed(true);
     }
 
     requestAnimationFrame(() => {
@@ -1004,7 +1002,6 @@ export default function App() {
     ],
     [t]
   );
-  const photoPreviewPairs = useMemo(() => photoImportedPairs.slice(0, 6), [photoImportedPairs]);
   const todayKey = getLocalDayKey(new Date());
   const todaySessions = useMemo(
     () => studyStats.sessions.filter((item) => getLocalDayKey(item.completedAt) === todayKey),
@@ -1331,7 +1328,7 @@ export default function App() {
       return;
     }
 
-    setTutorialStep(TUTORIAL_STEPS[0].key);
+    setTutorialStep("intro");
     setTutorialVisible(true);
   }, [launchVisible, storageReady, tutorialReady, tutorialSeen]);
 
@@ -2173,7 +2170,7 @@ export default function App() {
 
   const closeTutorial = (nextTab = null, { showCompletionAlert = false } = {}) => {
     setTutorialVisible(false);
-    setTutorialStep(TUTORIAL_STEPS[0].key);
+    setTutorialStep("intro");
     setTutorialSeen(true);
     void AsyncStorage.setItem(TUTORIAL_SEEN_KEY, "1");
 
@@ -2190,12 +2187,19 @@ export default function App() {
 
   const openTutorial = () => {
     selectTab("save");
-    setTutorialStep(TUTORIAL_STEPS[0].key);
+    setTutorialStep("intro");
     setTutorialVisible(true);
   };
 
   const startGuidedTutorial = () => {
-    setTutorialStep(TUTORIAL_STEPS[0].key);
+    const firstStep = TUTORIAL_STEPS[0];
+
+    if (firstStep?.tab) {
+      selectTab(firstStep.tab);
+    }
+
+    setTutorialStep(firstStep.key);
+    applyTutorialStepSideEffects(firstStep);
   };
 
   const advanceTutorial = () => {
@@ -2456,161 +2460,6 @@ export default function App() {
       );
     } finally {
       setImporting(false);
-    }
-  };
-
-  const resetPhotoImportState = () => {
-    setPhotoAsset(null);
-    setPhotoImportedPairs([]);
-    setPhotoInvalidRowIndexes([]);
-    setPhotoImportNotice("");
-  };
-
-  useEffect(() => {
-    if (!APP_FEATURES.photoImport && saveInputMode === "photo") {
-      setSaveInputMode("single");
-      resetPhotoImportState();
-    }
-  }, [saveInputMode]);
-
-  const readPairsFromPhotoAsset = async (asset) => {
-    if (!asset?.uri) {
-      throw new Error(t("alerts.photoUnreadable"));
-    }
-
-    try {
-      return await recognizePhotoCardPairs(asset);
-    } catch (error) {
-      if (error?.message === "LOCAL_OCR_UNAVAILABLE") {
-        throw new Error(t("alerts.devBuildOnly"));
-      }
-
-      throw error;
-    }
-  };
-
-  const handlePickedPhotoForImport = async (asset) => {
-    if (!asset?.uri) {
-      return;
-    }
-
-    setPhotoAsset(asset);
-    setPhotoImporting(true);
-    setPhotoImportedPairs([]);
-    setPhotoInvalidRowIndexes([]);
-    setPhotoImportNotice(t("save.photoScanning"));
-
-    try {
-      const { entries, invalidRowIndexes, providerNoticeKey } = await readPairsFromPhotoAsset(asset);
-
-      setPhotoImportedPairs(entries);
-      setPhotoInvalidRowIndexes(invalidRowIndexes);
-
-      if (!entries.length) {
-        const baseNotice = invalidRowIndexes.length
-          ? t("save.photoPairNotGrouped")
-          : t("save.photoNoText");
-
-        setPhotoImportNotice(
-          providerNoticeKey ? `${t(providerNoticeKey)} ${baseNotice}` : baseNotice
-        );
-        return;
-      }
-
-      const messages = [t("save.photoPairFound", { count: entries.length })];
-
-      if (invalidRowIndexes.length) {
-        messages.push(t("save.photoPairInvalid", { count: invalidRowIndexes.length }));
-      }
-
-      if (providerNoticeKey) {
-        messages.unshift(t(providerNoticeKey));
-      }
-
-      setPhotoImportNotice(messages.join(" "));
-    } catch (error) {
-      setPhotoImportNotice(error?.message || t("save.photoReadFailed"));
-    } finally {
-      setPhotoImporting(false);
-    }
-  };
-
-  const pickPhotoFromLibrary = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (!permission.granted) {
-      Alert.alert(t("alerts.photoLibraryPermissionTitle"), t("alerts.photoLibraryPermissionBody"));
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      quality: 1,
-    });
-
-    if (result.canceled) {
-      return;
-    }
-
-    await handlePickedPhotoForImport(result.assets?.[0]);
-  };
-
-  const takePhotoForImport = async () => {
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-
-    if (!permission.granted) {
-      Alert.alert(t("alerts.photoCameraPermissionTitle"), t("alerts.photoCameraPermissionBody"));
-      return;
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      quality: 1,
-      cameraType: ImagePicker.CameraType.back,
-    });
-
-    if (result.canceled) {
-      return;
-    }
-
-    await handlePickedPhotoForImport(result.assets?.[0]);
-  };
-
-  const saveRecognizedPhotoPairs = async () => {
-    if (!photoImportedPairs.length) {
-      Alert.alert(t("alerts.noPhotoPairsTitle"), t("alerts.noPhotoPairsBody"));
-      return;
-    }
-
-    const saveResult = await saveEntryBatch(photoImportedPairs);
-    const messages = [];
-
-    if (saveResult.savedCount) {
-      messages.push(t("alerts.photoSaved", { count: saveResult.savedCount }));
-    }
-
-    if (saveResult.skippedDuplicates) {
-      messages.push(t("alerts.photoSkipped", { count: saveResult.skippedDuplicates }));
-    }
-
-    setPhotoImportNotice(
-      messages.length
-        ? messages.join(" ")
-        : t("alerts.photoAllSkipped")
-    );
-
-    if (saveResult.cloudSaved) {
-      setTranslatedNote("notes.photoSavedCloud");
-    }
-
-    if (saveResult.savedCount) {
-      setQuizFolderId(saveFolderId);
-      setManageFolderId(saveFolderId);
-      setSaveComposerVisible(false);
-      setSaveActionMenuOpen(false);
-      Alert.alert(t("alerts.photoSavedTitle"), messages.join(" "));
     }
   };
 
@@ -3358,8 +3207,9 @@ export default function App() {
           ]}
         >
           <View style={styles.folderCreateTileCircle}>
-            <MaterialCommunityIcons name="plus" size={34} color={theme.accent} />
+            <MaterialCommunityIcons name="plus" size={26} color={theme.accent} />
           </View>
+          <Text style={styles.folderCreateTileLabel}>{t("folders.addFolderShort")}</Text>
         </Pressable>
       );
     };
@@ -3763,155 +3613,6 @@ export default function App() {
         </View>
       ) : null}
 
-      {APP_FEATURES.photoImport && saveInputMode === "photo" ? (
-        <View style={[styles.importPanel, styles.saveModalInnerPanel]}>
-          <View style={styles.importHeader}>
-            <View style={styles.importTitleRow}>
-              <View style={styles.importIconWrap}>
-                <MaterialCommunityIcons name="camera-outline" size={18} color={theme.accent} />
-              </View>
-              <Text style={styles.importTitle}>{t("save.photoImportTitle")}</Text>
-            </View>
-            <Text style={styles.importBody}>{t("save.photoImportBody")}</Text>
-          </View>
-
-          {photoAsset?.uri ? (
-            <View style={styles.photoPreviewFrame}>
-              <Image source={{ uri: photoAsset.uri }} style={styles.photoPreviewImage} resizeMode="contain" />
-            </View>
-          ) : (
-            <View style={styles.photoPlaceholderCard}>
-              <View style={styles.photoPlaceholderIcon}>
-                <MaterialCommunityIcons name="image-search-outline" size={22} color={theme.accent} />
-              </View>
-              <Text style={styles.photoPlaceholderTitle}>{t("save.photoPlaceholderTitle")}</Text>
-              <Text style={styles.photoPlaceholderBody}>{t("save.photoPlaceholderBody")}</Text>
-            </View>
-          )}
-
-          {photoImportNotice ? <Text style={styles.photoImportNotice}>{photoImportNotice}</Text> : null}
-
-          {photoPreviewPairs.length ? (
-            <View style={styles.photoResultsCard}>
-              <Text style={styles.photoResultsTitle}>{t("save.photoPreviewTitle")}</Text>
-              <View style={styles.libraryList}>
-                {photoPreviewPairs.map((entry, index) => (
-                  <View key={`${entry.left}-${entry.right}-${index}`} style={[styles.previewRow, styles.previewRowLarge]}>
-                    <View style={styles.previewColumn}>
-                      <Text style={styles.previewLabel}>{t("common.front")}</Text>
-                      <Text style={styles.previewText}>{entry.left}</Text>
-                    </View>
-                    <Text style={styles.previewDivider}>↔</Text>
-                    <View style={styles.previewColumn}>
-                      <Text style={styles.previewLabel}>{t("common.back")}</Text>
-                      <Text style={styles.previewText}>{entry.right}</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-              {photoImportedPairs.length > photoPreviewPairs.length ? (
-                <Text style={styles.photoImportMeta}>
-                  {t("save.photoPreviewMore", {
-                    count: photoImportedPairs.length - photoPreviewPairs.length,
-                  })}
-                </Text>
-              ) : null}
-              {photoInvalidRowIndexes.length ? (
-                <Text style={styles.photoImportMeta}>
-                  {t("save.photoPreviewInvalidRows", {
-                    rows: photoInvalidRowIndexes.join(", "),
-                  })}
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
-
-          <View style={styles.actionRow}>
-            <Pressable
-              disabled={photoImporting}
-              onPress={() => void takePhotoForImport()}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                photoImporting && styles.primaryButtonDisabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.primaryButtonText,
-                  photoImporting && styles.primaryButtonTextDisabled,
-                ]}
-              >
-                {photoImporting ? t("save.photoReading") : t("save.photoTake")}
-              </Text>
-            </Pressable>
-            <Pressable
-              disabled={photoImporting}
-              onPress={() => void pickPhotoFromLibrary()}
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                photoImporting && styles.secondaryButtonDisabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.secondaryButtonText,
-                  photoImporting && styles.secondaryButtonTextDisabled,
-                ]}
-              >
-                {t("save.photoPick")}
-              </Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.actionRow}>
-            <Pressable
-              disabled={!photoImportedPairs.length || photoImporting}
-              onPress={() => void saveRecognizedPhotoPairs()}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                (!photoImportedPairs.length || photoImporting) && styles.primaryButtonDisabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.primaryButtonText,
-                  (!photoImportedPairs.length || photoImporting) &&
-                    styles.primaryButtonTextDisabled,
-                ]}
-              >
-                {t("save.photoSave")}
-              </Text>
-            </Pressable>
-            <Pressable
-              disabled={!photoAsset?.uri && !photoImportedPairs.length && !photoImportNotice}
-              onPress={resetPhotoImportState}
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                !photoAsset?.uri &&
-                  !photoImportedPairs.length &&
-                  !photoImportNotice &&
-                  styles.secondaryButtonDisabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.secondaryButtonText,
-                  !photoAsset?.uri &&
-                    !photoImportedPairs.length &&
-                    !photoImportNotice &&
-                    styles.secondaryButtonTextDisabled,
-                ]}
-              >
-                {t("save.reset")}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
     </>
   );
 
@@ -5931,6 +5632,16 @@ export default function App() {
       {launchVisible ? (
         <LaunchScreen opacity={launchOpacity} scale={launchScale} glow={moonGlow} styles={styles} />
       ) : null}
+      {tutorialVisible && tutorialStep === "intro" ? (
+        <TutorialOverlay
+          styles={styles}
+          theme={theme}
+          t={t}
+          maxWidth={tutorialMaxWidth}
+          onClose={() => closeTutorial()}
+          onStart={startGuidedTutorial}
+        />
+      ) : null}
       {guidedTutorialActive &&
       displayedTutorialStep ? (
         <TutorialCoach
@@ -7106,18 +6817,25 @@ const createStyles = (theme) => StyleSheet.create({
   folderCreateTile: {
     alignItems: "center",
     justifyContent: "center",
+    gap: 8,
     backgroundColor: theme.surface,
     borderStyle: "dashed",
   },
   folderCreateTileCircle: {
-    width: 62,
-    height: 62,
+    width: 52,
+    height: 52,
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: theme.accentSoft,
     borderWidth: 1,
     borderColor: theme.accent,
+  },
+  folderCreateTileLabel: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "800",
+    color: theme.textSecondary,
   },
   folderTileForm: {
     justifyContent: "center",
@@ -7670,69 +7388,6 @@ const createStyles = (theme) => StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
     color: theme.accentText,
-  },
-  photoPreviewFrame: {
-    height: 228,
-    overflow: "hidden",
-    borderRadius: 22,
-    backgroundColor: theme.surfaceCard,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
-  photoPreviewImage: {
-    width: "100%",
-    height: "100%",
-  },
-  photoPlaceholderCard: {
-    alignItems: "flex-start",
-    gap: 12,
-    padding: 18,
-    borderRadius: 22,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
-  photoPlaceholderIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.accentSoft,
-  },
-  photoPlaceholderTitle: {
-    fontSize: 18,
-    lineHeight: 25,
-    fontWeight: "800",
-    color: theme.textPrimary,
-  },
-  photoPlaceholderBody: {
-    fontSize: 14,
-    lineHeight: 22,
-    color: theme.textSecondary,
-  },
-  photoImportNotice: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: theme.textSecondary,
-  },
-  photoResultsCard: {
-    gap: 12,
-    padding: 14,
-    borderRadius: 20,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
-  photoResultsTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: theme.textPrimary,
-  },
-  photoImportMeta: {
-    fontSize: 12,
-    lineHeight: 18,
-    color: theme.textSecondary,
   },
   dangerButton: {
     flex: 1,

@@ -42,13 +42,11 @@ MEMORIA는 앞면/뒷면 카드쌍을 저장하고, 폴더로 정리하고, 선�
   - `expo-dev-client`
   - `expo-document-picker`
   - `expo-file-system`
-  - `expo-image-picker`
   - `expo-linear-gradient`
   - `expo-secure-store`
   - `expo-web-browser`
   - `jszip`
   - `xlsx`
-  - `@infinitered/react-native-mlkit-text-recognition` 로컬 vendor 패키지
 
 `expo-dev-client`가 들어있다. JS/UI 변경은 Metro reload로 대체로 반영되지만, 네이티브 모듈/Expo config/plugin/permission 변경은 새 dev build나 EAS build가 필요할 수 있다.
 
@@ -88,7 +86,7 @@ adb devices
 커밋/푸시:
 
 ```powershell
-git add App.js src/i18n.js handoff.md
+git add App.js src/i18n.js package.json package-lock.json app.json README.md handoff.md
 git commit -m "<message>"
 git push origin develop
 ```
@@ -109,11 +107,6 @@ git push origin develop
 - `src/lib/supabase.js`
   - Supabase 클라이언트.
   - 네이티브는 SecureStore, 웹은 AsyncStorage 기반 세션 저장.
-- `src/config/features.js`
-  - 기능 플래그.
-  - 현재 `photoImport: false`.
-- `src/lib/photo-ocr.js`
-  - 사진/OCR import 관련 코드. 현재 UI에서는 플래그로 숨김.
 - `supabase/schema.sql`
   - 전체 Supabase 스키마.
 - `supabase/migrations/20260514_add_memory_folders.sql`
@@ -501,7 +494,6 @@ RLS:
 - 폴더 UI는 저장/암기/보관함이 같은 함수를 공유하므로 한 곳 수정이 세 탭에 영향을 줄 수 있다.
 - 튜토리얼은 실제 UI state를 많이 건드린다. 새 단계 추가 시 `applyTutorialStepSideEffects`, `advanceTutorial`, 번역 키를 함께 확인하라.
 - 저장 모달은 Modal 위에 뜬다. 튜토리얼 오버레이를 Modal 밖에 띄우면 z-index/레이어 때문에 뒤에 깔릴 수 있다. 그래서 최근에는 모달 내부에 튜토리얼 안내 카드를 넣었다.
-- `photoImport`는 현재 false. UI를 다시 켜려면 권한/네이티브 빌드/MLKit 동작까지 확인해야 한다.
 - 한국어 사용자 노출 문구에서는 브랜드명을 `메모리아`로 쓰는 흐름이 생겼다. 앱 이름 자체는 `MEMORIA` 유지.
 - Git worktree에 사용자 변경이 있을 수 있다. 절대 무단으로 되돌리지 말고 같이 읽고 맞춰라.
 
