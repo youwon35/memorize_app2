@@ -343,7 +343,7 @@ const TUTORIAL_STEPS = [
     type: "spotlight",
     tab: "save",
     targetKey: "folder-create-save",
-    spotlightRadius: 24,
+    spotlightRadius: 18,
     bubbleHeight: 280,
     icon: "folder-open-outline",
     titleKey: "tutorial.saveFolderTitle",
@@ -355,7 +355,7 @@ const TUTORIAL_STEPS = [
     type: "spotlight",
     tab: "save",
     targetKey: "save-mode-single",
-    spotlightRadius: "pill",
+    spotlightRadius: 16,
     icon: "cards-outline",
     titleKey: "tutorial.saveSingleChipTitle",
     bodyKey: "tutorial.saveSingleChipBody",
@@ -366,7 +366,7 @@ const TUTORIAL_STEPS = [
     type: "spotlight",
     tab: "save",
     targetKey: "save-composer",
-    spotlightRadius: 30,
+    spotlightRadius: 18,
     bubbleGap: 42,
     bubbleHeight: 170,
     icon: "cards-outline",
@@ -439,7 +439,7 @@ const TUTORIAL_STEPS = [
     type: "spotlight",
     tab: "manage",
     targetKey: "manage-list-panel",
-    spotlightRadius: 18,
+    spotlightRadius: 26,
     bubbleHeight: 360,
     icon: "playlist-edit",
     titleKey: "tutorial.manageUseTitle",
@@ -6140,6 +6140,8 @@ function TutorialCoach({
     0
   );
   const tabTailLeft = `${12 + tabIndex * 19}%`;
+  const scrimColor =
+    theme.mode === "dark" ? "rgba(0, 0, 0, 0.68)" : "rgba(8, 13, 28, 0.58)";
   const safeScreenWidth = screenWidth || 390;
   const safeScreenHeight = screenHeight || 844;
   const spotlightPadding = step.spotlightPadding ?? 0;
@@ -6198,6 +6200,107 @@ function TutorialCoach({
   const waitingLabel = t(waitingLabelKey, { tab: targetTabLabel });
   const nextActionLabel = t(step.actionKey ?? "tutorial.next");
   const showSpotlightActions = !(waitsForManualInteraction && step.hideWaitingPill);
+  const renderSpotlightCornerMasks = () => {
+    if (!spotlightRect || spotlightRadius <= 1) {
+      return null;
+    }
+
+    const cornerSize = Math.min(
+      spotlightRadius,
+      spotlightRect.width / 2,
+      spotlightRect.height / 2
+    );
+
+    if (cornerSize <= 1) {
+      return null;
+    }
+
+    return (
+      <>
+        <Pressable
+          onPress={() => {}}
+          style={[
+            styles.tutorialSpotlightCornerMask,
+            {
+              left: spotlightRect.left,
+              top: spotlightRect.top,
+              width: cornerSize,
+              height: cornerSize,
+              backgroundColor: scrimColor,
+              borderBottomRightRadius: cornerSize,
+            },
+          ]}
+        />
+        <Pressable
+          onPress={() => {}}
+          style={[
+            styles.tutorialSpotlightCornerMask,
+            {
+              right: spotlightRect.right,
+              top: spotlightRect.top,
+              width: cornerSize,
+              height: cornerSize,
+              backgroundColor: scrimColor,
+              borderBottomLeftRadius: cornerSize,
+            },
+          ]}
+        />
+        <Pressable
+          onPress={() => {}}
+          style={[
+            styles.tutorialSpotlightCornerMask,
+            {
+              left: spotlightRect.left,
+              bottom: spotlightRect.bottom,
+              width: cornerSize,
+              height: cornerSize,
+              backgroundColor: scrimColor,
+              borderTopRightRadius: cornerSize,
+            },
+          ]}
+        />
+        <Pressable
+          onPress={() => {}}
+          style={[
+            styles.tutorialSpotlightCornerMask,
+            {
+              right: spotlightRect.right,
+              bottom: spotlightRect.bottom,
+              width: cornerSize,
+              height: cornerSize,
+              backgroundColor: scrimColor,
+              borderTopLeftRadius: cornerSize,
+            },
+          ]}
+        />
+      </>
+    );
+  };
+  const renderTutorialTabItem = (item, targetKey) => {
+    const target = item.key === targetKey;
+
+    return (
+      <Pressable
+        key={item.key}
+        onPress={() => {}}
+        style={[
+          styles.tutorialSpotlightTab,
+          target ? styles.tutorialSpotlightTabTarget : styles.tutorialSpotlightTabMuted,
+        ]}
+      >
+        <MaterialCommunityIcons
+          name={item.icon}
+          size={22}
+          color={target ? theme.accentText : theme.textSecondary}
+        />
+        <Text
+          style={target ? styles.tutorialSpotlightTabTextTarget : styles.tutorialSpotlightTabText}
+        >
+          {t(item.labelKey)}
+        </Text>
+      </Pressable>
+    );
+  };
   const renderWaitingPill = (pressable = false) => {
     if (pressable) {
       return (
@@ -6282,6 +6385,20 @@ function TutorialCoach({
               ]}
               onPress={() => {}}
             />
+            {renderSpotlightCornerMasks()}
+            <Pressable
+              onPress={() => {}}
+              style={[
+                styles.tutorialSpotlightTouchBlocker,
+                {
+                  left: spotlightRect.left,
+                  top: spotlightRect.top,
+                  width: spotlightRect.width,
+                  height: spotlightRect.height,
+                  borderRadius: spotlightRadius,
+                },
+              ]}
+            />
             <View
               pointerEvents="none"
               style={[
@@ -6363,33 +6480,7 @@ function TutorialCoach({
                 : null,
             ]}
           >
-            {TABS.map((item) => {
-              const target = item.key === step.waitForTab;
-
-              if (!target) {
-                return (
-                  <View key={item.key} style={[styles.tutorialSpotlightTab, styles.tutorialSpotlightTabMuted]}>
-                    <MaterialCommunityIcons name={item.icon} size={22} color={theme.textSecondary} />
-                    <Text style={styles.tutorialSpotlightTabText}>{t(item.labelKey)}</Text>
-                  </View>
-                );
-              }
-
-              return (
-                <Pressable
-                  key={item.key}
-                  onPress={() => onTargetTabPress?.(item.key)}
-                  style={({ pressed }) => [
-                    styles.tutorialSpotlightTab,
-                    styles.tutorialSpotlightTabTarget,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <MaterialCommunityIcons name={item.icon} size={22} color={theme.accentText} />
-                  <Text style={styles.tutorialSpotlightTabTextTarget}>{t(item.labelKey)}</Text>
-                </Pressable>
-              );
-            })}
+            {TABS.map((item) => renderTutorialTabItem(item, step.waitForTab))}
           </View>
         ) : null}
       </View>
@@ -6488,33 +6579,7 @@ function TutorialCoach({
               : null,
           ]}
         >
-          {TABS.map((item) => {
-            const target = item.key === step.tab;
-
-            if (!target) {
-              return (
-                <View key={item.key} style={[styles.tutorialSpotlightTab, styles.tutorialSpotlightTabMuted]}>
-                  <MaterialCommunityIcons name={item.icon} size={22} color={theme.textSecondary} />
-                  <Text style={styles.tutorialSpotlightTabText}>{t(item.labelKey)}</Text>
-                </View>
-              );
-            }
-
-            return (
-              <Pressable
-                key={item.key}
-                onPress={() => onTargetTabPress?.(item.key)}
-                style={({ pressed }) => [
-                  styles.tutorialSpotlightTab,
-                  styles.tutorialSpotlightTabTarget,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <MaterialCommunityIcons name={item.icon} size={22} color={theme.accentText} />
-                <Text style={styles.tutorialSpotlightTabTextTarget}>{t(item.labelKey)}</Text>
-              </Pressable>
-            );
-          })}
+          {TABS.map((item) => renderTutorialTabItem(item, step.tab))}
         </View>
       ) : null}
     </View>
@@ -10313,6 +10378,13 @@ const createStyles = (theme) => StyleSheet.create({
     borderColor: theme.accent,
     backgroundColor: "transparent",
   },
+  tutorialSpotlightCornerMask: {
+    position: "absolute",
+  },
+  tutorialSpotlightTouchBlocker: {
+    position: "absolute",
+    backgroundColor: "transparent",
+  },
   tutorialSpotlightBubble: {
     position: "absolute",
     gap: 14,
@@ -10490,14 +10562,14 @@ const createStyles = (theme) => StyleSheet.create({
     position: "absolute",
     left: 14,
     right: 14,
-    bottom: Platform.OS === "android" ? 28 : 14,
+    bottom: Platform.OS === "android" ? 56 : 24,
     flexDirection: "row",
     gap: 8,
     paddingTop: 10,
     paddingHorizontal: 10,
     paddingBottom: Platform.OS === "android" ? 18 : 10,
     borderRadius: 28,
-    backgroundColor: theme.surfaceStrong,
+    backgroundColor: theme.tabBarBg,
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
@@ -10515,7 +10587,7 @@ const createStyles = (theme) => StyleSheet.create({
   tutorialSpotlightTabTarget: {
     backgroundColor: theme.accent,
     borderWidth: 2,
-    borderColor: theme.surfaceStrong,
+    borderColor: theme.tabBarBg,
   },
   tutorialSpotlightTabText: {
     fontSize: 13,
