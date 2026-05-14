@@ -921,6 +921,13 @@ export default function App() {
   });
 
   const selectTab = (nextTab) => {
+    if (nextTab !== tab) {
+      setFolderNameDraft("");
+      setCreatingFolderKey(null);
+      setFolderActionMenuKey(null);
+      cancelFolderRename();
+    }
+
     setTab(nextTab);
     setSaveActionMenuOpen(false);
     setManageSortMenuOpen(false);
@@ -6807,9 +6814,10 @@ const createStyles = (theme) => StyleSheet.create({
     maxHeight: "84%",
     alignSelf: "center",
     gap: 10,
+    marginBottom: Platform.OS === "android" ? 28 : 0,
     paddingTop: 12,
     paddingHorizontal: 22,
-    paddingBottom: Platform.OS === "android" ? 26 : 18,
+    paddingBottom: Platform.OS === "android" ? 30 : 18,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     backgroundColor: theme.surface,
@@ -6855,7 +6863,7 @@ const createStyles = (theme) => StyleSheet.create({
   },
   saveModalScrollContent: {
     gap: 10,
-    paddingBottom: 6,
+    paddingBottom: Platform.OS === "android" ? 18 : 8,
   },
   saveModalInnerPanel: {
     borderRadius: 18,
@@ -7132,14 +7140,15 @@ const createStyles = (theme) => StyleSheet.create({
     minHeight: 42,
     paddingVertical: 9,
     fontSize: 12,
+    textAlign: "center",
   },
   folderTileActionRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 6,
   },
   folderTilePrimaryButton: {
     flex: 1,
+    minWidth: 0,
     minHeight: 32,
     alignItems: "center",
     justifyContent: "center",
@@ -7153,6 +7162,7 @@ const createStyles = (theme) => StyleSheet.create({
   },
   folderTileSecondaryButton: {
     flex: 1,
+    minWidth: 0,
     minHeight: 32,
     alignItems: "center",
     justifyContent: "center",
@@ -7539,7 +7549,7 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 14,
     padding: 16,
     borderRadius: 24,
-    backgroundColor: theme.surfaceSoft,
+    backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
@@ -7584,7 +7594,7 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 10,
     padding: 12,
     borderRadius: 18,
-    backgroundColor: theme.surface,
+    backgroundColor: theme.surfaceSoft,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
@@ -7613,7 +7623,7 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 6,
     padding: 12,
     borderRadius: 16,
-    backgroundColor: theme.surfaceCard,
+    backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
@@ -7659,19 +7669,18 @@ const createStyles = (theme) => StyleSheet.create({
   importButton: {
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 18,
+    minHeight: 50,
+    borderRadius: 16,
     paddingVertical: 14,
-    backgroundColor: theme.surfaceMuted,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
+    backgroundColor: theme.accent,
   },
   importButtonDisabled: {
-    backgroundColor: theme.surfaceSoft,
+    backgroundColor: theme.mutedBg,
   },
   importButtonText: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "800",
-    color: theme.textPrimary,
+    color: theme.accentText,
   },
   photoPreviewFrame: {
     height: 228,
