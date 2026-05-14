@@ -348,32 +348,31 @@ const TUTORIAL_STEPS = [
     icon: "folder-open-outline",
     titleKey: "tutorial.saveFolderTitle",
     bodyKey: "tutorial.saveFolderBody",
-    actionKey: "tutorial.nextCardCreate",
+    actionKey: "tutorial.next",
   },
   {
     key: "save-single-chip",
-    type: "target-press",
+    type: "spotlight",
     tab: "save",
     targetKey: "save-mode-single",
     spotlightRadius: "pill",
     icon: "cards-outline",
     titleKey: "tutorial.saveSingleChipTitle",
     bodyKey: "tutorial.saveSingleChipBody",
-    waitingKey: "tutorial.waitingSaveModeSingle",
-    hideTargetHint: true,
+    actionKey: "tutorial.next",
   },
   {
     key: "save-single-practice",
-    type: "practice",
+    type: "spotlight",
     tab: "save",
     targetKey: "save-composer",
     spotlightRadius: 30,
     bubbleGap: 42,
     bubbleHeight: 170,
-    hideWaitingPill: true,
     icon: "cards-outline",
     titleKey: "tutorial.savePracticeTitle",
     bodyKey: "tutorial.savePracticeBody",
+    actionKey: "tutorial.next",
   },
   {
     key: "quiz-tab",
@@ -425,7 +424,7 @@ const TUTORIAL_STEPS = [
     icon: "chart-timeline-variant",
     titleKey: "tutorial.historySummaryTitle",
     bodyKey: "tutorial.historySummaryBody",
-    waitForTab: "manage",
+    actionKey: "tutorial.next",
   },
   {
     key: "manage-tab",
@@ -445,7 +444,7 @@ const TUTORIAL_STEPS = [
     icon: "playlist-edit",
     titleKey: "tutorial.manageUseTitle",
     bodyKey: "tutorial.manageUseBody",
-    waitForTab: "about",
+    actionKey: "tutorial.next",
   },
   {
     key: "about-tab",
@@ -2332,11 +2331,7 @@ export default function App() {
     setTutorialStep(nextStep.key);
     applyTutorialStepSideEffects(nextStep);
 
-    if (
-      nextStep.type !== "tab" &&
-      nextStep.tab &&
-      tab !== nextStep.tab
-    ) {
+    if (nextStep.tab && tab !== nextStep.tab) {
       selectTab(nextStep.tab);
     }
   };
@@ -3395,6 +3390,11 @@ export default function App() {
     ).length;
     const folderViewKey = createFolderViewKey(scope, normalizedCurrentFolderId);
     const creatingCurrentFolder = creatingFolderKey === folderViewKey;
+    const prioritizeCreateTile =
+      allowCreate &&
+      guidedTutorialActive &&
+      tutorialStep === "save-folder-manage" &&
+      scope === "save";
     const renderFolderAction = (action) => (
       <Pressable
         key={action.key}
@@ -3635,8 +3635,9 @@ export default function App() {
           <View style={styles.folderChildrenSection}>
             {children.length || allowCreate || showSavedCards ? (
               <View style={styles.folderChildList}>
+                {allowCreate && prioritizeCreateTile ? renderCreateFolderTile() : null}
                 {children.map(renderChildFolderTile)}
-                {allowCreate ? renderCreateFolderTile() : null}
+                {allowCreate && !prioritizeCreateTile ? renderCreateFolderTile() : null}
                 {showSavedCards ? (
                   <Pressable
                     onPress={() => openFolderCards(normalizedCurrentFolderId)}
@@ -4039,6 +4040,8 @@ export default function App() {
   const renderSaveComposerModal = () => {
     const activeSaveMode =
       SAVE_INPUT_OPTIONS.find((option) => option.key === saveInputMode) ?? SAVE_INPUT_OPTIONS[0];
+    const showTutorialInlineCard =
+      guidedTutorialActive && tutorialStep === "save-single-practice" && saveInputMode === "single";
 
     return (
       <Modal
@@ -4078,6 +4081,25 @@ export default function App() {
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.saveModalScrollContent}
               >
+                {showTutorialInlineCard ? (
+                  <View style={styles.saveTutorialInlineCard}>
+                    <Text style={styles.saveTutorialInlineTitle}>
+                      {t("tutorial.savePracticeTitle")}
+                    </Text>
+                    <Text style={styles.saveTutorialInlineBody}>
+                      {t("tutorial.savePracticeBody")}
+                    </Text>
+                    <Pressable
+                      onPress={advanceTutorial}
+                      style={({ pressed }) => [
+                        styles.tutorialCoachNextButton,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text style={styles.tutorialCoachNextText}>{t("tutorial.next")}</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
                 {renderSaveInputContent()}
               </ScrollView>
             </View>
@@ -4093,7 +4115,7 @@ export default function App() {
       tab === "save" &&
       !launchVisible &&
       !saveComposerVisible &&
-      (!guidedTutorialActive || tutorialSaveModeStep);
+      (!tutorialVisible || tutorialSaveModeStep);
 
     if (!shouldShow) {
       return null;
@@ -5945,7 +5967,9 @@ export default function App() {
           onStart={startGuidedTutorial}
         />
       ) : null}
-      {guidedTutorialActive && displayedTutorialStep ? (
+      {guidedTutorialActive &&
+      displayedTutorialStep &&
+      !(tutorialStep === "save-single-practice" && saveComposerVisible) ? (
         <TutorialCoach
           step={displayedTutorialStep}
           styles={styles}
@@ -6167,16 +6191,12 @@ function TutorialCoach({
   const [demoBack, setDemoBack] = useState("");
   const [savingDemo, setSavingDemo] = useState(false);
   const waitsForManualInteraction =
-    step.type === "practice" ||
-    step.type === "target-press" ||
-    Boolean(step.waitForTab) ||
     Boolean(step.waitForNextTap);
   const waitingLabelKey = step.waitingKey ?? (
     step.type === "practice" ? "tutorial.waitingSave" : "tutorial.waitingTap"
   );
-  const waitingLabel = step.waitForTab || isTabStep
-    ? t("tutorial.tapTabHint", { tab: targetTabLabel })
-    : t(waitingLabelKey);
+  const waitingLabel = t(waitingLabelKey, { tab: targetTabLabel });
+  const nextActionLabel = t(step.actionKey ?? "tutorial.next");
   const showSpotlightActions = !(waitsForManualInteraction && step.hideWaitingPill);
   const renderWaitingPill = (pressable = false) => {
     if (pressable) {
@@ -6323,7 +6343,7 @@ function TutorialCoach({
                     pressed && styles.pressed,
                   ]}
                 >
-                  <Text style={styles.tutorialCoachNextText}>{t(step.actionKey)}</Text>
+                  <Text style={styles.tutorialCoachNextText}>{nextActionLabel}</Text>
                 </Pressable>
               )}
             </View>
@@ -6422,11 +6442,7 @@ function TutorialCoach({
         ) : null}
 
         <View style={styles.tutorialCoachActions}>
-          {isTabStep ? (
-            <View style={styles.tutorialCoachWaitingPill}>
-              <Text style={styles.tutorialCoachWaitingText}>{waitingLabel}</Text>
-            </View>
-          ) : isSaveDemo ? (
+          {isSaveDemo ? (
             <Pressable
               disabled={savingDemo}
               onPress={() => void saveDemoCard()}
@@ -6453,7 +6469,7 @@ function TutorialCoach({
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={styles.tutorialCoachNextText}>{t(step.actionKey)}</Text>
+              <Text style={styles.tutorialCoachNextText}>{nextActionLabel}</Text>
             </Pressable>
           )}
         </View>
@@ -10402,12 +10418,35 @@ const createStyles = (theme) => StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: theme.accent,
+    backgroundColor: theme.accentSoft,
+    borderWidth: 1,
+    borderColor: theme.accentSoftStrong,
   },
   tutorialCoachNextText: {
     fontSize: 14,
     fontWeight: "900",
-    color: theme.accentText,
+    color: theme.accent,
+  },
+  saveTutorialInlineCard: {
+    gap: 12,
+    padding: 16,
+    marginBottom: 14,
+    borderRadius: 18,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.accentSoftStrong,
+  },
+  saveTutorialInlineTitle: {
+    fontSize: 17,
+    lineHeight: 23,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  saveTutorialInlineBody: {
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: "700",
+    color: theme.textSecondary,
   },
   tutorialDemoForm: {
     gap: 8,
