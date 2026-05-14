@@ -79,7 +79,7 @@ const DAILY_STUDY_GOAL_KEY = "@memoria/daily-study-goal";
 const THEME_MODE_KEY = "@memoria/theme-mode";
 const LANGUAGE_KEY = "@memoria/language";
 const STUDY_STATS_KEY = "@memoria/study-stats";
-const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen-v2";
+const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen-v3";
 const SUPPORT_REQUESTS_KEY = "@memoria/support-requests";
 const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
@@ -339,16 +339,16 @@ const TUTORIAL_STEPS = [
     bodyKey: "tutorial.saveTabBody",
   },
   {
-    key: "save-folder-overview",
+    key: "save-folder-manage",
     type: "spotlight",
     tab: "save",
-    targetKey: "folder-panel-save",
+    targetKey: "folder-create-save",
     spotlightRadius: 24,
     bubbleHeight: 280,
     icon: "folder-open-outline",
     titleKey: "tutorial.saveFolderTitle",
     bodyKey: "tutorial.saveFolderBody",
-    actionKey: "tutorial.nextSaveAdd",
+    actionKey: "tutorial.nextCardCreate",
   },
   {
     key: "save-single-chip",
@@ -376,41 +376,6 @@ const TUTORIAL_STEPS = [
     bodyKey: "tutorial.savePracticeBody",
   },
   {
-    key: "save-single-success",
-    type: "spotlight",
-    tab: "save",
-    bubbleHeight: 300,
-    hideBubbleTail: true,
-    icon: "check-circle-outline",
-    titleKey: "tutorial.saveSuccessTitle",
-    bodyKey: "tutorial.saveSuccessBody",
-    actionKey: "tutorial.nextFileChip",
-  },
-  {
-    key: "save-file-chip",
-    type: "target-press",
-    tab: "save",
-    targetKey: "save-mode-text",
-    spotlightRadius: "pill",
-    icon: "file-document-plus-outline",
-    titleKey: "tutorial.saveFileChipTitle",
-    bodyKey: "tutorial.saveFileChipBody",
-    waitingKey: "tutorial.waitingSaveModeFile",
-    hideTargetHint: true,
-  },
-  {
-    key: "save-file-panel",
-    type: "spotlight",
-    tab: "save",
-    targetKey: "save-import-panel",
-    spotlightRadius: 24,
-    bubbleHeight: 320,
-    icon: "file-document-plus-outline",
-    titleKey: "tutorial.saveFileTitle",
-    bodyKey: "tutorial.saveFileBody",
-    actionKey: "tutorial.nextQuiz",
-  },
-  {
     key: "quiz-tab",
     type: "tab",
     tab: "quiz",
@@ -419,40 +384,28 @@ const TUTORIAL_STEPS = [
     bodyKey: "tutorial.quizTabBody",
   },
   {
-    key: "quiz-scope",
+    key: "quiz-folder-setting",
     type: "spotlight",
     tab: "quiz",
-    targetKey: "quiz-scope-card",
+    targetKey: "folder-panel-quiz",
     spotlightRadius: 24,
-    bubbleHeight: 300,
+    bubbleHeight: 280,
     icon: "brain",
     titleKey: "tutorial.quizUseTitle",
     bodyKey: "tutorial.quizUseBody",
     actionKey: "tutorial.nextQuizStart",
   },
   {
-    key: "quiz-start-button",
-    type: "target-press",
+    key: "quiz-start-overview",
+    type: "spotlight",
     tab: "quiz",
     targetKey: "quiz-start-button",
     spotlightRadius: 18,
+    bubbleHeight: 250,
     icon: "brain",
     titleKey: "tutorial.quizStartTitle",
     bodyKey: "tutorial.quizStartBody",
-    waitingKey: "tutorial.waitingQuizStart",
-    hideTargetHint: true,
-  },
-  {
-    key: "quiz-answer-practice",
-    type: "practice",
-    tab: "quiz",
-    targetKey: "quiz-card",
-    spotlightRadius: 24,
-    bubbleHeight: 330,
-    icon: "brain",
-    titleKey: "tutorial.quizAnswerTitle",
-    bodyKey: "tutorial.quizAnswerBody",
-    waitingKey: "tutorial.waitingAnswer",
+    actionKey: "tutorial.nextHistory",
   },
   {
     key: "history-tab",
@@ -472,18 +425,6 @@ const TUTORIAL_STEPS = [
     icon: "chart-timeline-variant",
     titleKey: "tutorial.historySummaryTitle",
     bodyKey: "tutorial.historySummaryBody",
-    actionKey: "tutorial.nextHistoryRecent",
-  },
-  {
-    key: "history-recent",
-    type: "spotlight",
-    tab: "history",
-    targetKey: "history-recent-panel",
-    spotlightRadius: 26,
-    bubbleHeight: 340,
-    icon: "chart-timeline-variant",
-    titleKey: "tutorial.historyRecentTitle",
-    bodyKey: "tutorial.historyRecentBody",
     waitForTab: "manage",
   },
   {
@@ -493,18 +434,6 @@ const TUTORIAL_STEPS = [
     icon: "playlist-edit",
     titleKey: "tutorial.manageTabTitle",
     bodyKey: "tutorial.manageTabBody",
-  },
-  {
-    key: "manage-folder",
-    type: "spotlight",
-    tab: "manage",
-    targetKey: "folder-panel-manage",
-    spotlightRadius: 24,
-    bubbleHeight: 320,
-    icon: "folder-open-outline",
-    titleKey: "tutorial.manageFolderTitle",
-    bodyKey: "tutorial.manageFolderBody",
-    actionKey: "tutorial.nextManageList",
   },
   {
     key: "manage-use",
@@ -764,7 +693,6 @@ export default function App() {
   const [tutorialVisible, setTutorialVisible] = useState(false);
   const [tutorialStep, setTutorialStep] = useState("intro");
   const [tutorialTargetRect, setTutorialTargetRect] = useState(null);
-  const [tutorialQuizResult, setTutorialQuizResult] = useState(null);
   const [session, setSession] = useState(null);
   const [userRole, setUserRole] = useState("user");
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
@@ -821,7 +749,6 @@ export default function App() {
   const scrollRef = useRef(null);
   const tutorialStepRef = useRef(tutorialStep);
   const tutorialTargetRefs = useRef({});
-  const tutorialSavedPairIdRef = useRef(null);
   const pairsRef = useRef(pairs);
   const foldersRef = useRef(folders);
   const cloudFoldersReadyRef = useRef(false);
@@ -885,20 +812,7 @@ export default function App() {
       : Math.min(DEFAULT_QUIZ_COUNT, maxQuizCount);
   const guidedTutorialActive = tutorialVisible && tutorialStep !== "intro";
   const currentTutorialStep = guidedTutorialActive ? TUTORIAL_STEP_MAP[tutorialStep] : null;
-  const displayedTutorialStep = useMemo(() => {
-    if (!currentTutorialStep || currentTutorialStep.key !== "history-tab") {
-      return currentTutorialStep;
-    }
-
-    return {
-      ...currentTutorialStep,
-      titleKey:
-        tutorialQuizResult === "incorrect"
-          ? "tutorial.historyTabTitleIncorrect"
-          : "tutorial.historyTabTitleCorrect",
-      bodyKey: "tutorial.historyTabBodyAfterQuiz",
-    };
-  }, [currentTutorialStep, tutorialQuizResult]);
+  const displayedTutorialStep = currentTutorialStep;
   tutorialStepRef.current = tutorialStep;
 
   const registerTutorialTarget = (key) => (node) => {
@@ -1009,7 +923,7 @@ export default function App() {
   };
 
   const applyTutorialStepSideEffects = (step) => {
-    if (step?.key === "save-folder-overview") {
+    if (step?.key === "save-folder-manage") {
       setSaveComposerVisible(false);
       setSaveActionMenuOpen(false);
       requestAnimationFrame(() => {
@@ -1017,8 +931,8 @@ export default function App() {
       });
     }
 
-    if (step?.key === "save-single-chip" || step?.key === "save-file-chip") {
-      setSaveInputMode(step?.key === "save-file-chip" ? "text" : "single");
+    if (step?.key === "save-single-chip") {
+      setSaveInputMode("single");
       setSaveComposerVisible(false);
       setSaveActionMenuOpen(true);
       requestAnimationFrame(() => {
@@ -1035,23 +949,6 @@ export default function App() {
       });
     }
 
-    if (step?.key === "save-single-success") {
-      setSaveActionMenuOpen(false);
-      setSaveComposerVisible(false);
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-      });
-    }
-
-    if (step?.key === "save-file-panel") {
-      setSaveInputMode("text");
-      setSaveActionMenuOpen(false);
-      setSaveComposerVisible(true);
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-      });
-    }
-
     if (step?.key === "quiz-tab") {
       setSaveActionMenuOpen(false);
       setSaveComposerVisible(false);
@@ -1060,21 +957,16 @@ export default function App() {
       });
     }
 
-    if (step?.key === "quiz-scope" || step?.key === "quiz-start-button") {
+    if (step?.key === "quiz-folder-setting" || step?.key === "quiz-start-overview") {
       setQuizMode("front");
       setQuizCountInput("1");
+      setQuizFolderPanelCollapsed(false);
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo?.({ y: 0, animated: true });
       });
     }
 
-    if (step?.key === "quiz-answer-practice") {
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-      });
-    }
-
-    if (step?.key === "history-summary" || step?.key === "history-recent") {
+    if (step?.key === "history-summary") {
       setHistoryCalendarOpen(false);
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo?.({ y: 0, animated: true });
@@ -1087,7 +979,7 @@ export default function App() {
       });
     }
 
-    if (step?.key === "manage-folder" || step?.key === "manage-use") {
+    if (step?.key === "manage-use") {
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo?.({ y: 0, animated: true });
       });
@@ -2407,7 +2299,6 @@ export default function App() {
     setTutorialVisible(false);
     setTutorialStep("intro");
     setTutorialSeen(true);
-    setTutorialQuizResult(null);
     void AsyncStorage.setItem(TUTORIAL_SEEN_KEY, "1");
 
     if (nextTab) {
@@ -2423,12 +2314,10 @@ export default function App() {
 
   const openTutorial = () => {
     setTutorialStep("intro");
-    setTutorialQuizResult(null);
     setTutorialVisible(true);
   };
 
   const startGuidedTutorial = () => {
-    setTutorialQuizResult(null);
     setTutorialStep(TUTORIAL_STEPS[0].key);
   };
 
@@ -2584,9 +2473,13 @@ export default function App() {
     }
 
     if (guidedTutorialActive && tutorialStep === "save-single-practice") {
-      tutorialSavedPairIdRef.current = saveResult.savedPairs?.[0]?.id ?? null;
-      setTutorialStep("save-single-success");
-      applyTutorialStepSideEffects(TUTORIAL_STEP_MAP["save-single-success"]);
+      const nextStep = getNextTutorialStep("save-single-practice");
+
+      if (nextStep) {
+        setTutorialStep(nextStep.key);
+        applyTutorialStepSideEffects(nextStep);
+      }
+
       return;
     }
   };
@@ -2907,21 +2800,6 @@ export default function App() {
     updateStudyStats(nextStudyStats);
     roundMetaRef.current = null;
     setRoundComplete(true);
-
-    if (guidedTutorialActive && tutorialStepRef.current === "quiz-answer-practice") {
-      setTimeout(() => {
-        if (tutorialStepRef.current !== "quiz-answer-practice") {
-          return;
-        }
-
-        const nextStep = getNextTutorialStep("quiz-answer-practice");
-
-        if (nextStep) {
-          setTutorialStep(nextStep.key);
-          applyTutorialStepSideEffects(nextStep);
-        }
-      }, 420);
-    }
   };
 
   const resetQuizSession = () => {
@@ -3128,40 +3006,36 @@ export default function App() {
   };
 
   const startQuiz = (requestedCount) => {
-    if (!quizFolderPairs.length) {
-      Alert.alert(t("quiz.noQuestionsTitle"), t("quiz.noQuestionsBody"));
-      return;
-    }
-
-    const quizTutorialStarting =
-      guidedTutorialActive && tutorialStepRef.current === "quiz-start-button";
-    const tutorialPair =
-      quizTutorialStarting
-        ? pairsRef.current.find((pair) => pair.id === tutorialSavedPairIdRef.current) ?? pairsRef.current[0]
-        : null;
-    const finalRequestedCount = quizTutorialStarting ? 1 : resolveRequestedQuizCount(requestedCount);
-    const nextDeck = buildPracticeDeck(
-      tutorialPair ? [tutorialPair] : quizFolderPairs,
-      finalRequestedCount,
-      quizTutorialStarting ? "front" : quizMode,
-      studyStatsRef.current
-    );
-
-    beginQuizRound(nextDeck, {
-      requestedCount: finalRequestedCount,
-      mode: quizTutorialStarting ? "front" : quizMode,
-      source: "adaptive",
-      folderId: quizTutorialStarting ? normalizeFolderId(tutorialPair?.folderId) : quizFolderId,
-    });
-
-    if (quizTutorialStarting) {
-      const nextStep = getNextTutorialStep("quiz-start-button");
+    if (guidedTutorialActive && tutorialStepRef.current === "quiz-start-overview") {
+      const nextStep = getNextTutorialStep("quiz-start-overview");
 
       if (nextStep) {
         setTutorialStep(nextStep.key);
         applyTutorialStepSideEffects(nextStep);
       }
+
+      return;
     }
+
+    if (!quizFolderPairs.length) {
+      Alert.alert(t("quiz.noQuestionsTitle"), t("quiz.noQuestionsBody"));
+      return;
+    }
+
+    const finalRequestedCount = resolveRequestedQuizCount(requestedCount);
+    const nextDeck = buildPracticeDeck(
+      quizFolderPairs,
+      finalRequestedCount,
+      quizMode,
+      studyStatsRef.current
+    );
+
+    beginQuizRound(nextDeck, {
+      requestedCount: finalRequestedCount,
+      mode: quizMode,
+      source: "adaptive",
+      folderId: quizFolderId,
+    });
   };
 
   const retryIncorrectCards = () => {
@@ -3315,9 +3189,6 @@ export default function App() {
     if (result !== "incorrect") {
       updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, false));
       setRoundIncorrectIds(nextIncorrectIds);
-      if (guidedTutorialActive && tutorialStepRef.current === "quiz-answer-practice") {
-        setTutorialQuizResult("incorrect");
-      }
     }
 
     goNext(nextIncorrectIds);
@@ -3339,9 +3210,6 @@ export default function App() {
 
     if (compareAnswers(answer, current.answer)) {
       updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, true));
-      if (guidedTutorialActive && tutorialStepRef.current === "quiz-answer-practice") {
-        setTutorialQuizResult("correct");
-      }
       setResult("correct");
       setFeedback(t("quiz.feedbackCorrect"));
       return;
@@ -3349,9 +3217,6 @@ export default function App() {
 
     const nextIncorrectIds = appendUniqueId(roundIncorrectIds, current.id);
     updateStudyStats(recordStudyAttempt(studyStatsRef.current, current, false));
-    if (guidedTutorialActive && tutorialStepRef.current === "quiz-answer-practice") {
-      setTutorialQuizResult("incorrect");
-    }
     setResult("incorrect");
     setFeedback(t("quiz.feedbackIncorrect"));
     setRoundIncorrectIds(nextIncorrectIds);
@@ -3600,6 +3465,7 @@ export default function App() {
       return (
         <Pressable
           key={`${folderViewKey}:create-button`}
+          {...tutorialTargetProps(`folder-create-${scope}`)}
           accessibilityLabel={t("folders.newFolder")}
           onPress={() => {
             cancelFolderRename();
@@ -3812,9 +3678,6 @@ export default function App() {
       advanceTutorial();
     }
 
-    if (guidedTutorialActive && tutorialStep === "save-file-chip" && optionKey === "text") {
-      advanceTutorial();
-    }
   };
 
   const swapDraftSides = () => {
@@ -4225,8 +4088,7 @@ export default function App() {
   };
 
   const renderSaveFloatingAdd = () => {
-    const tutorialSaveModeStep =
-      tutorialStep === "save-single-chip" || tutorialStep === "save-file-chip";
+    const tutorialSaveModeStep = tutorialStep === "save-single-chip";
     const shouldShow =
       tab === "save" &&
       !launchVisible &&
@@ -6125,17 +5987,23 @@ function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) 
 }
 
 function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
-  const messages = [
-    { text: t("tutorial.messageHello") },
-    { text: t("tutorial.messageEfficiency") },
-    { text: t("tutorial.messageIntro") },
+  const featureCards = [
+    {
+      icon: "star-four-points-outline",
+      title: t("tutorial.welcomeSaveTitle"),
+      body: t("tutorial.welcomeSaveBody"),
+    },
+    {
+      icon: "cards-playing-outline",
+      title: t("tutorial.welcomeStudyTitle"),
+      body: t("tutorial.welcomeStudyBody"),
+    },
+    {
+      icon: "folder-multiple-outline",
+      title: t("tutorial.welcomeLibraryTitle"),
+      body: t("tutorial.welcomeLibraryBody"),
+    },
   ];
-  const [visibleMessageCount, setVisibleMessageCount] = useState(1);
-
-  const choicesReady = visibleMessageCount >= messages.length;
-  const showNextMessage = () => {
-    setVisibleMessageCount((currentCount) => Math.min(messages.length, currentCount + 1));
-  };
 
   return (
     <View style={styles.tutorialOverlay}>
@@ -6160,83 +6028,62 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
           />
         ))}
       </View>
-      <Pressable
-        style={styles.tutorialTapArea}
-        onPress={showNextMessage}
-        disabled={choicesReady}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          styles.tutorialWelcomeContent,
+          maxWidth ? { maxWidth, alignSelf: "center", width: "100%" } : null,
+        ]}
       >
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={[
-            styles.tutorialScrollContent,
-            maxWidth ? { maxWidth, alignSelf: "center", width: "100%" } : null,
-          ]}
-        >
-          <View style={styles.tutorialHeader}>
-            <Text style={styles.tutorialTitle}>{t("tutorial.title")}</Text>
-            <Text style={styles.tutorialCaption}>{t("tutorial.caption")}</Text>
-          </View>
+        <View style={styles.tutorialWelcomeHeader}>
+          <Text style={styles.tutorialWelcomeTitle}>{t("tutorial.welcomeTitle")}</Text>
+          <Text style={styles.tutorialWelcomeSubtitle}>{t("tutorial.welcomeSubtitle")}</Text>
+        </View>
 
-          <View style={styles.tutorialChat}>
-            {messages.slice(0, visibleMessageCount).map((message, index) => (
-              <View key={`intro-message-${index}`} style={styles.tutorialMessageRow}>
-                <View style={styles.tutorialBubble}>
-                  <View style={styles.tutorialBubbleTail} />
-                  <Text style={styles.tutorialBubbleText}>{message.text}</Text>
-                </View>
+        <View style={styles.tutorialMascotStage}>
+          <View style={styles.tutorialMascotShadow} />
+          <View style={styles.tutorialMascot}>
+            <View style={styles.tutorialMascotEyeRow}>
+              <View style={styles.tutorialMascotEye} />
+              <View style={styles.tutorialMascotEye} />
+            </View>
+            <View style={styles.tutorialMascotSmile} />
+            <View style={styles.tutorialMascotBook}>
+              <MaterialCommunityIcons name="book-open-variant" size={42} color={theme.accentText} />
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.tutorialFeatureList}>
+          {featureCards.map((item) => (
+            <View key={item.title} style={styles.tutorialFeatureCard}>
+              <View style={styles.tutorialFeatureIcon}>
+                <MaterialCommunityIcons name={item.icon} size={22} color={theme.accent} />
               </View>
-            ))}
-            {!choicesReady ? (
-              <Text style={styles.tutorialTapHint}>{t("tutorial.tapToContinue")}</Text>
-            ) : null}
-          </View>
-        </ScrollView>
-      </Pressable>
+              <View style={styles.tutorialFeatureCopy}>
+                <Text style={styles.tutorialFeatureTitle}>{item.title}</Text>
+                <Text style={styles.tutorialFeatureBody}>{item.body}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
 
-      <View style={styles.tutorialBottomSheet}>
-        <View style={styles.tutorialActionRow}>
-          <Pressable
-            onPress={onClose}
-            disabled={!choicesReady}
-            style={({ pressed }) => [
-              styles.secondaryButton,
-              styles.tutorialActionButton,
-              !choicesReady && styles.secondaryButtonDisabled,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text
-              style={[
-                styles.secondaryButtonText,
-                styles.tutorialChoiceText,
-                !choicesReady && styles.secondaryButtonTextDisabled,
-              ]}
-            >
-              {t("tutorial.alreadyKnow")}
-            </Text>
-          </Pressable>
+        <View style={styles.tutorialWelcomeActions}>
           <Pressable
             onPress={onStart}
-            disabled={!choicesReady}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              styles.tutorialActionButton,
-              !choicesReady && styles.primaryButtonDisabled,
-              pressed && styles.pressed,
-            ]}
+            style={({ pressed }) => [styles.tutorialStartButton, pressed && styles.pressed]}
           >
-            <Text
-              style={[
-                styles.primaryButtonText,
-                styles.tutorialChoiceText,
-                !choicesReady && styles.primaryButtonTextDisabled,
-              ]}
-            >
-              {t("tutorial.like")}
-            </Text>
+            <Text style={styles.tutorialStartText}>{t("tutorial.start")}</Text>
+            <MaterialCommunityIcons name="arrow-right" size={18} color={theme.accentText} />
+          </Pressable>
+          <Pressable
+            onPress={onClose}
+            style={({ pressed }) => [styles.tutorialSkipButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.tutorialSkipText}>{t("tutorial.skip")}</Text>
           </Pressable>
         </View>
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -10128,6 +9975,162 @@ const createStyles = (theme) => StyleSheet.create({
   },
   tutorialIntroDecor: {
     ...StyleSheet.absoluteFillObject,
+  },
+  tutorialWelcomeContent: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) + 38 : 58,
+    paddingBottom: Platform.OS === "android" ? 38 : 52,
+    justifyContent: "center",
+  },
+  tutorialWelcomeHeader: {
+    gap: 10,
+    marginBottom: 18,
+  },
+  tutorialWelcomeTitle: {
+    fontSize: 28,
+    lineHeight: 36,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  tutorialWelcomeSubtitle: {
+    maxWidth: 280,
+    fontSize: 15,
+    lineHeight: 23,
+    fontWeight: "800",
+    color: theme.accent,
+  },
+  tutorialMascotStage: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 190,
+    marginBottom: 18,
+  },
+  tutorialMascotShadow: {
+    position: "absolute",
+    bottom: 8,
+    width: 150,
+    height: 28,
+    borderRadius: 999,
+    backgroundColor: theme.accentSoft,
+  },
+  tutorialMascot: {
+    width: 138,
+    height: 146,
+    borderTopLeftRadius: 72,
+    borderTopRightRadius: 72,
+    borderBottomLeftRadius: 42,
+    borderBottomRightRadius: 42,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.surfaceStrong,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+    shadowColor: theme.textPrimary,
+    shadowOpacity: theme.mode === "dark" ? 0.2 : 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 4,
+  },
+  tutorialMascotEyeRow: {
+    position: "absolute",
+    top: 48,
+    flexDirection: "row",
+    gap: 24,
+  },
+  tutorialMascotEye: {
+    width: 8,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: theme.textPrimary,
+  },
+  tutorialMascotSmile: {
+    position: "absolute",
+    top: 70,
+    width: 22,
+    height: 11,
+    borderBottomWidth: 2,
+    borderColor: theme.textPrimary,
+    borderRadius: 12,
+  },
+  tutorialMascotBook: {
+    position: "absolute",
+    bottom: 22,
+    width: 82,
+    height: 54,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accent,
+  },
+  tutorialFeatureList: {
+    gap: 10,
+  },
+  tutorialFeatureCard: {
+    minHeight: 76,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  tutorialFeatureIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accentSoft,
+  },
+  tutorialFeatureCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  tutorialFeatureTitle: {
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  tutorialFeatureBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
+    color: theme.textSecondary,
+  },
+  tutorialWelcomeActions: {
+    gap: 12,
+    marginTop: 24,
+  },
+  tutorialStartButton: {
+    minHeight: 58,
+    borderRadius: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: theme.accent,
+  },
+  tutorialStartText: {
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: "900",
+    color: theme.accentText,
+  },
+  tutorialSkipButton: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tutorialSkipText: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "800",
+    color: theme.textMuted,
   },
   tutorialTapArea: {
     flex: 1,
