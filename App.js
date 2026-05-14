@@ -74,7 +74,8 @@ const APP_VERSION = "1.0.0";
 const STORAGE_KEY = "@memoria/cards";
 const FOLDERS_STORAGE_KEY = "@memoria/folders";
 const ROOT_FOLDER_ID = "root";
-const DAILY_STUDY_GOAL = 5;
+const DEFAULT_DAILY_STUDY_GOAL = 5;
+const DAILY_STUDY_GOAL_KEY = "@memoria/daily-study-goal";
 const THEME_MODE_KEY = "@memoria/theme-mode";
 const LANGUAGE_KEY = "@memoria/language";
 const STUDY_STATS_KEY = "@memoria/study-stats";
@@ -660,6 +661,9 @@ export default function App() {
   const [language, setLanguage] = useState(getInitialLanguage());
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [themeMode, setThemeMode] = useState("light");
+  const [dailyStudyGoal, setDailyStudyGoal] = useState(DEFAULT_DAILY_STUDY_GOAL);
+  const [dailyGoalModalVisible, setDailyGoalModalVisible] = useState(false);
+  const [dailyGoalInput, setDailyGoalInput] = useState(`${DEFAULT_DAILY_STUDY_GOAL}`);
   const [saveInputMode, setSaveInputMode] = useState("single");
   const [saveActionMenuOpen, setSaveActionMenuOpen] = useState(false);
   const [saveComposerVisible, setSaveComposerVisible] = useState(false);
@@ -734,11 +738,13 @@ export default function App() {
   const [launchVisible, setLaunchVisible] = useState(true);
   const [openManageSwipeId, setOpenManageSwipeId] = useState(null);
   const [legalDocKey, setLegalDocKey] = useState(null);
+  const [stopQuizModalVisible, setStopQuizModalVisible] = useState(false);
   const [saveFolderPanelCollapsed, setSaveFolderPanelCollapsed] = useState(false);
   const [quizFolderPanelCollapsed, setQuizFolderPanelCollapsed] = useState(false);
   const [manageFolderPanelCollapsed, setManageFolderPanelCollapsed] = useState(false);
 
   const timerRef = useRef(null);
+  const pendingStopActionRef = useRef(null);
   const appRootRef = useRef(null);
   const scrollRef = useRef(null);
   const tutorialStepRef = useRef(tutorialStep);
@@ -1043,7 +1049,7 @@ export default function App() {
     };
 
     if (nextTab !== tab && hasActiveQuizRound) {
-      confirmStopActiveQuiz(completeTabChange);
+      requestStopActiveQuiz(completeTabChange);
       return;
     }
 
@@ -1306,6 +1312,7 @@ export default function App() {
       try {
         const storedLanguage = await AsyncStorage.getItem(LANGUAGE_KEY);
         const storedThemeMode = await AsyncStorage.getItem(THEME_MODE_KEY);
+        const storedStudyGoal = await AsyncStorage.getItem(DAILY_STUDY_GOAL_KEY);
         const storedStudyStats = await AsyncStorage.getItem(STUDY_STATS_KEY);
         const storedTutorialSeen = await AsyncStorage.getItem(TUTORIAL_SEEN_KEY);
         const storedSupportRequests = await AsyncStorage.getItem(SUPPORT_REQUESTS_KEY);
@@ -1317,6 +1324,15 @@ export default function App() {
 
         if (storedThemeMode === "dark" || storedThemeMode === "light") {
           setThemeMode(storedThemeMode);
+        }
+
+        const parsedStudyGoal = Number.parseInt(storedStudyGoal, 10);
+
+        if (Number.isFinite(parsedStudyGoal) && parsedStudyGoal > 0) {
+          const nextGoal = Math.min(99, parsedStudyGoal);
+
+          setDailyStudyGoal(nextGoal);
+          setDailyGoalInput(`${nextGoal}`);
         }
 
         if (storedStudyStats && active) {
@@ -1406,6 +1422,14 @@ export default function App() {
 
     void AsyncStorage.setItem(THEME_MODE_KEY, themeMode);
   }, [themeMode, preferencesReady]);
+
+  useEffect(() => {
+    if (!preferencesReady) {
+      return;
+    }
+
+    void AsyncStorage.setItem(DAILY_STUDY_GOAL_KEY, `${dailyStudyGoal}`);
+  }, [dailyStudyGoal, preferencesReady]);
 
   useEffect(() => {
     void AsyncStorage.setItem(SUPPORT_REQUESTS_KEY, JSON.stringify(supportRequests));
@@ -2817,21 +2841,27 @@ export default function App() {
     return persistPromise;
   };
 
-  const confirmStopActiveQuiz = (onConfirm) => {
-    Alert.alert(t("quiz.stopTitle"), t("quiz.stopBody"), [
-      { text: t("quiz.stopNo"), style: "cancel" },
-      {
-        text: t("quiz.stopYes"),
-        style: "destructive",
-        onPress: () => {
-          const resetPromise = resetQuizSession();
+  const requestStopActiveQuiz = (onConfirm) => {
+    pendingStopActionRef.current = onConfirm ?? null;
+    setStopQuizModalVisible(true);
+  };
 
-          if (onConfirm) {
-            void resetPromise.finally(onConfirm).catch(() => {});
-          }
-        },
-      },
-    ]);
+  const cancelStopActiveQuiz = () => {
+    pendingStopActionRef.current = null;
+    setStopQuizModalVisible(false);
+  };
+
+  const confirmStopActiveQuiz = () => {
+    const nextAction = pendingStopActionRef.current;
+
+    pendingStopActionRef.current = null;
+    setStopQuizModalVisible(false);
+
+    const resetPromise = resetQuizSession();
+
+    if (nextAction) {
+      void resetPromise.finally(nextAction).catch(() => {});
+    }
   };
 
   useEffect(() => {
@@ -2844,12 +2874,12 @@ export default function App() {
         return false;
       }
 
-      confirmStopActiveQuiz(() => BackHandler.exitApp());
+      requestStopActiveQuiz(() => BackHandler.exitApp());
       return true;
     });
 
     return () => subscription.remove();
-  }, [confirmStopActiveQuiz, hasActiveQuizRound]);
+  }, [hasActiveQuizRound]);
 
   const submitSupportRequest = async () => {
     const replyEmail = supportReplyEmail.trim();
@@ -4253,6 +4283,154 @@ export default function App() {
     );
   };
 
+  const updateDailyGoalDraft = (nextValue) => {
+    const cleaned = String(nextValue).replace(/[^\d]/g, "").slice(0, 2);
+
+    setDailyGoalInput(cleaned);
+  };
+
+  const adjustDailyGoalDraft = (delta) => {
+    const currentValue = Number.parseInt(dailyGoalInput, 10);
+    const baseValue = Number.isFinite(currentValue) && currentValue > 0 ? currentValue : dailyStudyGoal;
+    const nextValue = Math.max(1, Math.min(99, baseValue + delta));
+
+    setDailyGoalInput(`${nextValue}`);
+  };
+
+  const openDailyGoalModal = () => {
+    setDailyGoalInput(`${dailyStudyGoal}`);
+    setDailyGoalModalVisible(true);
+  };
+
+  const saveDailyGoal = () => {
+    const parsedValue = Number.parseInt(dailyGoalInput, 10);
+    const nextGoal = Math.max(1, Math.min(99, Number.isFinite(parsedValue) ? parsedValue : dailyStudyGoal));
+
+    setDailyStudyGoal(nextGoal);
+    setDailyGoalInput(`${nextGoal}`);
+    setDailyGoalModalVisible(false);
+  };
+
+  const renderDailyGoalModal = () => (
+    <Modal
+      visible={dailyGoalModalVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setDailyGoalModalVisible(false)}
+    >
+      <View style={styles.focusModalOverlay}>
+        <Pressable style={styles.focusModalBackdrop} onPress={() => setDailyGoalModalVisible(false)} />
+        <View style={[styles.focusModalCard, contentMaxWidth ? { maxWidth: Math.min(contentMaxWidth, 420) } : null]}>
+          <View style={styles.focusModalIconWrap}>
+            <MaterialCommunityIcons name="target" size={30} color={theme.accent} />
+          </View>
+          <Text style={styles.focusModalTitle}>{t("history.goalModalTitle")}</Text>
+          <Text style={styles.focusModalBody}>{t("history.goalModalBody")}</Text>
+
+          <View style={styles.goalStepperCard}>
+            <Pressable
+              accessibilityLabel={t("history.goalDecrease")}
+              onPress={() => adjustDailyGoalDraft(-1)}
+              style={({ pressed }) => [styles.goalRoundButton, pressed && styles.pressed]}
+            >
+              <MaterialCommunityIcons name="minus" size={19} color={theme.textSecondary} />
+            </Pressable>
+            <View style={styles.goalInputWrap}>
+              <TextInput
+                value={dailyGoalInput}
+                onChangeText={updateDailyGoalDraft}
+                keyboardType="number-pad"
+                maxLength={2}
+                selectTextOnFocus
+                style={styles.goalInput}
+              />
+              <Text style={styles.goalInputUnit}>{t("history.goalUnit")}</Text>
+            </View>
+            <Pressable
+              accessibilityLabel={t("history.goalIncrease")}
+              onPress={() => adjustDailyGoalDraft(1)}
+              style={({ pressed }) => [styles.goalRoundButton, pressed && styles.pressed]}
+            >
+              <MaterialCommunityIcons name="plus" size={19} color={theme.accent} />
+            </Pressable>
+          </View>
+
+          <View style={styles.goalPresetRow}>
+            {[3, 5, 10].map((count) => {
+              const active = Number.parseInt(dailyGoalInput, 10) === count;
+
+              return (
+                <Pressable
+                  key={`daily-goal-${count}`}
+                  onPress={() => setDailyGoalInput(`${count}`)}
+                  style={({ pressed }) => [
+                    styles.goalPresetChip,
+                    active && styles.goalPresetChipActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={[styles.goalPresetText, active && styles.goalPresetTextActive]}>
+                    {t("history.goalPreset", { count })}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Pressable
+            onPress={saveDailyGoal}
+            style={({ pressed }) => [styles.focusModalPrimaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.focusModalPrimaryText}>{t("history.goalSave")}</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setDailyGoalModalVisible(false)}
+            style={({ pressed }) => [styles.focusModalSecondaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.focusModalSecondaryText}>{t("common.cancel")}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderStopQuizModal = () => (
+    <Modal
+      visible={stopQuizModalVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={cancelStopActiveQuiz}
+    >
+      <View style={styles.focusModalOverlay}>
+        <Pressable style={styles.focusModalBackdrop} onPress={cancelStopActiveQuiz} />
+        <View style={[styles.focusModalCard, contentMaxWidth ? { maxWidth: Math.min(contentMaxWidth, 420) } : null]}>
+          <View style={styles.focusModalSparkleRow}>
+            <MaterialCommunityIcons name="star-four-points" size={18} color={theme.accentSoftStrong} />
+            <View style={styles.focusModalIconWrap}>
+              <MaterialCommunityIcons name="card-text-outline" size={30} color={theme.accent} />
+            </View>
+            <MaterialCommunityIcons name="star-four-points" size={18} color={theme.accentSoftStrong} />
+          </View>
+          <Text style={styles.focusModalTitle}>{t("quiz.stopTitle")}</Text>
+          <Text style={styles.focusModalBody}>{t("quiz.stopBody")}</Text>
+          <Text style={styles.focusModalHint}>{t("quiz.stopHint")}</Text>
+          <Pressable
+            onPress={cancelStopActiveQuiz}
+            style={({ pressed }) => [styles.focusModalPrimaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.focusModalPrimaryText}>{t("quiz.stopNo")}</Text>
+          </Pressable>
+          <Pressable
+            onPress={confirmStopActiveQuiz}
+            style={({ pressed }) => [styles.focusModalSecondaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.focusModalSecondaryText}>{t("quiz.stopYes")}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+
   const renderQuizReadySetup = () => (
     <>
       <View style={styles.quizReadyHero}>
@@ -4499,7 +4677,7 @@ export default function App() {
           <View style={styles.quizTopBar}>
             <Pressable
               accessibilityLabel={t("quiz.restartAdaptive")}
-              onPress={returnToQuizReady}
+              onPress={() => requestStopActiveQuiz()}
               style={({ pressed }) => [styles.quizTopIconButton, pressed && styles.pressed]}
             >
               <MaterialCommunityIcons name="chevron-left" size={22} color={theme.textPrimary} />
@@ -4509,7 +4687,7 @@ export default function App() {
             </Text>
             <Pressable
               accessibilityLabel={t("common.close")}
-              onPress={returnToQuizReady}
+              onPress={() => requestStopActiveQuiz()}
               style={({ pressed }) => [styles.quizTopIconButton, pressed && styles.pressed]}
             >
               <MaterialCommunityIcons name="close" size={21} color={theme.textPrimary} />
@@ -4658,7 +4836,7 @@ export default function App() {
     const yesterdaySessions = studyStats.sessions.filter((item) => getLocalDayKey(item.completedAt) === yesterdayKey);
     const yesterdaySolvedCount = yesterdaySessions.reduce((sum, item) => sum + (item.totalCards ?? 0), 0);
     const yesterdayIncorrectCount = yesterdaySessions.reduce((sum, item) => sum + (item.incorrectCount ?? 0), 0);
-    const progressRatio = Math.min(1, todaySessionCount / DAILY_STUDY_GOAL);
+    const progressRatio = Math.min(1, todaySessionCount / dailyStudyGoal);
     const progressPercent = Math.round(progressRatio * 100);
     const historyMetrics = [
       {
@@ -4782,11 +4960,16 @@ export default function App() {
                 <View style={styles.historyProgressFooter}>
                   <Text style={styles.historyDateSummary}>
                     {t("history.goalStatus", {
-                      goal: DAILY_STUDY_GOAL,
-                      count: Math.min(todaySessionCount, DAILY_STUDY_GOAL),
+                      goal: dailyStudyGoal,
+                      count: Math.min(todaySessionCount, dailyStudyGoal),
                     })}
                   </Text>
-                  <Text style={styles.historyGoalChip}>{t("history.goalSetting")}</Text>
+                  <Pressable
+                    onPress={openDailyGoalModal}
+                    style={({ pressed }) => [styles.historyGoalButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.historyGoalChip}>{t("history.goalSetting")}</Text>
+                  </Pressable>
                 </View>
               </View>
             </View>
@@ -5780,6 +5963,9 @@ export default function App() {
           })}
         </View>
       </KeyboardAvoidingView>
+
+      {renderDailyGoalModal()}
+      {renderStopQuizModal()}
 
       {launchVisible ? (
         <LaunchScreen opacity={launchOpacity} scale={launchScale} glow={moonGlow} styles={styles} />
@@ -8939,6 +9125,166 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "900",
     color: theme.accentText,
   },
+  focusModalOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  focusModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: theme.mode === "dark" ? "rgba(2, 5, 14, 0.76)" : "rgba(10, 14, 24, 0.68)",
+  },
+  focusModalCard: {
+    width: "100%",
+    alignItems: "center",
+    gap: 14,
+    paddingHorizontal: 22,
+    paddingTop: 28,
+    paddingBottom: 20,
+    borderRadius: 26,
+    backgroundColor: theme.surfaceStrong,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+    shadowColor: "#000000",
+    shadowOpacity: theme.mode === "dark" ? 0.28 : 0.16,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 12,
+  },
+  focusModalSparkleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  focusModalIconWrap: {
+    width: 58,
+    height: 58,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 29,
+    backgroundColor: theme.accentSoft,
+  },
+  focusModalTitle: {
+    textAlign: "center",
+    fontSize: 18,
+    lineHeight: 25,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  focusModalBody: {
+    maxWidth: 280,
+    textAlign: "center",
+    fontSize: 13,
+    lineHeight: 21,
+    color: theme.textSecondary,
+  },
+  focusModalHint: {
+    maxWidth: 280,
+    textAlign: "center",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "800",
+    color: theme.accent,
+  },
+  focusModalPrimaryButton: {
+    width: "100%",
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 15,
+    backgroundColor: theme.accent,
+  },
+  focusModalPrimaryText: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: theme.accentText,
+  },
+  focusModalSecondaryButton: {
+    width: "100%",
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 15,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  focusModalSecondaryText: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: theme.textSecondary,
+  },
+  goalStepperCard: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: 12,
+    borderRadius: 18,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  goalRoundButton: {
+    width: 38,
+    height: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 19,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  goalInputWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  goalInput: {
+    width: "100%",
+    paddingVertical: 0,
+    textAlign: "center",
+    fontSize: 30,
+    lineHeight: 38,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  goalInputUnit: {
+    marginTop: -2,
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.textSecondary,
+  },
+  goalPresetRow: {
+    width: "100%",
+    flexDirection: "row",
+    gap: 8,
+  },
+  goalPresetChip: {
+    flex: 1,
+    minHeight: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  goalPresetChipActive: {
+    backgroundColor: theme.accentSoft,
+    borderColor: theme.accent,
+  },
+  goalPresetText: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: theme.textSecondary,
+  },
+  goalPresetTextActive: {
+    color: theme.accent,
+  },
   retryModalCard: {
     width: "100%",
     gap: 14,
@@ -9121,6 +9467,9 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
+  },
+  historyGoalButton: {
+    borderRadius: 999,
   },
   historyGoalChip: {
     paddingHorizontal: 10,
