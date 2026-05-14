@@ -4618,55 +4618,60 @@ export default function App() {
 
       {roundComplete && deck.length ? (
         <View style={styles.quizSummaryCard}>
-          <View style={styles.quizSummaryHeader}>
-            <Text style={styles.panelTitle}>{t("quiz.roundComplete")}</Text>
-            <Text style={styles.panelBody}>
-              {roundIncorrectCards.length
-                ? t("quiz.roundBodyRetry")
-                : t("quiz.roundBodyPerfect")}
-            </Text>
+          <View style={styles.quizSummaryHero}>
+            <View style={styles.quizSummaryBadge}>
+              <MaterialCommunityIcons name="check" size={32} color={theme.accentText} />
+            </View>
+            <Text style={styles.quizSummaryTitle}>{t("quiz.roundComplete")}</Text>
+            <Text style={styles.quizSummaryBody}>{t("quiz.roundBody")}</Text>
           </View>
 
-          <View style={styles.quizSummaryStats}>
-            <View style={styles.quizSummaryStat}>
-              <Text style={styles.quizSummaryValue}>{deck.length}</Text>
-              <Text style={styles.quizSummaryLabel}>{t("quiz.total")}</Text>
-            </View>
-            <View style={styles.quizSummaryStat}>
-              <Text style={[styles.quizSummaryValue, styles.quizSummaryValueGood]}>
-                {roundCorrectCount}
-              </Text>
-              <Text style={styles.quizSummaryLabel}>{t("quiz.correct")}</Text>
-            </View>
-            <View style={styles.quizSummaryStat}>
-              <Text style={[styles.quizSummaryValue, styles.quizSummaryValueBad]}>
-                {roundIncorrectCards.length}
-              </Text>
-              <Text style={styles.quizSummaryLabel}>{t("quiz.retry")}</Text>
+          <View style={styles.quizSummaryResultCard}>
+            <Text style={styles.quizSummaryResultTitle}>{t("quiz.roundResultTitle")}</Text>
+            <View style={styles.quizSummaryStats}>
+              <View style={styles.quizSummaryStat}>
+                <Text style={styles.quizSummaryValue}>{deck.length}</Text>
+                <Text style={styles.quizSummaryLabel}>{t("quiz.total")}</Text>
+              </View>
+              <View style={[styles.quizSummaryStat, styles.quizSummaryStatGood]}>
+                <Text style={[styles.quizSummaryValue, styles.quizSummaryValueGood]}>
+                  {roundCorrectCount}
+                </Text>
+                <Text style={styles.quizSummaryLabel}>{t("quiz.correct")}</Text>
+              </View>
+              <View style={[styles.quizSummaryStat, styles.quizSummaryStatBad]}>
+                <Text style={[styles.quizSummaryValue, styles.quizSummaryValueBad]}>
+                  {roundIncorrectCards.length}
+                </Text>
+                <Text style={styles.quizSummaryLabel}>{t("quiz.retry")}</Text>
+              </View>
             </View>
           </View>
 
-          <View style={styles.actionRow}>
-            <Pressable onPress={returnToQuizReady} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-              <Text style={styles.secondaryButtonText}>{t("quiz.restartAdaptive")}</Text>
-            </Pressable>
+          <View style={styles.quizSummaryActions}>
             <Pressable
               disabled={!roundIncorrectCards.length}
               onPress={retryIncorrectCards}
               style={({ pressed }) => [
-                styles.primaryButton,
+                styles.quizSummaryPrimaryAction,
                 !roundIncorrectCards.length && styles.primaryButtonDisabled,
                 pressed && styles.pressed,
               ]}
             >
               <Text
                 style={[
-                  styles.primaryButtonText,
+                  styles.quizSummaryPrimaryActionText,
                   !roundIncorrectCards.length && styles.primaryButtonTextDisabled,
                 ]}
               >
                 {t("quiz.retryIncorrect")}
               </Text>
+            </Pressable>
+            <Pressable
+              onPress={returnToQuizReady}
+              style={({ pressed }) => [styles.quizSummarySecondaryAction, pressed && styles.pressed]}
+            >
+              <Text style={styles.quizSummarySecondaryActionText}>{t("quiz.restartAdaptive")}</Text>
             </Pressable>
           </View>
         </View>
@@ -8235,10 +8240,12 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textPrimary,
   },
   quizSummaryCard: {
-    gap: 16,
-    padding: 18,
+    gap: 18,
+    padding: 20,
     borderRadius: 24,
     backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
   },
   quizReadyCard: {
     gap: 16,
@@ -8543,6 +8550,54 @@ const createStyles = (theme) => StyleSheet.create({
   quizSummaryHeader: {
     gap: 6,
   },
+  quizSummaryHero: {
+    alignItems: "center",
+    gap: 8,
+    paddingTop: 8,
+    paddingHorizontal: 8,
+  },
+  quizSummaryBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accent,
+    shadowColor: theme.accent,
+    shadowOpacity: theme.mode === "dark" ? 0.24 : 0.28,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  quizSummaryTitle: {
+    fontSize: 25,
+    lineHeight: 32,
+    fontWeight: "900",
+    textAlign: "center",
+    color: theme.textPrimary,
+  },
+  quizSummaryBody: {
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: "700",
+    textAlign: "center",
+    color: theme.textSecondary,
+  },
+  quizSummaryResultCard: {
+    gap: 12,
+    padding: 14,
+    borderRadius: 20,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  quizSummaryResultTitle: {
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: "900",
+    textAlign: "center",
+    color: theme.textPrimary,
+  },
   quizSummaryStats: {
     flexDirection: "row",
     gap: 10,
@@ -8555,6 +8610,12 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.surfaceCard,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
+  },
+  quizSummaryStatGood: {
+    backgroundColor: theme.mode === "dark" ? "rgba(134, 226, 162, 0.08)" : "rgba(29, 143, 84, 0.08)",
+  },
+  quizSummaryStatBad: {
+    backgroundColor: theme.dangerBgSoft,
   },
   quizSummaryValue: {
     fontSize: 28,
@@ -8569,6 +8630,35 @@ const createStyles = (theme) => StyleSheet.create({
   },
   quizSummaryLabel: {
     fontSize: 13,
+    color: theme.textSecondary,
+  },
+  quizSummaryActions: {
+    gap: 10,
+  },
+  quizSummaryPrimaryAction: {
+    minHeight: 56,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+    backgroundColor: theme.accent,
+  },
+  quizSummaryPrimaryActionText: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: theme.accentText,
+  },
+  quizSummarySecondaryAction: {
+    minHeight: 54,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  quizSummarySecondaryActionText: {
+    fontSize: 15,
+    fontWeight: "900",
     color: theme.textSecondary,
   },
   quizBadge: {
