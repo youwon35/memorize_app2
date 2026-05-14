@@ -79,7 +79,7 @@ const DAILY_STUDY_GOAL_KEY = "@memoria/daily-study-goal";
 const THEME_MODE_KEY = "@memoria/theme-mode";
 const LANGUAGE_KEY = "@memoria/language";
 const STUDY_STATS_KEY = "@memoria/study-stats";
-const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen";
+const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen-v2";
 const SUPPORT_REQUESTS_KEY = "@memoria/support-requests";
 const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
@@ -339,6 +339,18 @@ const TUTORIAL_STEPS = [
     bodyKey: "tutorial.saveTabBody",
   },
   {
+    key: "save-folder-overview",
+    type: "spotlight",
+    tab: "save",
+    targetKey: "folder-panel-save",
+    spotlightRadius: 24,
+    bubbleHeight: 280,
+    icon: "folder-open-outline",
+    titleKey: "tutorial.saveFolderTitle",
+    bodyKey: "tutorial.saveFolderBody",
+    actionKey: "tutorial.nextSaveAdd",
+  },
+  {
     key: "save-single-chip",
     type: "target-press",
     tab: "save",
@@ -367,12 +379,36 @@ const TUTORIAL_STEPS = [
     key: "save-single-success",
     type: "spotlight",
     tab: "save",
-    waitForTab: "quiz",
-    bubbleHeight: 330,
+    bubbleHeight: 300,
     hideBubbleTail: true,
     icon: "check-circle-outline",
     titleKey: "tutorial.saveSuccessTitle",
     bodyKey: "tutorial.saveSuccessBody",
+    actionKey: "tutorial.nextFileChip",
+  },
+  {
+    key: "save-file-chip",
+    type: "target-press",
+    tab: "save",
+    targetKey: "save-mode-text",
+    spotlightRadius: "pill",
+    icon: "file-document-plus-outline",
+    titleKey: "tutorial.saveFileChipTitle",
+    bodyKey: "tutorial.saveFileChipBody",
+    waitingKey: "tutorial.waitingSaveModeFile",
+    hideTargetHint: true,
+  },
+  {
+    key: "save-file-panel",
+    type: "spotlight",
+    tab: "save",
+    targetKey: "save-import-panel",
+    spotlightRadius: 24,
+    bubbleHeight: 320,
+    icon: "file-document-plus-outline",
+    titleKey: "tutorial.saveFileTitle",
+    bodyKey: "tutorial.saveFileBody",
+    actionKey: "tutorial.nextQuiz",
   },
   {
     key: "quiz-tab",
@@ -381,6 +417,18 @@ const TUTORIAL_STEPS = [
     icon: "brain",
     titleKey: "tutorial.quizTabTitle",
     bodyKey: "tutorial.quizTabBody",
+  },
+  {
+    key: "quiz-scope",
+    type: "spotlight",
+    tab: "quiz",
+    targetKey: "quiz-scope-card",
+    spotlightRadius: 24,
+    bubbleHeight: 300,
+    icon: "brain",
+    titleKey: "tutorial.quizUseTitle",
+    bodyKey: "tutorial.quizUseBody",
+    actionKey: "tutorial.nextQuizStart",
   },
   {
     key: "quiz-start-button",
@@ -415,6 +463,18 @@ const TUTORIAL_STEPS = [
     bodyKey: "tutorial.historyTabBody",
   },
   {
+    key: "history-summary",
+    type: "spotlight",
+    tab: "history",
+    targetKey: "history-summary-panel",
+    spotlightRadius: 26,
+    bubbleHeight: 320,
+    icon: "chart-timeline-variant",
+    titleKey: "tutorial.historySummaryTitle",
+    bodyKey: "tutorial.historySummaryBody",
+    actionKey: "tutorial.nextHistoryRecent",
+  },
+  {
     key: "history-recent",
     type: "spotlight",
     tab: "history",
@@ -435,10 +495,22 @@ const TUTORIAL_STEPS = [
     bodyKey: "tutorial.manageTabBody",
   },
   {
+    key: "manage-folder",
+    type: "spotlight",
+    tab: "manage",
+    targetKey: "folder-panel-manage",
+    spotlightRadius: 24,
+    bubbleHeight: 320,
+    icon: "folder-open-outline",
+    titleKey: "tutorial.manageFolderTitle",
+    bodyKey: "tutorial.manageFolderBody",
+    actionKey: "tutorial.nextManageList",
+  },
+  {
     key: "manage-use",
     type: "spotlight",
     tab: "manage",
-    targetKey: "manage-first-card",
+    targetKey: "manage-list-panel",
     spotlightRadius: 18,
     bubbleHeight: 360,
     icon: "playlist-edit",
@@ -937,8 +1009,16 @@ export default function App() {
   };
 
   const applyTutorialStepSideEffects = (step) => {
-    if (step?.key === "save-single-chip") {
-      setSaveInputMode("single");
+    if (step?.key === "save-folder-overview") {
+      setSaveComposerVisible(false);
+      setSaveActionMenuOpen(false);
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
+      });
+    }
+
+    if (step?.key === "save-single-chip" || step?.key === "save-file-chip") {
+      setSaveInputMode(step?.key === "save-file-chip" ? "text" : "single");
       setSaveComposerVisible(false);
       setSaveActionMenuOpen(true);
       requestAnimationFrame(() => {
@@ -963,7 +1043,24 @@ export default function App() {
       });
     }
 
-    if (step?.key === "quiz-start-button") {
+    if (step?.key === "save-file-panel") {
+      setSaveInputMode("text");
+      setSaveActionMenuOpen(false);
+      setSaveComposerVisible(true);
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
+      });
+    }
+
+    if (step?.key === "quiz-tab") {
+      setSaveActionMenuOpen(false);
+      setSaveComposerVisible(false);
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo?.({ y: 0, animated: true });
+      });
+    }
+
+    if (step?.key === "quiz-scope" || step?.key === "quiz-start-button") {
       setQuizMode("front");
       setQuizCountInput("1");
       requestAnimationFrame(() => {
@@ -977,7 +1074,7 @@ export default function App() {
       });
     }
 
-    if (step?.key === "history-recent") {
+    if (step?.key === "history-summary" || step?.key === "history-recent") {
       setHistoryCalendarOpen(false);
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo?.({ y: 0, animated: true });
@@ -990,7 +1087,7 @@ export default function App() {
       });
     }
 
-    if (step?.key === "manage-use") {
+    if (step?.key === "manage-folder" || step?.key === "manage-use") {
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo?.({ y: 0, animated: true });
       });
@@ -3601,7 +3698,7 @@ export default function App() {
     };
 
     return (
-      <View style={styles.folderPanel}>
+      <View style={styles.folderPanel} {...tutorialTargetProps(`folder-panel-${scope}`)}>
         <View style={styles.folderHeaderRow}>
           <View style={styles.folderHeaderCopy}>
             <View style={styles.folderTitleRow}>
@@ -3715,7 +3812,7 @@ export default function App() {
       advanceTutorial();
     }
 
-    if (guidedTutorialActive && tutorialStep === "save-single-success" && optionKey === "text") {
+    if (guidedTutorialActive && tutorialStep === "save-file-chip" && optionKey === "text") {
       advanceTutorial();
     }
   };
@@ -4128,11 +4225,13 @@ export default function App() {
   };
 
   const renderSaveFloatingAdd = () => {
+    const tutorialSaveModeStep =
+      tutorialStep === "save-single-chip" || tutorialStep === "save-file-chip";
     const shouldShow =
       tab === "save" &&
       !launchVisible &&
       !saveComposerVisible &&
-      (!guidedTutorialActive || tutorialStep === "save-single-chip");
+      (!guidedTutorialActive || tutorialSaveModeStep);
 
     if (!shouldShow) {
       return null;
@@ -4146,7 +4245,7 @@ export default function App() {
           tabBarLeft !== null ? { right: Math.max(24, tabBarLeft + 24) } : null,
         ]}
       >
-        {saveActionMenuOpen && guidedTutorialActive && tutorialStep === "save-single-chip" ? (
+        {saveActionMenuOpen && guidedTutorialActive && tutorialSaveModeStep ? (
           <View style={styles.saveFabMenu}>
             {SAVE_INPUT_OPTIONS.map((option) => renderSaveModeOption(option, "fab"))}
           </View>
@@ -4154,7 +4253,7 @@ export default function App() {
         <Pressable
           accessibilityLabel={t("folders.actions")}
           onPress={() => {
-            if (guidedTutorialActive && tutorialStep === "save-single-chip") {
+            if (guidedTutorialActive && tutorialSaveModeStep) {
               setSaveActionMenuOpen((currentValue) => !currentValue);
               return;
             }
@@ -4165,13 +4264,13 @@ export default function App() {
             styles.saveFabButton,
             saveActionMenuOpen &&
               guidedTutorialActive &&
-              tutorialStep === "save-single-chip" &&
+              tutorialSaveModeStep &&
               styles.saveFabButtonActive,
             pressed && styles.pressed,
           ]}
         >
           <MaterialCommunityIcons
-            name={saveActionMenuOpen && guidedTutorialActive && tutorialStep === "save-single-chip" ? "close" : "plus"}
+            name={saveActionMenuOpen && guidedTutorialActive && tutorialSaveModeStep ? "close" : "plus"}
             size={30}
             color={theme.accentText}
           />
@@ -4440,7 +4539,7 @@ export default function App() {
         <Text style={styles.quizReadyHeroTitle}>{t("quiz.readyTitle")}</Text>
       </View>
 
-      <View style={styles.quizScopeCard}>
+      <View style={styles.quizScopeCard} {...tutorialTargetProps("quiz-scope-card")}>
         <View style={styles.quizScopeHeader}>
           <Text style={styles.quizScopeTitle}>{t("quiz.scopeTitle")}</Text>
         </View>
