@@ -3419,61 +3419,13 @@ export default function App() {
     onToggleCollapse,
   }) => {
     const normalizedCurrentFolderId = normalizeFolderId(currentFolderId);
-    const currentFolder = folders.find((folder) => folder.id === normalizedCurrentFolderId);
-    const parentFolderId = currentFolder?.parentId ?? ROOT_FOLDER_ID;
     const path = getFolderPath(folders, normalizedCurrentFolderId);
     const children = getFolderChildren(folders, normalizedCurrentFolderId);
     const directPairCount = pairs.filter(
       (pair) => normalizeFolderId(pair.folderId) === normalizedCurrentFolderId
     ).length;
-    const canManageCurrentFolder = allowCreate && currentFolder;
-    const renamingCurrentFolder = renamingFolderId === normalizedCurrentFolderId;
     const folderViewKey = createFolderViewKey(scope, normalizedCurrentFolderId);
     const creatingCurrentFolder = creatingFolderKey === folderViewKey;
-    const actionMenuOpen = folderActionMenuKey === folderViewKey;
-    const folderActions = [
-      allowCreate
-        ? {
-            key: "create",
-            icon: "folder-plus-outline",
-            label: t("folders.newFolder"),
-            onPress: () => {
-              cancelFolderRename();
-              setFolderNameDraft("");
-              setCreatingFolderKey(folderViewKey);
-              setFolderActionMenuKey(null);
-            },
-          }
-        : null,
-      normalizedCurrentFolderId !== ROOT_FOLDER_ID
-        ? {
-            key: "up",
-            icon: "arrow-up-left",
-            label: t("folders.up"),
-            onPress: () => onSelectFolder(parentFolderId),
-          }
-        : null,
-      canManageCurrentFolder
-        ? {
-            key: "rename",
-            icon: "pencil-outline",
-            label: t("folders.rename"),
-            onPress: () => beginFolderRename(currentFolder),
-          }
-        : null,
-      canManageCurrentFolder
-        ? {
-            key: "delete",
-            icon: "trash-can-outline",
-            label: t("folders.delete"),
-            danger: true,
-            onPress: () => {
-              setFolderActionMenuKey(null);
-              void deleteFolder(normalizedCurrentFolderId);
-            },
-          }
-        : null,
-    ].filter(Boolean);
     const renderFolderAction = (action) => (
       <Pressable
         key={action.key}
@@ -3490,6 +3442,156 @@ export default function App() {
         </Text>
       </Pressable>
     );
+    const renderFolderTileForm = ({
+      key,
+      value,
+      onChangeText,
+      placeholder,
+      onSubmit,
+      onCancel,
+      submitLabel,
+    }) => (
+      <View key={key} style={[styles.folderChildItem, styles.folderTileForm]}>
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={theme.textPlaceholder}
+          style={[styles.input, styles.folderTileInput]}
+          returnKeyType="done"
+          onSubmitEditing={onSubmit}
+        />
+        <View style={styles.folderTileActionRow}>
+          <Pressable
+            onPress={onSubmit}
+            style={({ pressed }) => [styles.folderTilePrimaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.folderTilePrimaryText}>{submitLabel}</Text>
+          </Pressable>
+          <Pressable
+            onPress={onCancel}
+            style={({ pressed }) => [styles.folderTileSecondaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.folderTileSecondaryText}>{t("common.cancel")}</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+    const renderCreateFolderTile = () => {
+      if (creatingCurrentFolder) {
+        return renderFolderTileForm({
+          key: `${folderViewKey}:create`,
+          value: folderNameDraft,
+          onChangeText: setFolderNameDraft,
+          placeholder: t("folders.newPlaceholder"),
+          submitLabel: t("folders.create"),
+          onSubmit: () => void createFolderInCurrentLocation(normalizedCurrentFolderId),
+          onCancel: () => {
+            setFolderNameDraft("");
+            setCreatingFolderKey(null);
+          },
+        });
+      }
+
+      return (
+        <Pressable
+          key={`${folderViewKey}:create-button`}
+          accessibilityLabel={t("folders.newFolder")}
+          onPress={() => {
+            cancelFolderRename();
+            setFolderNameDraft("");
+            setCreatingFolderKey(folderViewKey);
+            setFolderActionMenuKey(null);
+          }}
+          style={({ pressed }) => [
+            styles.folderChildItem,
+            styles.folderCreateTile,
+            pressed && styles.pressed,
+          ]}
+        >
+          <View style={styles.folderCreateTileCircle}>
+            <MaterialCommunityIcons name="plus" size={34} color={theme.accent} />
+          </View>
+        </Pressable>
+      );
+    };
+    const renderChildFolderTile = (folder) => {
+      const folderPairCount = pairs.filter(
+        (pair) => normalizeFolderId(pair.folderId) === folder.id
+      ).length;
+      const childMenuKey = `${folderViewKey}:folder:${folder.id}`;
+      const childMenuOpen = folderActionMenuKey === childMenuKey;
+
+      if (allowCreate && renamingFolderId === folder.id) {
+        return renderFolderTileForm({
+          key: folder.id,
+          value: folderRenameDraft,
+          onChangeText: setFolderRenameDraft,
+          placeholder: t("folders.renamePlaceholder"),
+          submitLabel: t("folders.renameSave"),
+          onSubmit: () => void saveFolderRename(folder.id),
+          onCancel: cancelFolderRename,
+        });
+      }
+
+      return (
+        <View key={folder.id} style={[styles.folderChildItem, childMenuOpen && styles.folderChildItemMenuOpen]}>
+          <Pressable
+            onPress={() => onSelectFolder(folder.id)}
+            style={({ pressed }) => [styles.folderChildMain, pressed && styles.pressed]}
+          >
+            <View style={styles.folderChildIcon}>
+              <MaterialCommunityIcons name="folder" size={40} color={theme.accent} />
+            </View>
+            <Text style={styles.folderChildName} numberOfLines={2} ellipsizeMode="tail">
+              {folder.name}
+            </Text>
+            <Text style={styles.folderChildMeta}>
+              {t("folders.folderCardCount", { count: folderPairCount })}
+            </Text>
+          </Pressable>
+          {allowCreate ? (
+            <View style={styles.folderChildActionWrap}>
+              <Pressable
+                accessibilityLabel={t("folders.actions")}
+                onPress={() =>
+                  setFolderActionMenuKey((currentKey) =>
+                    currentKey === childMenuKey ? null : childMenuKey
+                  )
+                }
+                style={({ pressed }) => [
+                  styles.folderChildActionButton,
+                  childMenuOpen && styles.folderActionButtonActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <MaterialCommunityIcons name="dots-vertical" size={18} color={theme.textSecondary} />
+              </Pressable>
+              {childMenuOpen ? (
+                <View style={styles.folderChildActionMenu}>
+                  {renderFolderAction({
+                    key: "rename",
+                    icon: "pencil-outline",
+                    label: t("folders.rename"),
+                    onPress: () => beginFolderRename(folder),
+                  })}
+                  {renderFolderAction({
+                    key: "delete",
+                    icon: "trash-can-outline",
+                    label: t("folders.delete"),
+                    danger: true,
+                    onPress: () => {
+                      setFolderActionMenuKey(null);
+                      void deleteFolder(folder.id);
+                    },
+                  })}
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      );
+    };
 
     return (
       <View style={styles.folderPanel}>
@@ -3500,50 +3602,24 @@ export default function App() {
               <Text style={styles.folderPanelTitle}>{t("folders.title")}</Text>
             </View>
           </View>
-          {folderActions.length || collapsible ? (
+          {collapsible ? (
             <View style={styles.folderHeaderActions}>
-              {collapsible ? (
-                <Pressable
-                  accessibilityLabel={collapsed ? t("folders.expand") : t("folders.collapse")}
-                  onPress={onToggleCollapse}
-                  style={({ pressed }) => [
-                    styles.folderActionButton,
-                    styles.folderCollapseButton,
-                    collapsed && styles.folderActionButtonActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <MaterialCommunityIcons
-                    name={collapsed ? "chevron-down" : "chevron-up"}
-                    size={22}
-                    color={collapsed ? theme.accent : theme.textSecondary}
-                  />
-                </Pressable>
-              ) : null}
-              {folderActions.length ? (
-                <View style={styles.folderActionWrap}>
-                  <Pressable
-                    accessibilityLabel={t("folders.actions")}
-                    onPress={() =>
-                      setFolderActionMenuKey((currentKey) =>
-                        currentKey === folderViewKey ? null : folderViewKey
-                      )
-                    }
-                    style={({ pressed }) => [
-                      styles.folderActionButton,
-                      actionMenuOpen && styles.folderActionButtonActive,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <MaterialCommunityIcons name="dots-horizontal" size={22} color={theme.textPrimary} />
-                  </Pressable>
-                  {actionMenuOpen ? (
-                    <View style={styles.folderActionMenu}>
-                      {folderActions.map(renderFolderAction)}
-                    </View>
-                  ) : null}
-                </View>
-              ) : null}
+              <Pressable
+                accessibilityLabel={collapsed ? t("folders.expand") : t("folders.collapse")}
+                onPress={onToggleCollapse}
+                style={({ pressed }) => [
+                  styles.folderActionButton,
+                  styles.folderCollapseButton,
+                  collapsed && styles.folderActionButtonActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name={collapsed ? "chevron-down" : "chevron-up"}
+                  size={22}
+                  color={collapsed ? theme.accent : theme.textSecondary}
+                />
+              </Pressable>
             </View>
           ) : null}
         </View>
@@ -3562,7 +3638,7 @@ export default function App() {
               {t("folders.root")}
             </Text>
           </Pressable>
-          {path.map((folder, index) => {
+          {path.map((folder) => {
             const active = folder.id === normalizedCurrentFolderId;
 
             return (
@@ -3585,112 +3661,32 @@ export default function App() {
           })}
         </ScrollView>
 
-        {renamingCurrentFolder ? (
-          <View style={styles.folderManageBox}>
-            <TextInput
-              value={folderRenameDraft}
-              onChangeText={setFolderRenameDraft}
-              placeholder={t("folders.renamePlaceholder")}
-              placeholderTextColor={theme.textPlaceholder}
-              style={[styles.input, styles.folderRenameInput]}
-              returnKeyType="done"
-              onSubmitEditing={() => void saveFolderRename(normalizedCurrentFolderId)}
-            />
-            <View style={styles.folderManageActionRow}>
-              <Pressable
-                onPress={() => void saveFolderRename(normalizedCurrentFolderId)}
-                style={({ pressed }) => [styles.folderSmallPrimaryButton, pressed && styles.pressed]}
-              >
-                <Text style={styles.folderSmallPrimaryText}>{t("folders.renameSave")}</Text>
-              </Pressable>
-              <Pressable
-                onPress={cancelFolderRename}
-                style={({ pressed }) => [styles.folderSmallSecondaryButton, pressed && styles.pressed]}
-              >
-                <Text style={styles.folderSmallSecondaryText}>{t("common.cancel")}</Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : null}
-
         {!collapsed ? (
           <View style={styles.folderChildrenSection}>
-            {children.length ? (
+            {children.length || allowCreate || showSavedCards ? (
               <View style={styles.folderChildList}>
-                {children.map((folder) => {
-                  const folderPairCount = pairs.filter(
-                    (pair) => normalizeFolderId(pair.folderId) === folder.id
-                  ).length;
-
-                  return (
-                    <Pressable
-                      key={folder.id}
-                      onPress={() => onSelectFolder(folder.id)}
-                      style={({ pressed }) => [styles.folderChildItem, pressed && styles.pressed]}
-                    >
-                      <View style={styles.folderChildIcon}>
-                        <MaterialCommunityIcons name="folder" size={40} color={theme.accent} />
-                      </View>
-                      <Text style={styles.folderChildName} numberOfLines={2} ellipsizeMode="tail">
-                        {folder.name}
-                      </Text>
-                      <Text style={styles.folderChildMeta}>
-                        {t("folders.folderCardCount", { count: folderPairCount })}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+                {children.map(renderChildFolderTile)}
+                {allowCreate ? renderCreateFolderTile() : null}
+                {showSavedCards ? (
+                  <Pressable
+                    onPress={() => openFolderCards(normalizedCurrentFolderId)}
+                    style={({ pressed }) => [styles.folderSavedCardsItem, pressed && styles.pressed]}
+                  >
+                    <View style={styles.folderSavedCardsIcon}>
+                      <MaterialCommunityIcons name="file-document-outline" size={36} color={theme.textSecondary} />
+                    </View>
+                    <Text style={styles.folderSavedCardsName} numberOfLines={2}>
+                      {t("folders.savedCards")}
+                    </Text>
+                    <Text style={styles.folderSavedCardsMeta}>
+                      {t("folders.folderCardCount", { count: directPairCount })}
+                    </Text>
+                  </Pressable>
+                ) : null}
               </View>
             ) : (
               <Text style={styles.folderEmptyText}>{t("folders.emptyChildren")}</Text>
             )}
-            {showSavedCards ? (
-              <Pressable
-                onPress={() => openFolderCards(normalizedCurrentFolderId)}
-                style={({ pressed }) => [styles.folderSavedCardsItem, pressed && styles.pressed]}
-              >
-                <View style={styles.folderSavedCardsIcon}>
-                  <MaterialCommunityIcons name="file-document-outline" size={36} color={theme.textSecondary} />
-                </View>
-                <Text style={styles.folderSavedCardsName} numberOfLines={2}>
-                  {t("folders.savedCards")}
-                </Text>
-                <Text style={styles.folderSavedCardsMeta}>
-                  {t("folders.folderCardCount", { count: directPairCount })}
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
-
-        {allowCreate && creatingCurrentFolder ? (
-          <View style={styles.folderManageBox}>
-            <TextInput
-              value={folderNameDraft}
-              onChangeText={setFolderNameDraft}
-              placeholder={t("folders.newPlaceholder")}
-              placeholderTextColor={theme.textPlaceholder}
-              style={[styles.input, styles.folderRenameInput]}
-              returnKeyType="done"
-              onSubmitEditing={() => void createFolderInCurrentLocation(normalizedCurrentFolderId)}
-            />
-            <View style={styles.folderManageActionRow}>
-              <Pressable
-                onPress={() => void createFolderInCurrentLocation(normalizedCurrentFolderId)}
-                style={({ pressed }) => [styles.folderSmallPrimaryButton, pressed && styles.pressed]}
-              >
-                <Text style={styles.folderSmallPrimaryText}>{t("folders.create")}</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  setFolderNameDraft("");
-                  setCreatingFolderKey(null);
-                }}
-                style={({ pressed }) => [styles.folderSmallSecondaryButton, pressed && styles.pressed]}
-              >
-                <Text style={styles.folderSmallSecondaryText}>{t("common.cancel")}</Text>
-              </Pressable>
-            </View>
           </View>
         ) : null}
       </View>
@@ -4470,6 +4466,7 @@ export default function App() {
       {renderFolderExplorer({
         currentFolderId: quizFolderId,
         onSelectFolder: selectQuizFolder,
+        allowCreate: true,
         scope: "quiz",
         showSavedCards: false,
         collapsible: true,
@@ -4614,6 +4611,7 @@ export default function App() {
         renderFolderExplorer({
           currentFolderId: quizFolderId,
           onSelectFolder: selectQuizFolder,
+          allowCreate: true,
           scope: "quiz",
         })
       ) : null}
@@ -4743,7 +4741,6 @@ export default function App() {
                   >
                     {feedback}
                   </Text>
-                  <Text style={styles.quizResultBody}>{t("quiz.feedbackReviewPrompt")}</Text>
                 </View>
               </View>
 
@@ -4773,7 +4770,9 @@ export default function App() {
                 onPress={() => goNext()}
                 style={({ pressed }) => [styles.quizPrimaryFullAction, pressed && styles.pressed]}
               >
-                <Text style={styles.quizPrimaryFullActionText}>{t("quiz.nextCard")}</Text>
+                <Text style={styles.quizPrimaryFullActionText}>
+                  {quizIndex + 1 >= deck.length ? t("quiz.finishStudy") : t("quiz.nextCard")}
+                </Text>
               </Pressable>
             </>
           ) : (
@@ -4936,13 +4935,6 @@ export default function App() {
               <View style={styles.historySummaryHeader}>
                 <View style={styles.historySummaryTitleRow}>
                   <Text style={styles.panelTitle}>{t("history.todayTitle")}</Text>
-                  <Pressable
-                    accessibilityLabel={t("history.helpTitle")}
-                    onPress={() => Alert.alert(t("history.helpTitle"), t("history.helpBody"))}
-                    style={({ pressed }) => [styles.historyHelpButton, pressed && styles.pressed]}
-                  >
-                    <MaterialCommunityIcons name="help-circle-outline" size={18} color={theme.textSecondary} />
-                  </Pressable>
                 </View>
                 <Text style={styles.panelBody}>{t("history.todayBody")}</Text>
               </View>
@@ -7050,9 +7042,23 @@ const createStyles = (theme) => StyleSheet.create({
     rowGap: 12,
   },
   folderChildItem: {
+    position: "relative",
     width: "48%",
     minWidth: 0,
     minHeight: 142,
+    overflow: "visible",
+    borderRadius: 18,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  folderChildItemMenuOpen: {
+    zIndex: 70,
+    elevation: 8,
+  },
+  folderChildMain: {
+    flex: 1,
+    width: "100%",
     alignItems: "center",
     justifyContent: "flex-start",
     gap: 8,
@@ -7060,9 +7066,100 @@ const createStyles = (theme) => StyleSheet.create({
     paddingTop: 28,
     paddingBottom: 16,
     borderRadius: 18,
+  },
+  folderChildActionWrap: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    zIndex: 50,
+    alignItems: "flex-end",
+  },
+  folderChildActionButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  folderChildActionMenu: {
+    position: "absolute",
+    top: 34,
+    right: 0,
+    width: 142,
+    zIndex: 80,
+    elevation: 10,
+    overflow: "hidden",
+    borderRadius: 16,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+    shadowColor: theme.textPrimary,
+    shadowOpacity: theme.mode === "dark" ? 0.2 : 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  folderCreateTile: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.surface,
+    borderStyle: "dashed",
+  },
+  folderCreateTileCircle: {
+    width: 62,
+    height: 62,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accentSoft,
+    borderWidth: 1,
+    borderColor: theme.accent,
+  },
+  folderTileForm: {
+    justifyContent: "center",
+    gap: 8,
+    padding: 10,
+    backgroundColor: theme.surface,
+  },
+  folderTileInput: {
+    minHeight: 42,
+    paddingVertical: 9,
+    fontSize: 12,
+  },
+  folderTileActionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  folderTilePrimaryButton: {
+    flex: 1,
+    minHeight: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    backgroundColor: theme.accent,
+  },
+  folderTilePrimaryText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: theme.accentText,
+  },
+  folderTileSecondaryButton: {
+    flex: 1,
+    minHeight: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
     backgroundColor: theme.surfaceSoft,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
+  },
+  folderTileSecondaryText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: theme.textSecondary,
   },
   folderChildIcon: {
     width: 56,
