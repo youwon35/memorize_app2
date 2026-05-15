@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/memoria-splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#050814"
+      "backgroundColor": "#F5F7FB"
     },
     "plugins": [
       [

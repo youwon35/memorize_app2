@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   Animated,
   BackHandler,
   Easing,
@@ -93,7 +92,7 @@ const CALENDAR_WEEKDAY_LABELS = {
   ja: ["日", "月", "火", "水", "木", "金", "土"],
 };
 const MAX_SESSION_HISTORY = 60;
-const SUPPORT_CATEGORY_OPTIONS = ["bug", "feature", "dataDeletion", "other"];
+const SUPPORT_CATEGORY_OPTIONS = ["bug", "feature", "other"];
 const SUPPORT_STATUS_OPTIONS = ["received", "reviewing", "resolved"];
 const ADMIN_SUPPORT_PREVIEW_LIMIT = 12;
 const MANAGE_SORT_OPTIONS = [
@@ -633,6 +632,8 @@ export default function App() {
   const [stopQuizModalVisible, setStopQuizModalVisible] = useState(false);
   const [tutorialCompletionVisible, setTutorialCompletionVisible] = useState(false);
   const [appAlertConfig, setAppAlertConfig] = useState(null);
+  const [dataDeletionModalVisible, setDataDeletionModalVisible] = useState(false);
+  const [dataDeleting, setDataDeleting] = useState(false);
   const [saveFolderPanelCollapsed, setSaveFolderPanelCollapsed] = useState(false);
   const [quizFolderPanelCollapsed, setQuizFolderPanelCollapsed] = useState(true);
   const [manageFolderPanelCollapsed, setManageFolderPanelCollapsed] = useState(true);
@@ -2662,48 +2663,80 @@ export default function App() {
     }
   };
 
-  const confirmDataDeletionRequest = async (replyEmail) => {
-    setSupportSending(true);
-    setSupportNotice("");
-
-    try {
-      const cloudSaved = await persistSupportRequest({
-        replyEmail,
-        category: "dataDeletion",
-        message: t("about.dataDeletionRequestMessage", { email: replyEmail }),
-      });
-
-      setSupportCategory("dataDeletion");
-      setSupportReplyEmail(replyEmail);
-      setSupportMessage("");
-      setSupportNotice(
-        cloudSaved
-          ? t("about.dataDeletionSavedCloud")
-          : t("about.dataDeletionSavedLocal")
-      );
-    } catch (error) {
-      setSupportNotice(error?.message || t("about.supportFail"));
-    } finally {
-      setSupportSending(false);
-    }
-  };
-
-  const requestDataDeletion = () => {
-    const replyEmail = `${session?.user?.email ?? supportReplyEmail}`.trim();
-
-    if (!isValidEmail(replyEmail)) {
-      Alert.alert(t("about.emailCheckTitle"), t("about.emailCheckBody"));
+  const openDataDeletionModal = () => {
+    if (!session?.user?.id) {
+      Alert.alert(t("about.authPrepTitle"), t("about.authPrepBody"));
       return;
     }
 
-    Alert.alert(t("about.dataDeletionConfirmTitle"), t("about.dataDeletionConfirmBody"), [
-      { text: t("common.cancel"), style: "cancel" },
-      {
-        text: t("about.dataDeletionButton"),
-        style: "destructive",
-        onPress: () => void confirmDataDeletionRequest(replyEmail),
-      },
-    ]);
+    setDataDeletionModalVisible(true);
+  };
+
+  const deleteMemoriaAccountData = async () => {
+    if (dataDeleting) {
+      return;
+    }
+
+    setDataDeleting(true);
+
+    try {
+      if (supabase && session?.user?.id) {
+        const [pairsResponse, foldersResponse] = await Promise.all([
+          supabase.from("memory_pairs").delete().eq("user_id", session.user.id),
+          supabase.from("memory_folders").delete().eq("user_id", session.user.id),
+        ]);
+
+        if (pairsResponse.error) {
+          throw pairsResponse.error;
+        }
+
+        if (foldersResponse.error) {
+          throw foldersResponse.error;
+        }
+      }
+
+      const emptyStudyStats = createEmptyStudyStats();
+
+      pairsRef.current = [];
+      foldersRef.current = [];
+      studyStatsRef.current = emptyStudyStats;
+      await Promise.all([
+        savePairs([]),
+        saveFolders([]),
+        updateStudyStats(emptyStudyStats),
+      ]);
+
+      setSaveFolderId(ROOT_FOLDER_ID);
+      setQuizFolderId(ROOT_FOLDER_ID);
+      setManageFolderId(ROOT_FOLDER_ID);
+      setSelectedManagePairIds([]);
+      setFolderActionMenuKey(null);
+      setCreatingFolderKey(null);
+      setOpenManageSwipeId(null);
+      setDeck([]);
+      setQuizIndex(0);
+      setAnswer("");
+      setFeedback("");
+      setResult(null);
+      setRoundComplete(false);
+      setRoundIncorrectIds([]);
+      cloudFoldersReadyRef.current = false;
+      setDataDeletionModalVisible(false);
+
+      if (supabase) {
+        await supabase.auth.signOut();
+      }
+
+      setNoteState({
+        key: isSupabaseConfigured ? "notes.googleSyncAvailable" : "notes.localMode",
+        params: {},
+      });
+      Alert.alert(t("about.dataDeletionDoneTitle"), t("about.dataDeletionDoneBody"));
+    } catch (error) {
+      Alert.alert(t("about.dataDeletionFailTitle"), error?.message || t("common.retryLater"));
+    } finally {
+      setDataDeleting(false);
+    }
   };
 
   const updateAdminSupportStatus = async (requestId, nextStatus) => {
@@ -4085,6 +4118,83 @@ export default function App() {
     </Modal>
   );
 
+  const renderDataDeletionModal = () => {
+    const deletionItems = [
+      { icon: "cards-outline", label: t("about.dataDeletionStoredCards") },
+      { icon: "folder-outline", label: t("about.dataDeletionFolders") },
+      { icon: "history", label: t("about.dataDeletionStudyHistory") },
+      { icon: "close-box-outline", label: t("about.dataDeletionWrongAnswers") },
+      { icon: "cloud-outline", label: t("about.dataDeletionSyncData") },
+    ];
+
+    return (
+      <Modal
+        visible={dataDeletionModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDataDeletionModalVisible(false)}
+      >
+        <View style={styles.dataDeletionModalOverlay}>
+          <Pressable
+            style={styles.focusModalBackdrop}
+            disabled={dataDeleting}
+            onPress={() => setDataDeletionModalVisible(false)}
+          />
+          <View style={[styles.dataDeletionModalCard, contentMaxWidth ? { maxWidth: Math.min(contentMaxWidth, 430) } : null]}>
+            <View style={styles.dataDeletionGrabber} />
+            <Text style={styles.dataDeletionModalTitle}>{t("about.dataDeletionConfirmTitle")}</Text>
+
+            <View style={styles.dataDeletionSection}>
+              <Text style={styles.dataDeletionSectionTitle}>{t("about.dataDeletionDeletedTitle")}</Text>
+              {deletionItems.map((item) => (
+                <View key={item.label} style={styles.dataDeletionListItem}>
+                  <MaterialCommunityIcons name={item.icon} size={17} color={theme.textSecondary} />
+                  <Text style={styles.dataDeletionListText}>{item.label}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={styles.dataDeletionWarningRow}>
+              <MaterialCommunityIcons name="alert-outline" size={18} color={theme.danger} />
+              <Text style={styles.dataDeletionWarningText}>{t("about.dataDeletionWarning")}</Text>
+            </View>
+
+            <View style={styles.dataDeletionActionRow}>
+              <Pressable
+                disabled={dataDeleting}
+                onPress={() => setDataDeletionModalVisible(false)}
+                style={({ pressed }) => [
+                  styles.dataDeletionCancelButton,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.dataDeletionCancelText}>{t("common.cancel")}</Text>
+              </Pressable>
+              <Pressable
+                disabled={dataDeleting}
+                onPress={() => void deleteMemoriaAccountData()}
+                style={({ pressed }) => [
+                  styles.dataDeletionContinueButton,
+                  dataDeleting && styles.primaryButtonDisabled,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.dataDeletionContinueText,
+                    dataDeleting && styles.primaryButtonTextDisabled,
+                  ]}
+                >
+                  {dataDeleting ? t("about.dataDeletionDeleting") : t("about.dataDeletionContinue")}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   const renderAppAlertModal = () => {
     if (!appAlertConfig) {
       return null;
@@ -5216,18 +5326,19 @@ export default function App() {
               <Text style={styles.settingsBody}>{t("about.dataDeletionBody")}</Text>
             </View>
             <Pressable
-              disabled={supportSending}
-              onPress={requestDataDeletion}
+              disabled={dataDeleting}
+              onPress={openDataDeletionModal}
               style={({ pressed }) => [
-                styles.primaryButton,
-                supportSending && styles.primaryButtonDisabled,
+                styles.accountDeleteButton,
+                dataDeleting && styles.primaryButtonDisabled,
                 pressed && styles.pressed,
               ]}
             >
+              <MaterialCommunityIcons name="trash-can-outline" size={18} color={theme.danger} />
               <Text
                 style={[
-                  styles.primaryButtonText,
-                  supportSending && styles.primaryButtonTextDisabled,
+                  styles.accountDeleteButtonText,
+                  dataDeleting && styles.primaryButtonTextDisabled,
                 ]}
               >
                 {t("about.dataDeletionButton")}
@@ -5710,10 +5821,11 @@ export default function App() {
       {renderDailyGoalModal()}
       {renderStopQuizModal()}
       {renderTutorialCompletionModal()}
+      {renderDataDeletionModal()}
       {renderAppAlertModal()}
 
       {launchVisible ? (
-        <LaunchScreen opacity={launchOpacity} scale={launchScale} glow={moonGlow} styles={styles} />
+        <LaunchScreen opacity={launchOpacity} scale={launchScale} glow={moonGlow} styles={styles} theme={theme} />
       ) : null}
       {tutorialVisible && tutorialStep === "intro" ? (
         <TutorialOverlay
@@ -5766,25 +5878,35 @@ function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) 
   );
 }
 
-function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
-  const featureCards = [
-    {
-      icon: "star-four-points-outline",
-      title: t("tutorial.welcomeSaveTitle"),
-      body: t("tutorial.welcomeSaveBody"),
-    },
-    {
-      icon: "cards-playing-outline",
-      title: t("tutorial.welcomeStudyTitle"),
-      body: t("tutorial.welcomeStudyBody"),
-    },
-    {
-      icon: "folder-multiple-outline",
-      title: t("tutorial.welcomeLibraryTitle"),
-      body: t("tutorial.welcomeLibraryBody"),
-    },
-  ];
+function MemoriaArtwork({ styles, theme }) {
+  return (
+    <View style={styles.memoriaArtwork}>
+      <View style={styles.memoriaOrbit} />
+      <View style={[styles.memoriaOrbitDot, styles.memoriaOrbitDotTop]} />
+      <View style={[styles.memoriaOrbitDot, styles.memoriaOrbitDotSide]} />
+      <View style={styles.memoriaBackCard}>
+        <View style={styles.memoriaBackLine} />
+        <View style={[styles.memoriaBackLine, styles.memoriaBackLineShort]} />
+        <MaterialCommunityIcons name="star-four-points" size={18} color={theme.accent} />
+      </View>
+      <View style={styles.memoriaFrontCard}>
+        <View style={styles.memoriaMiniMascot}>
+          <View style={styles.memoriaMiniEyeRow}>
+            <View style={styles.memoriaMiniEye} />
+            <View style={styles.memoriaMiniEye} />
+          </View>
+          <View style={styles.memoriaMiniBook}>
+            <MaterialCommunityIcons name="book-open-variant" size={24} color={theme.accentText} />
+          </View>
+        </View>
+        <View style={styles.memoriaCardLine} />
+        <View style={[styles.memoriaCardLine, styles.memoriaCardLineShort]} />
+      </View>
+    </View>
+  );
+}
 
+function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
   return (
     <View style={styles.tutorialOverlay}>
       <View pointerEvents="none" style={styles.tutorialIntroDecor}>
@@ -5815,37 +5937,9 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
           maxWidth ? { maxWidth, alignSelf: "center", width: "100%" } : null,
         ]}
       >
-        <View style={styles.tutorialWelcomeHeader}>
-          <Text style={styles.tutorialWelcomeTitle}>{t("tutorial.welcomeTitle")}</Text>
-          <Text style={styles.tutorialWelcomeSubtitle}>{t("tutorial.welcomeSubtitle")}</Text>
-        </View>
-
-        <View style={styles.tutorialMascotStage}>
-          <View style={styles.tutorialMascotShadow} />
-          <View style={styles.tutorialMascot}>
-            <View style={styles.tutorialMascotEyeRow}>
-              <View style={styles.tutorialMascotEye} />
-              <View style={styles.tutorialMascotEye} />
-            </View>
-            <View style={styles.tutorialMascotSmile} />
-            <View style={styles.tutorialMascotBook}>
-              <MaterialCommunityIcons name="book-open-variant" size={42} color={theme.accentText} />
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.tutorialFeatureList}>
-          {featureCards.map((item) => (
-            <View key={item.title} style={styles.tutorialFeatureCard}>
-              <View style={styles.tutorialFeatureIcon}>
-                <MaterialCommunityIcons name={item.icon} size={22} color={theme.accent} />
-              </View>
-              <View style={styles.tutorialFeatureCopy}>
-                <Text style={styles.tutorialFeatureTitle}>{item.title}</Text>
-                <Text style={styles.tutorialFeatureBody}>{item.body}</Text>
-              </View>
-            </View>
-          ))}
+        <View style={styles.tutorialBrandBlock}>
+          <MemoriaArtwork styles={styles} theme={theme} />
+          <Text style={styles.tutorialBrandTitle}>{APP_NAME}</Text>
         </View>
 
         <View style={styles.tutorialWelcomeActions}>
@@ -6342,16 +6436,14 @@ function TutorialCoach({
   );
 }
 
-function LaunchScreen({ opacity, scale, glow, styles }) {
+function LaunchScreen({ opacity, scale, glow, styles, theme }) {
   return (
     <Animated.View style={[styles.launchScreen, { opacity }]}>
-      <Animated.View style={[styles.launchHalo, { opacity: glow, transform: [{ scale }] }]} />
-      <View style={styles.launchMoonWrap}>
-        <View style={styles.launchMoon} />
-        <View style={styles.launchMoonCutout} />
-        <View style={[styles.launchStar, styles.launchStarPrimary]} />
-        <View style={[styles.launchStar, styles.launchStarSecondary]} />
-      </View>
+      <Animated.View style={[styles.launchBackdropCircle, styles.launchBackdropCircleTop, { opacity: glow }]} />
+      <Animated.View style={[styles.launchBackdropCircle, styles.launchBackdropCircleBottom, { opacity: glow }]} />
+      <Animated.View style={[styles.launchArtworkMotion, { transform: [{ scale }] }]}>
+        <MemoriaArtwork styles={styles} theme={theme} />
+      </Animated.View>
       <Animated.Text style={[styles.launchTitle, { transform: [{ scale }] }]}>
         {APP_NAME}
       </Animated.Text>
@@ -8667,6 +8759,22 @@ const createStyles = (theme) => StyleSheet.create({
     lineHeight: 22,
     color: theme.textSecondary,
   },
+  accountDeleteButton: {
+    minHeight: 54,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 16,
+    backgroundColor: theme.dangerBgSoft,
+    borderWidth: 1,
+    borderColor: theme.danger,
+  },
+  accountDeleteButtonText: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: theme.danger,
+  },
   compactSelectRow: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -9053,6 +9161,111 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.accent,
   },
   legalModalDoneText: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: theme.accentText,
+  },
+  dataDeletionModalOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  dataDeletionModalCard: {
+    width: "100%",
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    paddingBottom: 18,
+    borderRadius: 24,
+    backgroundColor: theme.surfaceStrong,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+    shadowColor: theme.textPrimary,
+    shadowOpacity: theme.mode === "dark" ? 0.24 : 0.12,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 12,
+  },
+  dataDeletionGrabber: {
+    alignSelf: "center",
+    width: 42,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceBorder,
+  },
+  dataDeletionModalTitle: {
+    textAlign: "center",
+    fontSize: 17,
+    lineHeight: 24,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  dataDeletionSection: {
+    gap: 9,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  dataDeletionSectionTitle: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "900",
+    color: theme.danger,
+  },
+  dataDeletionListItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  dataDeletionListText: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "700",
+    color: theme.textPrimary,
+  },
+  dataDeletionWarningRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  dataDeletionWarningText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "800",
+    color: theme.danger,
+  },
+  dataDeletionActionRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  dataDeletionCancelButton: {
+    flex: 1,
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 15,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  dataDeletionCancelText: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  dataDeletionContinueButton: {
+    flex: 1,
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 15,
+    backgroundColor: theme.danger,
+  },
+  dataDeletionContinueText: {
     fontSize: 14,
     fontWeight: "900",
     color: theme.accentText,
@@ -9716,52 +9929,145 @@ const createStyles = (theme) => StyleSheet.create({
     justifyContent: "center",
     backgroundColor: theme.launchBg,
   },
-  launchHalo: {
+  launchBackdropCircle: {
     position: "absolute",
-    width: 260,
-    height: 260,
-    borderRadius: 130,
-    backgroundColor: theme.accentSoftStrong,
+    borderRadius: 999,
+    backgroundColor: theme.accentSoft,
   },
-  launchMoonWrap: {
-    width: 116,
-    height: 116,
-    marginBottom: 22,
+  launchBackdropCircleTop: {
+    top: -120,
+    right: -92,
+    width: 290,
+    height: 290,
+  },
+  launchBackdropCircleBottom: {
+    bottom: -135,
+    left: -120,
+    width: 280,
+    height: 280,
+  },
+  launchArtworkMotion: {
+    marginBottom: 28,
+  },
+  memoriaArtwork: {
+    width: 230,
+    height: 230,
     alignItems: "center",
     justifyContent: "center",
   },
-  launchMoon: {
+  memoriaOrbit: {
     position: "absolute",
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: theme.accent,
+    width: 214,
+    height: 142,
+    borderRadius: 120,
+    borderWidth: 1,
+    borderColor: theme.accentSoftStrong,
+    transform: [{ rotate: "-8deg" }],
   },
-  launchMoonCutout: {
+  memoriaOrbitDot: {
     position: "absolute",
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    right: 18,
-    top: 21,
-    backgroundColor: theme.launchBg,
-  },
-  launchStar: {
-    position: "absolute",
-    backgroundColor: theme.star,
     borderRadius: 999,
+    backgroundColor: theme.accentSoftStrong,
   },
-  launchStarPrimary: {
-    top: 26,
-    right: 14,
+  memoriaOrbitDotTop: {
+    top: 29,
+    width: 12,
+    height: 12,
+  },
+  memoriaOrbitDotSide: {
+    right: 13,
+    bottom: 62,
     width: 10,
     height: 10,
   },
-  launchStarSecondary: {
-    bottom: 18,
-    left: 16,
+  memoriaBackCard: {
+    position: "absolute",
+    width: 106,
+    height: 142,
+    right: 41,
+    top: 48,
+    paddingTop: 78,
+    paddingHorizontal: 20,
+    gap: 9,
+    borderRadius: 18,
+    backgroundColor: theme.accentSoft,
+    borderWidth: 1,
+    borderColor: theme.accentSoftStrong,
+    transform: [{ rotate: "9deg" }],
+  },
+  memoriaBackLine: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: theme.surface,
+    opacity: 0.78,
+  },
+  memoriaBackLineShort: {
+    width: "70%",
+  },
+  memoriaFrontCard: {
+    position: "absolute",
+    width: 118,
+    height: 152,
+    left: 48,
+    top: 36,
+    alignItems: "center",
+    paddingTop: 24,
+    paddingHorizontal: 19,
+    borderRadius: 20,
+    backgroundColor: theme.surfaceStrong,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+    shadowColor: theme.textPrimary,
+    shadowOpacity: theme.mode === "dark" ? 0.2 : 0.1,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 5,
+    transform: [{ rotate: "-8deg" }],
+  },
+  memoriaMiniMascot: {
+    width: 62,
+    height: 64,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingBottom: 9,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  memoriaMiniEyeRow: {
+    position: "absolute",
+    top: 16,
+    flexDirection: "row",
+    gap: 14,
+  },
+  memoriaMiniEye: {
     width: 6,
-    height: 6,
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: theme.textPrimary,
+  },
+  memoriaMiniBook: {
+    width: 40,
+    height: 27,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    backgroundColor: theme.accent,
+  },
+  memoriaCardLine: {
+    width: 70,
+    height: 7,
+    marginTop: 16,
+    borderRadius: 999,
+    backgroundColor: theme.accentSoftStrong,
+  },
+  memoriaCardLineShort: {
+    width: 48,
+    marginTop: 8,
   },
   launchTitle: {
     fontSize: 26,
@@ -9783,128 +10089,22 @@ const createStyles = (theme) => StyleSheet.create({
     paddingBottom: Platform.OS === "android" ? 38 : 52,
     justifyContent: "center",
   },
-  tutorialWelcomeHeader: {
-    gap: 10,
-    marginBottom: 18,
+  tutorialBrandBlock: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 30,
   },
-  tutorialWelcomeTitle: {
-    fontSize: 28,
-    lineHeight: 36,
+  tutorialBrandTitle: {
+    marginTop: 12,
+    fontSize: 31,
+    lineHeight: 39,
     fontWeight: "900",
+    letterSpacing: 10,
     color: theme.textPrimary,
-  },
-  tutorialWelcomeSubtitle: {
-    maxWidth: 280,
-    fontSize: 15,
-    lineHeight: 23,
-    fontWeight: "800",
-    color: theme.accent,
-  },
-  tutorialMascotStage: {
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 190,
-    marginBottom: 18,
-  },
-  tutorialMascotShadow: {
-    position: "absolute",
-    bottom: 8,
-    width: 150,
-    height: 28,
-    borderRadius: 999,
-    backgroundColor: theme.accentSoft,
-  },
-  tutorialMascot: {
-    width: 138,
-    height: 146,
-    borderTopLeftRadius: 72,
-    borderTopRightRadius: 72,
-    borderBottomLeftRadius: 42,
-    borderBottomRightRadius: 42,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.surfaceStrong,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-    shadowColor: theme.textPrimary,
-    shadowOpacity: theme.mode === "dark" ? 0.2 : 0.08,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 4,
-  },
-  tutorialMascotEyeRow: {
-    position: "absolute",
-    top: 48,
-    flexDirection: "row",
-    gap: 24,
-  },
-  tutorialMascotEye: {
-    width: 8,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: theme.textPrimary,
-  },
-  tutorialMascotSmile: {
-    position: "absolute",
-    top: 70,
-    width: 22,
-    height: 11,
-    borderBottomWidth: 2,
-    borderColor: theme.textPrimary,
-    borderRadius: 12,
-  },
-  tutorialMascotBook: {
-    position: "absolute",
-    bottom: 22,
-    width: 82,
-    height: 54,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.accent,
-  },
-  tutorialFeatureList: {
-    gap: 10,
-  },
-  tutorialFeatureCard: {
-    minHeight: 76,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 14,
-    borderRadius: 16,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-  },
-  tutorialFeatureIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.accentSoft,
-  },
-  tutorialFeatureCopy: {
-    flex: 1,
-    minWidth: 0,
-    gap: 4,
-  },
-  tutorialFeatureTitle: {
-    fontSize: 14,
-    lineHeight: 19,
-    fontWeight: "900",
-    color: theme.textPrimary,
-  },
-  tutorialFeatureBody: {
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "700",
-    color: theme.textSecondary,
   },
   tutorialWelcomeActions: {
     gap: 12,
-    marginTop: 24,
+    marginTop: 10,
   },
   tutorialStartButton: {
     minHeight: 58,
