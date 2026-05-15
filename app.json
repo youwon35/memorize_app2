@@ -9,7 +9,7 @@
     "icon": "./app-icon.png",
     "splash": {
       "image": "./assets/memoria-splash.png",
-      "resizeMode": "contain",
+      "resizeMode": "cover",
       "backgroundColor": "#F5F7FB"
     },
     "plugins": [
@@ -30,8 +30,8 @@
     "android": {
       "package": "com.youwon35.memoria",
       "adaptiveIcon": {
-        "foregroundImage": "./app-icon.png",
-        "backgroundColor": "#050814"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#DED7FF"
       }
     },
     "ios": {

@@ -3,6 +3,7 @@ import {
   Animated,
   BackHandler,
   Easing,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -64,7 +65,8 @@ import {
 
 WebBrowser.maybeCompleteAuthSession();
 
-const APP_NAME = "MEMORIA";
+const LAUNCH_IMAGE = require("./assets/memoria-splash.png");
+const CHARACTER_IMAGE = require("./assets/memoria-character.png");
 const APP_VERSION = "1.0.0";
 const STORAGE_KEY = "@memoria/cards";
 const FOLDERS_STORAGE_KEY = "@memoria/folders";
@@ -655,7 +657,6 @@ export default function App() {
   const bootStartedAt = useRef(Date.now());
   const launchOpacity = useRef(new Animated.Value(1)).current;
   const launchScale = useRef(new Animated.Value(0.94)).current;
-  const moonGlow = useRef(new Animated.Value(0.56)).current;
 
   const t = useMemo(() => createTranslator(language), [language]);
   const theme = themeMode === "light" ? LIGHT_THEME : DARK_THEME;
@@ -1672,25 +1673,6 @@ export default function App() {
   }, [adminOnlyUnresolved, isAdmin, storageReady, session?.user?.id, t]);
 
   useEffect(() => {
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(moonGlow, {
-          toValue: 0.92,
-          duration: 1700,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(moonGlow, {
-          toValue: 0.56,
-          duration: 1700,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-
-    pulse.start();
-
     Animated.spring(launchScale, {
       toValue: 1,
       mass: 0.8,
@@ -1698,11 +1680,7 @@ export default function App() {
       stiffness: 130,
       useNativeDriver: true,
     }).start();
-
-    return () => {
-      pulse.stop();
-    };
-  }, [launchScale, moonGlow]);
+  }, [launchScale]);
 
   useEffect(() => {
     if (!launchVisible || !storageReady || !authReady) {
@@ -5825,7 +5803,7 @@ export default function App() {
       {renderAppAlertModal()}
 
       {launchVisible ? (
-        <LaunchScreen opacity={launchOpacity} scale={launchScale} glow={moonGlow} styles={styles} theme={theme} />
+        <LaunchScreen opacity={launchOpacity} scale={launchScale} styles={styles} />
       ) : null}
       {tutorialVisible && tutorialStep === "intro" ? (
         <TutorialOverlay
@@ -5878,35 +5856,17 @@ function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) 
   );
 }
 
-function MemoriaArtwork({ styles, theme }) {
+function MemoriaArtwork({ styles }) {
   return (
     <View style={styles.memoriaArtwork}>
-      <View style={styles.memoriaOrbit} />
-      <View style={[styles.memoriaOrbitDot, styles.memoriaOrbitDotTop]} />
-      <View style={[styles.memoriaOrbitDot, styles.memoriaOrbitDotSide]} />
-      <View style={styles.memoriaBackCard}>
-        <View style={styles.memoriaBackLine} />
-        <View style={[styles.memoriaBackLine, styles.memoriaBackLineShort]} />
-        <MaterialCommunityIcons name="star-four-points" size={18} color={theme.accent} />
-      </View>
-      <View style={styles.memoriaFrontCard}>
-        <View style={styles.memoriaMiniMascot}>
-          <View style={styles.memoriaMiniEyeRow}>
-            <View style={styles.memoriaMiniEye} />
-            <View style={styles.memoriaMiniEye} />
-          </View>
-          <View style={styles.memoriaMiniBook}>
-            <MaterialCommunityIcons name="book-open-variant" size={24} color={theme.accentText} />
-          </View>
-        </View>
-        <View style={styles.memoriaCardLine} />
-        <View style={[styles.memoriaCardLine, styles.memoriaCardLineShort]} />
-      </View>
+      <Image source={CHARACTER_IMAGE} style={styles.memoriaArtworkImage} resizeMode="contain" />
     </View>
   );
 }
 
 function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
+  const localizedAppName = t("common.appName");
+
   return (
     <View style={styles.tutorialOverlay}>
       <View pointerEvents="none" style={styles.tutorialIntroDecor}>
@@ -5938,8 +5898,8 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
         ]}
       >
         <View style={styles.tutorialBrandBlock}>
-          <MemoriaArtwork styles={styles} theme={theme} />
-          <Text style={styles.tutorialBrandTitle}>{APP_NAME}</Text>
+          <MemoriaArtwork styles={styles} />
+          <Text style={styles.tutorialBrandTitle}>{localizedAppName}</Text>
         </View>
 
         <View style={styles.tutorialWelcomeActions}>
@@ -6436,17 +6396,14 @@ function TutorialCoach({
   );
 }
 
-function LaunchScreen({ opacity, scale, glow, styles, theme }) {
+function LaunchScreen({ opacity, scale, styles }) {
   return (
     <Animated.View style={[styles.launchScreen, { opacity }]}>
-      <Animated.View style={[styles.launchBackdropCircle, styles.launchBackdropCircleTop, { opacity: glow }]} />
-      <Animated.View style={[styles.launchBackdropCircle, styles.launchBackdropCircleBottom, { opacity: glow }]} />
-      <Animated.View style={[styles.launchArtworkMotion, { transform: [{ scale }] }]}>
-        <MemoriaArtwork styles={styles} theme={theme} />
-      </Animated.View>
-      <Animated.Text style={[styles.launchTitle, { transform: [{ scale }] }]}>
-        {APP_NAME}
-      </Animated.Text>
+      <Animated.Image
+        source={LAUNCH_IMAGE}
+        resizeMode="cover"
+        style={[styles.launchSplashImage, { transform: [{ scale }] }]}
+      />
     </Animated.View>
   );
 }
@@ -9928,6 +9885,11 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: theme.launchBg,
+    overflow: "hidden",
+  },
+  launchSplashImage: {
+    width: "100%",
+    height: "100%",
   },
   launchBackdropCircle: {
     position: "absolute",
@@ -9950,10 +9912,14 @@ const createStyles = (theme) => StyleSheet.create({
     marginBottom: 28,
   },
   memoriaArtwork: {
-    width: 230,
-    height: 230,
+    width: 260,
+    height: 260,
     alignItems: "center",
     justifyContent: "center",
+  },
+  memoriaArtworkImage: {
+    width: "100%",
+    height: "100%",
   },
   memoriaOrbit: {
     position: "absolute",
@@ -10096,10 +10062,10 @@ const createStyles = (theme) => StyleSheet.create({
   },
   tutorialBrandTitle: {
     marginTop: 12,
-    fontSize: 31,
-    lineHeight: 39,
+    fontSize: 32,
+    lineHeight: 40,
     fontWeight: "900",
-    letterSpacing: 10,
+    letterSpacing: 0,
     color: theme.textPrimary,
   },
   tutorialWelcomeActions: {

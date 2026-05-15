@@ -1,12 +1,12 @@
-# MEMORIA Google Play 출시 체크리스트
+# 메모리아 Google Play 출시 체크리스트
 
-이 문서는 MEMORIA를 Google Play에 올릴 때 따라갈 실전 순서입니다. 현재 앱 식별자는 `com.youwon35.memoria`이며, Google Play에 한 번 업로드한 패키지명은 바꾸거나 재사용할 수 없습니다.
+이 문서는 메모리아를 Google Play에 올릴 때 따라갈 실전 순서입니다. 현재 앱 식별자는 `com.youwon35.memoria`이며, Google Play에 한 번 업로드한 패키지명은 바꾸거나 재사용할 수 없습니다.
 
 ## 1. 출시 전에 직접 준비할 것
 
 1. Google Play Console 개발자 계정을 만듭니다. 개인 계정으로 새로 만들었다면 폐쇄 테스트 12명, 14일 연속 참여 조건이 적용될 수 있습니다.
 2. Play Console에서 앱을 만듭니다.
-   - 앱 이름: `MEMORIA`
+   - 앱 이름: `메모리아`
    - 기본 언어: `한국어`
    - 유형: 앱
    - 가격: 무료로 시작 권장
@@ -69,7 +69,7 @@ Play Console의 `정책 및 프로그램 > 앱 콘텐츠`에서 아래 항목을
 3. 출시 노트 예시:
 
 ```text
-MEMORIA 첫 출시
+메모리아 첫 출시
 - 카드와 폴더 저장
 - 파일 가져오기
 - 맞춤 암기와 오답 다시 풀기
