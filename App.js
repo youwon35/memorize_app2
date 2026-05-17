@@ -9910,8 +9910,8 @@ const createStyles = (theme) => StyleSheet.create({
     marginBottom: 28,
   },
   memoriaArtwork: {
-    width: 260,
-    height: 260,
+    width: 340,
+    height: 340,
     alignItems: "center",
     justifyContent: "center",
   },
