@@ -5865,8 +5865,6 @@ function MemoriaArtwork({ styles }) {
 }
 
 function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
-  const localizedAppName = t("common.appName");
-
   return (
     <View style={styles.tutorialOverlay}>
       <View pointerEvents="none" style={styles.tutorialIntroDecor}>
@@ -5899,7 +5897,7 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
       >
         <View style={styles.tutorialBrandBlock}>
           <MemoriaArtwork styles={styles} />
-          <Text style={styles.tutorialBrandTitle}>{localizedAppName}</Text>
+          <Text style={styles.tutorialBrandTitle}>MEMORIA</Text>
         </View>
 
         <View style={styles.tutorialWelcomeActions}>
@@ -10062,10 +10060,10 @@ const createStyles = (theme) => StyleSheet.create({
   },
   tutorialBrandTitle: {
     marginTop: 12,
-    fontSize: 32,
+    fontSize: 31,
     lineHeight: 40,
     fontWeight: "900",
-    letterSpacing: 0,
+    letterSpacing: 5,
     color: theme.textPrimary,
   },
   tutorialWelcomeActions: {
