@@ -37,6 +37,12 @@ const TRANSLATIONS = {
       manage: "보관함",
       about: "앱 정보",
     },
+    launch: {
+      googleStart: "Google로 시작하기",
+      googleContinue: "Google 계정으로 계속하기",
+      googleUnavailable: "Google 로그인 설정 필요",
+      guestStart: "게스트로 둘러보기",
+    },
     saveModes: {
       single: "한 장씩",
       text: "파일로",
@@ -565,6 +571,12 @@ const TRANSLATIONS = {
       manage: "Library",
       about: "About",
     },
+    launch: {
+      googleStart: "Start with Google",
+      googleContinue: "Continue with Google",
+      googleUnavailable: "Google setup required",
+      guestStart: "Browse as guest",
+    },
     saveModes: {
       single: "One by one",
       text: "Files",
@@ -1092,6 +1104,12 @@ const TRANSLATIONS = {
       history: "記録",
       manage: "保管庫",
       about: "アプリ情報",
+    },
+    launch: {
+      googleStart: "Google で始める",
+      googleContinue: "Google で続ける",
+      googleUnavailable: "Google 設定が必要",
+      guestStart: "ゲストで見る",
     },
     saveModes: {
       single: "1枚ずつ",

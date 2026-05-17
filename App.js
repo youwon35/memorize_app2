@@ -3,7 +3,6 @@ import {
   Animated,
   BackHandler,
   Easing,
-  Image,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -21,6 +20,7 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import * as DocumentPicker from "expo-document-picker";
 import { makeRedirectUri } from "expo-auth-session";
 import { File } from "expo-file-system";
@@ -64,9 +64,6 @@ import {
 } from "./src/i18n";
 
 WebBrowser.maybeCompleteAuthSession();
-
-const LAUNCH_IMAGE = require("./assets/memoria-splash.png");
-const CHARACTER_IMAGE = require("./assets/memoria-character.png");
 const APP_VERSION = "1.0.0";
 const STORAGE_KEY = "@memoria/cards";
 const FOLDERS_STORAGE_KEY = "@memoria/folders";
@@ -654,7 +651,6 @@ export default function App() {
   const appOpenTrackedUserRef = useRef(null);
   const roundMetaRef = useRef(null);
   const roundSnapshotRef = useRef(null);
-  const bootStartedAt = useRef(Date.now());
   const launchOpacity = useRef(new Animated.Value(1)).current;
   const launchScale = useRef(new Animated.Value(0.94)).current;
 
@@ -1682,32 +1678,26 @@ export default function App() {
     }).start();
   }, [launchScale]);
 
-  useEffect(() => {
-    if (!launchVisible || !storageReady || !authReady) {
+  const dismissLaunchScreen = () => {
+    if (!launchVisible) {
       return;
     }
 
-    const elapsed = Date.now() - bootStartedAt.current;
-    const waitTime = Math.max(0, 1300 - elapsed);
-    const timeout = setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(launchOpacity, {
-          toValue: 0,
-          duration: 420,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(launchScale, {
-          toValue: 1.04,
-          duration: 420,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ]).start(() => setLaunchVisible(false));
-    }, waitTime);
-
-    return () => clearTimeout(timeout);
-  }, [authReady, launchOpacity, launchScale, launchVisible, storageReady]);
+    Animated.parallel([
+      Animated.timing(launchOpacity, {
+        toValue: 0,
+        duration: 360,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+      Animated.timing(launchScale, {
+        toValue: 1.03,
+        duration: 360,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+    ]).start(() => setLaunchVisible(false));
+  };
 
   useEffect(() => {
     if (pairs.length > 0) {
@@ -3121,7 +3111,7 @@ export default function App() {
         t("about.authPrepTitle"),
         t("about.authPrepBody")
       );
-      return;
+      return false;
     }
 
     setAuthBusy(true);
@@ -3153,16 +3143,36 @@ export default function App() {
           }
         }
 
-        return;
+        return true;
       }
 
       if (result.type !== "cancel") {
         setTranslatedNote("notes.loginIncomplete");
       }
+
+      return false;
     } catch (error) {
       Alert.alert(t("about.authFailTitle"), error?.message || t("about.authFailBody"));
+      return false;
     } finally {
       setAuthBusy(false);
+    }
+  };
+
+  const continueFromLaunchAsGuest = () => {
+    dismissLaunchScreen();
+  };
+
+  const continueFromLaunchWithGoogle = async () => {
+    if (session?.user) {
+      dismissLaunchScreen();
+      return;
+    }
+
+    const loggedIn = await login();
+
+    if (loggedIn) {
+      dismissLaunchScreen();
     }
   };
 
@@ -5803,7 +5813,19 @@ export default function App() {
       {renderAppAlertModal()}
 
       {launchVisible ? (
-        <LaunchScreen opacity={launchOpacity} scale={launchScale} styles={styles} />
+        <LaunchScreen
+          opacity={launchOpacity}
+          scale={launchScale}
+          styles={styles}
+          theme={theme}
+          t={t}
+          authBusy={authBusy}
+          authReady={authReady && storageReady}
+          isConfigured={isSupabaseConfigured}
+          hasSession={Boolean(session?.user)}
+          onGooglePress={() => void continueFromLaunchWithGoogle()}
+          onGuestPress={continueFromLaunchAsGuest}
+        />
       ) : null}
       {tutorialVisible && tutorialStep === "intro" ? (
         <TutorialOverlay
@@ -5856,10 +5878,47 @@ function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) 
   );
 }
 
-function MemoriaArtwork({ styles }) {
+function MemoriaArtwork({ styles, variant = "intro" }) {
   return (
-    <View style={styles.memoriaArtwork}>
-      <Image source={CHARACTER_IMAGE} style={styles.memoriaArtworkImage} resizeMode="contain" />
+    <View style={[styles.memoriaArtwork, variant === "launch" && styles.memoriaArtworkLaunch]}>
+      <View style={styles.memoriaOrbitRing} />
+      <MaterialCommunityIcons
+        name="moon-waning-crescent"
+        size={32}
+        color="#8E7BFF"
+        style={styles.memoriaMoon}
+      />
+      <MaterialCommunityIcons
+        name="star-four-points"
+        size={25}
+        color="#8E7BFF"
+        style={styles.memoriaStarTop}
+      />
+      <MaterialCommunityIcons
+        name="star-four-points"
+        size={20}
+        color="#A79BFF"
+        style={styles.memoriaStarBottom}
+      />
+      <View style={[styles.memoriaSparkDot, styles.memoriaSparkDotLeft]} />
+      <View style={[styles.memoriaSparkDot, styles.memoriaSparkDotRight]} />
+      <View style={styles.memoriaHood} />
+      <View style={styles.memoriaFace}>
+        <View style={styles.memoriaEyeRow}>
+          <View style={styles.memoriaEye} />
+          <View style={styles.memoriaEye} />
+        </View>
+        <View style={styles.memoriaMouth} />
+      </View>
+      <View style={styles.memoriaBackCard}>
+        <View style={styles.memoriaBackLine} />
+        <View style={[styles.memoriaBackLine, styles.memoriaBackLineShort]} />
+      </View>
+      <View style={styles.memoriaFrontCard}>
+        <MaterialCommunityIcons name="star" size={58} color="#FFFFFF" />
+      </View>
+      <View style={[styles.memoriaHand, styles.memoriaHandLeft]} />
+      <View style={[styles.memoriaHand, styles.memoriaHandRight]} />
     </View>
   );
 }
@@ -5897,7 +5956,7 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
       >
         <View style={styles.tutorialBrandBlock}>
           <MemoriaArtwork styles={styles} />
-          <Text style={styles.tutorialBrandTitle}>MEMORIA</Text>
+          <Text style={styles.tutorialBrandTitle}>M E M O R I A</Text>
         </View>
 
         <View style={styles.tutorialWelcomeActions}>
@@ -6394,14 +6453,91 @@ function TutorialCoach({
   );
 }
 
-function LaunchScreen({ opacity, scale, styles }) {
+function LaunchScreen({
+  opacity,
+  scale,
+  styles,
+  theme,
+  t,
+  authBusy,
+  authReady,
+  isConfigured,
+  hasSession,
+  onGooglePress,
+  onGuestPress,
+}) {
+  const googleLabel = !isConfigured
+    ? t("launch.googleUnavailable")
+    : hasSession
+      ? t("launch.googleContinue")
+      : t("launch.googleStart");
+  const googleDisabled = authBusy || !authReady || !isConfigured;
+
   return (
     <Animated.View style={[styles.launchScreen, { opacity }]}>
-      <Animated.Image
-        source={LAUNCH_IMAGE}
-        resizeMode="cover"
-        style={[styles.launchSplashImage, { transform: [{ scale }] }]}
-      />
+      <View pointerEvents="none" style={styles.launchDecorLayer}>
+        <View style={[styles.launchDecorOrb, styles.launchDecorOrbTop]} />
+        <View style={[styles.launchDecorOrb, styles.launchDecorOrbBottom]} />
+        <View style={[styles.launchDecorDot, styles.launchDecorDotTopLeft]} />
+        <View style={[styles.launchDecorDot, styles.launchDecorDotTopMid]} />
+        <View style={[styles.launchDecorDot, styles.launchDecorDotBottomLeft]} />
+        <MaterialCommunityIcons
+          name="star-four-points"
+          size={26}
+          color={theme.accent}
+          style={styles.launchDecorStarRight}
+        />
+        <MaterialCommunityIcons
+          name="moon-waning-crescent"
+          size={28}
+          color={theme.accent}
+          style={styles.launchDecorMoonLeft}
+        />
+      </View>
+
+      <Animated.View style={[styles.launchContent, { transform: [{ scale }] }]}>
+        <View style={styles.launchBrandBlock}>
+          <MemoriaArtwork styles={styles} variant="launch" />
+          <Text style={styles.launchTitle}>M E M O R I A</Text>
+        </View>
+
+        <View style={styles.launchActionGroup}>
+          <Pressable
+            disabled={googleDisabled}
+            onPress={onGooglePress}
+            style={({ pressed }) => [styles.launchGoogleButtonShell, pressed && styles.pressed]}
+          >
+            <LinearGradient
+              colors={googleDisabled ? ["#C9D0E3", "#BCC4DA"] : ["#9F8FFF", "#8572F4"]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={styles.launchGoogleButton}
+            >
+              <View style={styles.launchGoogleIconCircle}>
+                <MaterialCommunityIcons name="google" size={31} color="#4285F4" />
+              </View>
+              <Text style={styles.launchGoogleButtonText}>
+                {authBusy ? t("about.authConnecting") : googleLabel}
+              </Text>
+            </LinearGradient>
+          </Pressable>
+
+          <Pressable
+            disabled={!authReady}
+            onPress={onGuestPress}
+            style={({ pressed }) => [
+              styles.launchGuestButton,
+              !authReady && styles.launchGuestButtonDisabled,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={styles.launchGuestIconWrap}>
+              <MaterialCommunityIcons name="account-star" size={30} color={theme.accent} />
+            </View>
+            <Text style={styles.launchGuestButtonText}>{t("launch.guestStart")}</Text>
+          </Pressable>
+        </View>
+      </Animated.View>
     </Animated.View>
   );
 }
@@ -9885,108 +10021,296 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.launchBg,
     overflow: "hidden",
   },
-  launchSplashImage: {
-    width: "100%",
-    height: "100%",
+  launchDecorLayer: {
+    ...StyleSheet.absoluteFillObject,
   },
-  launchBackdropCircle: {
+  launchDecorOrb: {
     position: "absolute",
     borderRadius: 999,
     backgroundColor: theme.accentSoft,
   },
-  launchBackdropCircleTop: {
-    top: -120,
-    right: -92,
-    width: 290,
-    height: 290,
+  launchDecorOrbTop: {
+    top: -128,
+    right: -82,
+    width: 286,
+    height: 286,
   },
-  launchBackdropCircleBottom: {
-    bottom: -135,
-    left: -120,
-    width: 280,
-    height: 280,
+  launchDecorOrbBottom: {
+    bottom: -112,
+    left: -96,
+    width: 264,
+    height: 264,
   },
-  launchArtworkMotion: {
-    marginBottom: 28,
+  launchDecorDot: {
+    position: "absolute",
+    width: 9,
+    height: 9,
+    borderRadius: 999,
+    backgroundColor: theme.accent,
+    opacity: 0.22,
   },
-  memoriaArtwork: {
-    width: 340,
-    height: 340,
+  launchDecorDotTopLeft: {
+    top: Platform.OS === "android" ? 72 : 92,
+    left: 28,
+  },
+  launchDecorDotTopMid: {
+    top: Platform.OS === "android" ? 116 : 136,
+    right: 152,
+  },
+  launchDecorDotBottomLeft: {
+    bottom: Platform.OS === "android" ? 142 : 166,
+    left: 36,
+  },
+  launchDecorStarRight: {
+    position: "absolute",
+    top: Platform.OS === "android" ? 286 : 310,
+    right: 54,
+    opacity: 0.86,
+  },
+  launchDecorMoonLeft: {
+    position: "absolute",
+    top: Platform.OS === "android" ? 260 : 288,
+    left: 48,
+    opacity: 0.82,
+  },
+  launchContent: {
+    width: "100%",
+    maxWidth: 560,
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === "android" ? 42 : 58,
+    paddingBottom: Platform.OS === "android" ? 64 : 72,
+  },
+  launchBrandBlock: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    gap: 14,
+  },
+  launchActionGroup: {
+    width: "100%",
+    gap: 14,
+  },
+  launchGoogleButtonShell: {
+    width: "100%",
+    borderRadius: 26,
+    shadowColor: theme.accent,
+    shadowOpacity: theme.mode === "dark" ? 0.2 : 0.26,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 9,
+  },
+  launchGoogleButton: {
+    minHeight: 64,
+    borderRadius: 26,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 18,
+    paddingHorizontal: 20,
+  },
+  launchGoogleIconCircle: {
+    position: "absolute",
+    left: 18,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  launchGoogleButtonText: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "900",
+    textAlign: "center",
+    color: "#FFFFFF",
+  },
+  launchGuestButton: {
+    minHeight: 64,
+    borderRadius: 26,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+    paddingHorizontal: 20,
+    backgroundColor: theme.surfaceStrong,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+    shadowColor: theme.textPrimary,
+    shadowOpacity: theme.mode === "dark" ? 0.12 : 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 5,
+  },
+  launchGuestButtonDisabled: {
+    opacity: 0.62,
+  },
+  launchGuestIconWrap: {
+    position: "absolute",
+    left: 30,
+    width: 36,
+    height: 36,
     alignItems: "center",
     justifyContent: "center",
   },
-  memoriaArtworkImage: {
-    width: "100%",
-    height: "100%",
+  launchGuestButtonText: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "900",
+    textAlign: "center",
+    color: theme.accent,
   },
-  memoriaOrbit: {
-    position: "absolute",
-    width: 214,
-    height: 142,
-    borderRadius: 120,
-    borderWidth: 1,
-    borderColor: theme.accentSoftStrong,
-    transform: [{ rotate: "-8deg" }],
+  memoriaArtwork: {
+    width: 292,
+    height: 292,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  memoriaOrbitDot: {
+  memoriaArtworkLaunch: {
+    width: 318,
+    height: 318,
+  },
+  memoriaOrbitRing: {
     position: "absolute",
+    width: "86%",
+    height: "86%",
     borderRadius: 999,
-    backgroundColor: theme.accentSoftStrong,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: "rgba(142, 123, 255, 0.24)",
   },
-  memoriaOrbitDotTop: {
-    top: 29,
-    width: 12,
-    height: 12,
+  memoriaMoon: {
+    position: "absolute",
+    top: 27,
+    left: 42,
+    opacity: 0.78,
   },
-  memoriaOrbitDotSide: {
-    right: 13,
-    bottom: 62,
-    width: 10,
-    height: 10,
+  memoriaStarTop: {
+    position: "absolute",
+    top: 45,
+    right: 40,
+    opacity: 0.84,
+  },
+  memoriaStarBottom: {
+    position: "absolute",
+    bottom: 36,
+    right: 56,
+    opacity: 0.7,
+  },
+  memoriaSparkDot: {
+    position: "absolute",
+    width: 9,
+    height: 9,
+    borderRadius: 999,
+    backgroundColor: "#8E7BFF",
+    opacity: 0.36,
+  },
+  memoriaSparkDotLeft: {
+    left: 34,
+    bottom: 66,
+  },
+  memoriaSparkDotRight: {
+    right: 28,
+    top: 102,
+  },
+  memoriaHood: {
+    position: "absolute",
+    top: 60,
+    width: 204,
+    height: 212,
+    borderTopLeftRadius: 102,
+    borderTopRightRadius: 102,
+    borderBottomLeftRadius: 58,
+    borderBottomRightRadius: 58,
+    backgroundColor: "#DCD3FF",
+  },
+  memoriaFace: {
+    position: "absolute",
+    top: 86,
+    width: 154,
+    height: 158,
+    borderTopLeftRadius: 77,
+    borderTopRightRadius: 77,
+    borderBottomLeftRadius: 26,
+    borderBottomRightRadius: 26,
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  memoriaEyeRow: {
+    position: "absolute",
+    top: 47,
+    flexDirection: "row",
+    gap: 48,
+  },
+  memoriaEye: {
+    width: 17,
+    height: 31,
+    borderRadius: 999,
+    backgroundColor: "#10182B",
+  },
+  memoriaMouth: {
+    position: "absolute",
+    top: 78,
+    width: 36,
+    height: 20,
+    borderBottomWidth: 6,
+    borderColor: "#10182B",
+    borderRadius: 18,
   },
   memoriaBackCard: {
     position: "absolute",
-    width: 106,
-    height: 142,
-    right: 41,
-    top: 48,
-    paddingTop: 78,
-    paddingHorizontal: 20,
-    gap: 9,
-    borderRadius: 18,
-    backgroundColor: theme.accentSoft,
-    borderWidth: 1,
-    borderColor: theme.accentSoftStrong,
+    width: 86,
+    height: 116,
+    right: 72,
+    top: 148,
+    paddingTop: 51,
+    paddingHorizontal: 14,
+    gap: 11,
+    borderRadius: 16,
+    backgroundColor: "#D7CBFF",
     transform: [{ rotate: "9deg" }],
   },
   memoriaBackLine: {
     height: 8,
     borderRadius: 999,
-    backgroundColor: theme.surface,
-    opacity: 0.78,
+    backgroundColor: "#8E7BFF",
+    opacity: 0.84,
   },
   memoriaBackLineShort: {
     width: "70%",
   },
   memoriaFrontCard: {
     position: "absolute",
-    width: 118,
-    height: 152,
-    left: 48,
-    top: 36,
+    width: 104,
+    height: 136,
+    left: 82,
+    top: 142,
     alignItems: "center",
-    paddingTop: 24,
-    paddingHorizontal: 19,
-    borderRadius: 20,
-    backgroundColor: theme.surfaceStrong,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-    shadowColor: theme.textPrimary,
-    shadowOpacity: theme.mode === "dark" ? 0.2 : 0.1,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 5,
-    transform: [{ rotate: "-8deg" }],
+    justifyContent: "center",
+    borderRadius: 18,
+    backgroundColor: "#7F66F2",
+    transform: [{ rotate: "-9deg" }],
+    zIndex: 8,
+  },
+  memoriaHand: {
+    position: "absolute",
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: "#FFFFFF",
+    zIndex: 10,
+  },
+  memoriaHandLeft: {
+    left: 64,
+    top: 190,
+  },
+  memoriaHandRight: {
+    right: 58,
+    top: 190,
   },
   memoriaMiniMascot: {
     width: 62,
@@ -10034,9 +10358,10 @@ const createStyles = (theme) => StyleSheet.create({
     marginTop: 8,
   },
   launchTitle: {
-    fontSize: 26,
-    fontWeight: "800",
-    letterSpacing: 11,
+    fontSize: 31,
+    lineHeight: 42,
+    fontWeight: "900",
+    letterSpacing: 0,
     color: theme.textPrimary,
   },
   tutorialOverlay: {
@@ -10060,10 +10385,10 @@ const createStyles = (theme) => StyleSheet.create({
   },
   tutorialBrandTitle: {
     marginTop: 12,
-    fontSize: 31,
+    fontSize: 28,
     lineHeight: 40,
     fontWeight: "900",
-    letterSpacing: 5,
+    letterSpacing: 0,
     color: theme.textPrimary,
   },
   tutorialWelcomeActions: {

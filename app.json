@@ -8,8 +8,8 @@
     "userInterfaceStyle": "light",
     "icon": "./app-icon.png",
     "splash": {
-      "image": "./assets/memoria-splash.png",
-      "resizeMode": "cover",
+      "image": "./assets/adaptive-icon.png",
+      "resizeMode": "contain",
       "backgroundColor": "#F5F7FB"
     },
     "plugins": [
