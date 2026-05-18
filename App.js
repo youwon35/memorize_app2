@@ -3,6 +3,7 @@ import {
   Animated,
   BackHandler,
   Easing,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -62,6 +63,9 @@ import {
   normalizeSupportCategory,
   normalizeSupportStatus,
 } from "./src/i18n";
+
+const GOOGLE_G_ICON = require("./assets/google-g.png");
+const MEMORIA_CHARACTER_IMAGE = require("./assets/memoria-character.png");
 
 WebBrowser.maybeCompleteAuthSession();
 const APP_VERSION = "1.0.0";
@@ -5881,44 +5885,11 @@ function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) 
 function MemoriaArtwork({ styles, variant = "intro" }) {
   return (
     <View style={[styles.memoriaArtwork, variant === "launch" && styles.memoriaArtworkLaunch]}>
-      <View style={styles.memoriaOrbitRing} />
-      <MaterialCommunityIcons
-        name="moon-waning-crescent"
-        size={32}
-        color="#8E7BFF"
-        style={styles.memoriaMoon}
+      <Image
+        source={MEMORIA_CHARACTER_IMAGE}
+        style={styles.memoriaCharacterImage}
+        resizeMode="contain"
       />
-      <MaterialCommunityIcons
-        name="star-four-points"
-        size={25}
-        color="#8E7BFF"
-        style={styles.memoriaStarTop}
-      />
-      <MaterialCommunityIcons
-        name="star-four-points"
-        size={20}
-        color="#A79BFF"
-        style={styles.memoriaStarBottom}
-      />
-      <View style={[styles.memoriaSparkDot, styles.memoriaSparkDotLeft]} />
-      <View style={[styles.memoriaSparkDot, styles.memoriaSparkDotRight]} />
-      <View style={styles.memoriaHood} />
-      <View style={styles.memoriaFace}>
-        <View style={styles.memoriaEyeRow}>
-          <View style={styles.memoriaEye} />
-          <View style={styles.memoriaEye} />
-        </View>
-        <View style={styles.memoriaMouth} />
-      </View>
-      <View style={styles.memoriaBackCard}>
-        <View style={styles.memoriaBackLine} />
-        <View style={[styles.memoriaBackLine, styles.memoriaBackLineShort]} />
-      </View>
-      <View style={styles.memoriaFrontCard}>
-        <MaterialCommunityIcons name="star" size={58} color="#FFFFFF" />
-      </View>
-      <View style={[styles.memoriaHand, styles.memoriaHandLeft]} />
-      <View style={[styles.memoriaHand, styles.memoriaHandRight]} />
     </View>
   );
 }
@@ -6514,7 +6485,11 @@ function LaunchScreen({
               style={styles.launchGoogleButton}
             >
               <View style={styles.launchGoogleIconCircle}>
-                <MaterialCommunityIcons name="google" size={31} color="#4285F4" />
+                <Image
+                  source={GOOGLE_G_ICON}
+                  style={styles.launchGoogleIconImage}
+                  resizeMode="contain"
+                />
               </View>
               <Text style={styles.launchGoogleButtonText}>
                 {authBusy ? t("about.authConnecting") : googleLabel}
@@ -10122,6 +10097,10 @@ const createStyles = (theme) => StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#FFFFFF",
   },
+  launchGoogleIconImage: {
+    width: 31,
+    height: 31,
+  },
   launchGoogleButtonText: {
     fontSize: 17,
     lineHeight: 22,
@@ -10173,6 +10152,10 @@ const createStyles = (theme) => StyleSheet.create({
   memoriaArtworkLaunch: {
     width: 318,
     height: 318,
+  },
+  memoriaCharacterImage: {
+    width: "100%",
+    height: "100%",
   },
   memoriaOrbitRing: {
     position: "absolute",
