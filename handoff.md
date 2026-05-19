@@ -12,8 +12,8 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 
 - 작업 폴더: `D:\github\APP\memorize_app2`
 - 기본 작업 브랜치: `develop`
-- 현재 최신 기능 커밋: `cfd951f fix: restore saving and add bulk delete`
-- 현재 `develop`, `origin/develop`은 `cfd951f`를 가리킨다.
+- 현재 최신 기능 커밋: `c6ec4e9 feat: refine import examples and bulk selection`
+- 현재 `develop`, `origin/develop`은 `c6ec4e9` 기반이며, 이 문서 갱신 커밋이 추가될 예정이다.
 - 현재 `main`, `origin/main`은 이전 릴리스 커밋 `03f7898`에 머물러 있다.
 - 현재 추적되지 않은 파일: `want.png`
   - 사용자가 둔 참고 파일로 보인다.
@@ -21,21 +21,21 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 
 최근 릴리스 빌드:
 
-- EAS build ID: `cfa0066e-5ffa-47e7-b88d-47fb1aa39a6e`
+- EAS build ID: `6539f525-e33c-44f0-858d-a8cea15fb13a`
 - Profile: `production`
 - Distribution: `store`
-- App versionName: `1.0.2`
-- Android versionCode: `9`
-- Commit: `cfd951f8ce58f87e7314dcc6c8e29fee90b4de0b`
-- AAB: https://expo.dev/artifacts/eas/rD2FNeHu4EaUXitKJ9ZYTq.aab
-- Logs: https://expo.dev/accounts/zinnn/projects/memoria/builds/cfa0066e-5ffa-47e7-b88d-47fb1aa39a6e
+- App versionName: `1.0.3`
+- Android versionCode: `10`
+- Commit: `c6ec4e9c9b7dfb859977a8df754d0082e90cbd66`
+- AAB: https://expo.dev/artifacts/eas/duZy4o5t6LMbyXqq5iiqTm.aab
+- Logs: https://expo.dev/accounts/zinnn/projects/memoria/builds/6539f525-e33c-44f0-858d-a8cea15fb13a
 
 중요한 배경:
 
-- 이전 AAB는 `versionCode 7`이었고 Play Console에서 이미 사용된 코드라고 나왔다.
+- 이전 AAB는 `versionCode 9`였고, 이번 내부 테스트용 수정 빌드에서 `10`으로 증가했다.
 - Google Play에서 실제로 막는 것은 `versionName`이 아니라 정수 `versionCode`다.
-- 새 빌드는 EAS production의 `autoIncrement`로 `8 -> 9` 증가했다.
-- `versionName`은 이번 내부 테스트용 버그 수정 빌드에서 `1.0.2`로 올렸다.
+- 새 빌드는 EAS production의 `autoIncrement`로 `9 -> 10` 증가했다.
+- `versionName`은 이번 내부 테스트용 기능 수정 빌드에서 `1.0.3`으로 올렸다.
 
 ## 3. 기술 스택
 
@@ -104,7 +104,7 @@ npx eas-cli build:list --platform android --limit 1 --json
 ### `package.json`
 
 - `name`: `memorize_app2`
-- `version`: `1.0.2`
+- `version`: `1.0.3`
 - `main`: `node_modules/expo/AppEntry.js`
 - `private`: `true`
 
@@ -112,7 +112,7 @@ npx eas-cli build:list --platform android --limit 1 --json
 
 - Expo app name: `MEMORIA`
 - slug: `memoria`
-- version: `1.0.2`
+- version: `1.0.3`
 - scheme: `memoria`
 - owner: `zinnn`
 - EAS project id: `6caf9ed8-f402-4743-8222-5e05fcedb0f2`
@@ -214,7 +214,7 @@ OAuth redirect:
 - 캐릭터 주변 점선 원은 앱에서 dashed border로 렌더링한다.
 - 캐릭터/점선/버튼 배치는 `react-native-safe-area-context`와 `createIntroLayoutMetrics`로 화면 크기와 safe area를 고려한다.
 - `MEMORIA` 텍스트는 이미지 안 글자가 아니라 네이티브 `Text`로 렌더링해 글자 깨짐을 줄인다.
-- 시작 화면 우측 상단에는 아주 작게 `v1.0.2` 같은 앱 버전을 표시한다.
+- 시작 화면 우측 상단에는 아주 작게 `v1.0.3` 같은 앱 버전을 표시한다.
 - 하단 Google/게스트 버튼은 Android 내비게이션 바와 겹치지 않도록 safe area를 고려한다.
 
 `App.js` 상단 자산 연결:
@@ -553,6 +553,16 @@ npx eas-cli build --platform android --profile production --non-interactive --no
   - EAS build ID: `cfa0066e-5ffa-47e7-b88d-47fb1aa39a6e`
   - AAB: https://expo.dev/artifacts/eas/rD2FNeHu4EaUXitKJ9ZYTq.aab
   - Commit: `cfd951f8ce58f87e7314dcc6c8e29fee90b4de0b`
+- 2026-05-20 파일 가져오기 예시/보관함 선택 흐름 개선
+  - 파일 가져오기 안내 미리보기에서 하단 형식 힌트 문구를 제거했다.
+  - 예시 텍스트를 추상 placeholder가 아니라 실제 카드 예시 `안녕 / Hello`, `해 / Sun`으로 교체했다.
+  - 예시 파일명 표기에서 `/` 구분자를 없애고 `cards-example.txt`, `cards-example.xls`를 간격으로 나눠 보여준다.
+  - 보관함은 기본 상태에서 체크박스를 보이지 않게 하고, `여러개 선택` 버튼을 누른 뒤에만 다중 선택 UI가 열린다.
+  - 선택 모드에서는 전체 선택, 선택 삭제, 취소, 선택 카드 폴더 이동을 지원한다.
+- production AAB `1.0.3 / versionCode 10` 생성
+  - EAS build ID: `6539f525-e33c-44f0-858d-a8cea15fb13a`
+  - AAB: https://expo.dev/artifacts/eas/duZy4o5t6LMbyXqq5iiqTm.aab
+  - Commit: `c6ec4e9c9b7dfb859977a8df754d0082e90cbd66`
 
 ## 21. 다음 작업자가 꼭 기억할 것
 
