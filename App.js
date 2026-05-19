@@ -65,7 +65,8 @@ import {
 } from "./src/i18n";
 
 const GOOGLE_G_ICON = require("./assets/google-g.png");
-const MEMORIA_CHARACTER_IMAGE = require("./assets/memoria-character.png");
+const MEMORIA_CHARACTER_IMAGE = require("./assets/ghost_character.png");
+const MEMORIA_SPLASH_PREVIEW_IMAGE = require("./assets/splash_full_preview.png");
 
 WebBrowser.maybeCompleteAuthSession();
 const APP_VERSION = "1.0.0";
@@ -453,7 +454,7 @@ const LIGHT_THEME = {
   tabBarBg: "rgba(255, 255, 255, 0.98)",
   tabText: "#7280A1",
   iconContrast: "#FFFFFF",
-  launchBg: "#F5F7FB",
+  launchBg: "#F7F5FF",
 };
 
 const getQuizModeConfig = (mode) =>
@@ -5898,25 +5899,11 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
   return (
     <View style={styles.tutorialOverlay}>
       <View pointerEvents="none" style={styles.tutorialIntroDecor}>
-        <View style={styles.backgroundOrbPrimary} />
-        <View style={styles.backgroundOrbSecondary} />
-        {STAR_FIELD.map((star, index) => (
-          <View
-            key={`tutorial-star-${index}`}
-            style={[
-              styles.star,
-              {
-                top: star.top,
-                left: star.left,
-                right: star.right,
-                width: star.size,
-                height: star.size,
-                borderRadius: star.size / 2,
-                opacity: star.opacity,
-              },
-            ]}
-          />
-        ))}
+        <Image
+          source={MEMORIA_SPLASH_PREVIEW_IMAGE}
+          style={styles.memoriaPreviewImage}
+          resizeMode="cover"
+        />
       </View>
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -5926,7 +5913,6 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
         ]}
       >
         <View style={styles.tutorialBrandBlock}>
-          <MemoriaArtwork styles={styles} />
           <Text style={styles.tutorialBrandTitle}>M E M O R I A</Text>
         </View>
 
@@ -6447,70 +6433,57 @@ function LaunchScreen({
   return (
     <Animated.View style={[styles.launchScreen, { opacity }]}>
       <View pointerEvents="none" style={styles.launchDecorLayer}>
-        <View style={[styles.launchDecorOrb, styles.launchDecorOrbTop]} />
-        <View style={[styles.launchDecorOrb, styles.launchDecorOrbBottom]} />
-        <View style={[styles.launchDecorDot, styles.launchDecorDotTopLeft]} />
-        <View style={[styles.launchDecorDot, styles.launchDecorDotTopMid]} />
-        <View style={[styles.launchDecorDot, styles.launchDecorDotBottomLeft]} />
-        <MaterialCommunityIcons
-          name="star-four-points"
-          size={26}
-          color={theme.accent}
-          style={styles.launchDecorStarRight}
-        />
-        <MaterialCommunityIcons
-          name="moon-waning-crescent"
-          size={28}
-          color={theme.accent}
-          style={styles.launchDecorMoonLeft}
+        <Image
+          source={MEMORIA_SPLASH_PREVIEW_IMAGE}
+          style={styles.memoriaPreviewImage}
+          resizeMode="cover"
         />
       </View>
 
       <Animated.View style={[styles.launchContent, { transform: [{ scale }] }]}>
-        <View style={styles.launchBrandBlock}>
-          <MemoriaArtwork styles={styles} variant="launch" />
+        <View style={styles.launchBottomStack}>
           <Text style={styles.launchTitle}>M E M O R I A</Text>
-        </View>
 
-        <View style={styles.launchActionGroup}>
-          <Pressable
-            disabled={googleDisabled}
-            onPress={onGooglePress}
-            style={({ pressed }) => [styles.launchGoogleButtonShell, pressed && styles.pressed]}
-          >
-            <LinearGradient
-              colors={googleDisabled ? ["#C9D0E3", "#BCC4DA"] : ["#9F8FFF", "#8572F4"]}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              style={styles.launchGoogleButton}
+          <View style={styles.launchActionGroup}>
+            <Pressable
+              disabled={googleDisabled}
+              onPress={onGooglePress}
+              style={({ pressed }) => [styles.launchGoogleButtonShell, pressed && styles.pressed]}
             >
-              <View style={styles.launchGoogleIconCircle}>
-                <Image
-                  source={GOOGLE_G_ICON}
-                  style={styles.launchGoogleIconImage}
-                  resizeMode="contain"
-                />
-              </View>
-              <Text style={styles.launchGoogleButtonText}>
-                {authBusy ? t("about.authConnecting") : googleLabel}
-              </Text>
-            </LinearGradient>
-          </Pressable>
+              <LinearGradient
+                colors={googleDisabled ? ["#C9D0E3", "#BCC4DA"] : ["#9F8FFF", "#8572F4"]}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
+                style={styles.launchGoogleButton}
+              >
+                <View style={styles.launchGoogleIconCircle}>
+                  <Image
+                    source={GOOGLE_G_ICON}
+                    style={styles.launchGoogleIconImage}
+                    resizeMode="contain"
+                  />
+                </View>
+                <Text style={styles.launchGoogleButtonText}>
+                  {authBusy ? t("about.authConnecting") : googleLabel}
+                </Text>
+              </LinearGradient>
+            </Pressable>
 
-          <Pressable
-            disabled={!authReady}
-            onPress={onGuestPress}
-            style={({ pressed }) => [
-              styles.launchGuestButton,
-              !authReady && styles.launchGuestButtonDisabled,
-              pressed && styles.pressed,
-            ]}
-          >
-            <View style={styles.launchGuestIconWrap}>
-              <MaterialCommunityIcons name="account-star" size={30} color={theme.accent} />
-            </View>
-            <Text style={styles.launchGuestButtonText}>{t("launch.guestStart")}</Text>
-          </Pressable>
+            <Pressable
+              disabled={!authReady}
+              onPress={onGuestPress}
+              style={({ pressed }) => [
+                styles.launchGuestButton,
+                !authReady && styles.launchGuestButtonDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <View style={styles.launchGuestIconWrap}>
+                <MaterialCommunityIcons name="account-star" size={30} color={theme.accent} />
+              </View>
+              <Text style={styles.launchGuestButtonText}>{t("launch.guestStart")}</Text>
+            </Pressable>
+          </View>
         </View>
       </Animated.View>
     </Animated.View>
@@ -9999,6 +9972,11 @@ const createStyles = (theme) => StyleSheet.create({
   launchDecorLayer: {
     ...StyleSheet.absoluteFillObject,
   },
+  memoriaPreviewImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: "100%",
+    height: "100%",
+  },
   launchDecorOrb: {
     position: "absolute",
     borderRadius: 999,
@@ -10049,21 +10027,18 @@ const createStyles = (theme) => StyleSheet.create({
     opacity: 0.82,
   },
   launchContent: {
-    width: "100%",
-    maxWidth: 560,
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-end",
     paddingHorizontal: 20,
     paddingTop: Platform.OS === "android" ? 42 : 58,
-    paddingBottom: Platform.OS === "android" ? 64 : 72,
+    paddingBottom: Platform.OS === "android" ? 42 : 54,
   },
-  launchBrandBlock: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
+  launchBottomStack: {
     width: "100%",
-    gap: 14,
+    maxWidth: 560,
+    alignItems: "center",
+    gap: 18,
   },
   launchActionGroup: {
     width: "100%",
@@ -10096,10 +10071,11 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#FFFFFF",
+    overflow: "hidden",
   },
   launchGoogleIconImage: {
-    width: 31,
-    height: 31,
+    width: 30,
+    height: 30,
   },
   launchGoogleButtonText: {
     fontSize: 17,
@@ -10358,16 +10334,15 @@ const createStyles = (theme) => StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 20,
     paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) + 38 : 58,
-    paddingBottom: Platform.OS === "android" ? 38 : 52,
-    justifyContent: "center",
+    paddingBottom: Platform.OS === "android" ? 36 : 50,
+    justifyContent: "flex-end",
   },
   tutorialBrandBlock: {
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 30,
+    marginBottom: 18,
   },
   tutorialBrandTitle: {
-    marginTop: 12,
     fontSize: 28,
     lineHeight: 40,
     fontWeight: "900",

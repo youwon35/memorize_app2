@@ -41,7 +41,7 @@ const TRANSLATIONS = {
       googleStart: "Google로 시작하기",
       googleContinue: "Google 계정으로 계속하기",
       googleUnavailable: "Google 로그인 설정 필요",
-      guestStart: "게스트로 둘러보기",
+      guestStart: "게스트로 시작하기",
     },
     saveModes: {
       single: "한 장씩",
@@ -575,7 +575,7 @@ const TRANSLATIONS = {
       googleStart: "Start with Google",
       googleContinue: "Continue with Google",
       googleUnavailable: "Google setup required",
-      guestStart: "Browse as guest",
+      guestStart: "Start as guest",
     },
     saveModes: {
       single: "One by one",
@@ -1109,7 +1109,7 @@ const TRANSLATIONS = {
       googleStart: "Google で始める",
       googleContinue: "Google で続ける",
       googleUnavailable: "Google 設定が必要",
-      guestStart: "ゲストで見る",
+      guestStart: "ゲストで始める",
     },
     saveModes: {
       single: "1枚ずつ",

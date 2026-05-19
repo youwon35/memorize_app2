@@ -8,9 +8,9 @@
     "userInterfaceStyle": "light",
     "icon": "./app-icon.png",
     "splash": {
-      "image": "./assets/adaptive-icon.png",
+      "image": "./assets/splash_full_preview.png",
       "resizeMode": "contain",
-      "backgroundColor": "#F5F7FB"
+      "backgroundColor": "#F7F5FF"
     },
     "plugins": [
       [
@@ -31,7 +31,7 @@
       "package": "com.youwon35.memoria",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#DED7FF"
+        "backgroundColor": "#F7F5FF"
       }
     },
     "ios": {
