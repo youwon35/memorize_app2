@@ -2473,7 +2473,7 @@ function AppContent() {
   };
 
   const saveEntryBatch = async (entries, options = {}) => {
-    const { uniqueEntries, skippedDuplicates } = prepareEntryBatch(entries, options);
+    const { uniqueEntries, skippedDuplicates, existingPairs } = prepareEntryBatch(entries, options);
 
     if (!uniqueEntries.length) {
       return { savedCount: 0, skippedDuplicates, cloudSaved: false, savedPairs: [] };
@@ -2557,6 +2557,7 @@ function AppContent() {
 
     return {
       targetFolderId,
+      existingPairs,
       uniqueEntries,
       skippedDuplicates,
     };
@@ -3405,6 +3406,74 @@ function AppContent() {
     }
 
     await savePairs(pairs.filter((item) => item.id !== pair.id));
+    setSelectedManagePairIds((currentIds) => currentIds.filter((id) => id !== pair.id));
+  };
+
+  const deleteSelectedManagePairs = async () => {
+    const selectedIds = new Set(selectedManagePairIds);
+    const selectedPairs = pairsRef.current.filter((pair) => selectedIds.has(pair.id));
+
+    if (!selectedPairs.length) {
+      Alert.alert(t("manage.deleteSelectedNoneTitle"), t("manage.deleteSelectedNoneBody"));
+      return;
+    }
+
+    const cloudPairIds = selectedPairs
+      .filter((pair) => pair.source === "cloud")
+      .map((pair) => pair.id);
+
+    if (session?.user?.id && supabase && cloudPairIds.length) {
+      const response = await supabase
+        .from("memory_pairs")
+        .delete()
+        .in("id", cloudPairIds)
+        .eq("user_id", session.user.id);
+
+      if (response.error) {
+        Alert.alert(t("manage.deleteFail"), t("common.retryLater"));
+        return;
+      }
+    }
+
+    await savePairs(pairsRef.current.filter((pair) => !selectedIds.has(pair.id)));
+    setSelectedManagePairIds([]);
+    setOpenManageSwipeId(null);
+
+    if (editingId && selectedIds.has(editingId)) {
+      setEditingId(null);
+      setEditingLeft("");
+      setEditingRight("");
+      setEditingFolderId(ROOT_FOLDER_ID);
+    }
+
+    Alert.alert(
+      t("manage.deleteSelectedDoneTitle"),
+      t("manage.deleteSelectedDoneBody", { count: selectedPairs.length })
+    );
+  };
+
+  const confirmDeleteSelectedManagePairs = () => {
+    const selectedCount = selectedManagePairIds.length;
+
+    if (!selectedCount) {
+      Alert.alert(t("manage.deleteSelectedNoneTitle"), t("manage.deleteSelectedNoneBody"));
+      return;
+    }
+
+    Alert.alert(
+      t("manage.deleteSelectedTitle"),
+      t("manage.deleteSelectedBody", { count: selectedCount }),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("manage.deleteSelected"),
+          style: "destructive",
+          onPress: () => {
+            void deleteSelectedManagePairs();
+          },
+        },
+      ]
+    );
   };
 
   const signOut = async () => {
@@ -5469,6 +5538,7 @@ function AppContent() {
 
   const renderManagePairCard = (pair, index) => {
     const targetProps = index === 0 ? tutorialTargetProps("manage-first-card") : {};
+    const selected = selectedManagePairSet.has(pair.id);
     const beginEdit = () => {
       closeManageSwipe(pair.id);
       setEditingId(pair.id);
@@ -5580,6 +5650,24 @@ function AppContent() {
         >
           <View style={[styles.manageCard, styles.manageSwipeCard, styles.manageListCard, { width: manageSwipeCardWidth }]}>
             <View style={styles.managePairInlineRow}>
+              <Pressable
+                accessibilityLabel={selected ? t("manage.unselectCard") : t("manage.selectCard")}
+                onPress={() => {
+                  closeManageSwipe(pair.id);
+                  toggleManagePairSelection(pair.id);
+                }}
+                style={({ pressed }) => [
+                  styles.manageSelectButton,
+                  selected && styles.manageSelectButtonActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name={selected ? "checkbox-marked-circle" : "checkbox-blank-circle-outline"}
+                  size={17}
+                  color={selected ? theme.accentText : theme.textSecondary}
+                />
+              </Pressable>
               <View style={styles.managePairColumn}>
                 <View style={styles.manageTextBlock}>
                   <Text style={styles.managePairText} numberOfLines={1} ellipsizeMode="tail">
@@ -5697,7 +5785,50 @@ function AppContent() {
               </View>
             </View>
             <View style={styles.manageListDivider} />
-            {sortedManagePairs.map(renderManagePairCard)}
+            <View style={styles.manageBulkBar}>
+              <View style={styles.manageBulkCopy}>
+                <Text style={styles.manageBulkTitle}>
+                  {t("manage.selectedCount", { count: selectedManagePairIds.length })}
+                </Text>
+                <Text style={styles.manageBulkBody}>{t("manage.bulkSelectHint")}</Text>
+              </View>
+              <View style={styles.manageBulkActions}>
+                <Pressable
+                  onPress={selectAllVisibleManagePairs}
+                  style={({ pressed }) => [styles.manageBulkButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.manageBulkButtonText}>{t("manage.selectAllVisible")}</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setSelectedManagePairIds([])}
+                  style={({ pressed }) => [styles.manageBulkButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.manageBulkButtonText}>{t("manage.clearSelection")}</Text>
+                </Pressable>
+                <Pressable
+                  disabled={!selectedManagePairIds.length}
+                  onPress={confirmDeleteSelectedManagePairs}
+                  style={({ pressed }) => [
+                    styles.manageBulkButton,
+                    styles.manageBulkDangerButton,
+                    !selectedManagePairIds.length && styles.manageBulkButtonDisabled,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.manageBulkButtonText,
+                      styles.manageBulkDangerText,
+                      !selectedManagePairIds.length && styles.manageBulkButtonTextDisabled,
+                    ]}
+                  >
+                    {t("manage.deleteSelected")}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+            <View style={styles.manageListDivider} />
+            {visibleManagePairs.map(renderManagePairCard)}
           </View>
         ) : (
           <EmptyPanel
@@ -8369,6 +8500,65 @@ const createStyles = (theme) => StyleSheet.create({
   manageListDivider: {
     height: 1,
     backgroundColor: theme.surfaceBorderSoft,
+  },
+  manageBulkBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingHorizontal: 4,
+    paddingVertical: 10,
+  },
+  manageBulkCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  manageBulkTitle: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  manageBulkBody: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: theme.textSecondary,
+  },
+  manageBulkActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: 6,
+  },
+  manageBulkButton: {
+    minHeight: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 9,
+    borderRadius: 999,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  manageBulkDangerButton: {
+    backgroundColor: theme.dangerBgSoft,
+    borderColor: theme.danger,
+  },
+  manageBulkButtonDisabled: {
+    opacity: 0.45,
+  },
+  manageBulkButtonText: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "900",
+    color: theme.textSecondary,
+  },
+  manageBulkDangerText: {
+    color: theme.danger,
+  },
+  manageBulkButtonTextDisabled: {
+    color: theme.textPlaceholder,
   },
   panelHeader: {
     flexDirection: "row",
