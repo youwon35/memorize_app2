@@ -6374,7 +6374,12 @@ function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) 
 function MemoriaLaunchArtwork({ styles, size }) {
   return (
     <View style={[styles.memoriaLaunchArtwork, { width: size, height: size }]}>
-      <View style={styles.memoriaLaunchOrbitRing} />
+      <View
+        style={[
+          styles.memoriaLaunchOrbitRing,
+          { transform: [{ translateY: -Math.round(size * 0.035) }] },
+        ]}
+      />
       <Image
         source={MEMORIA_CHARACTER_IMAGE}
         style={styles.memoriaLaunchCharacterImage}
