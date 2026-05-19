@@ -5902,7 +5902,7 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
         <Image
           source={MEMORIA_SPLASH_PREVIEW_IMAGE}
           style={styles.memoriaPreviewImage}
-          resizeMode="cover"
+          resizeMode="contain"
         />
       </View>
       <ScrollView
@@ -6436,7 +6436,7 @@ function LaunchScreen({
         <Image
           source={MEMORIA_SPLASH_PREVIEW_IMAGE}
           style={styles.memoriaPreviewImage}
-          resizeMode="cover"
+          resizeMode="contain"
         />
       </View>
 
@@ -10032,7 +10032,7 @@ const createStyles = (theme) => StyleSheet.create({
     justifyContent: "flex-end",
     paddingHorizontal: 20,
     paddingTop: Platform.OS === "android" ? 42 : 58,
-    paddingBottom: Platform.OS === "android" ? 42 : 54,
+    paddingBottom: Platform.OS === "android" ? 108 : 78,
   },
   launchBottomStack: {
     width: "100%",
@@ -10325,7 +10325,7 @@ const createStyles = (theme) => StyleSheet.create({
   },
   tutorialOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: theme.appBg,
+    backgroundColor: theme.launchBg,
   },
   tutorialIntroDecor: {
     ...StyleSheet.absoluteFillObject,
@@ -10334,7 +10334,7 @@ const createStyles = (theme) => StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 20,
     paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) + 38 : 58,
-    paddingBottom: Platform.OS === "android" ? 36 : 50,
+    paddingBottom: Platform.OS === "android" ? 104 : 76,
     justifyContent: "flex-end",
   },
   tutorialBrandBlock: {
