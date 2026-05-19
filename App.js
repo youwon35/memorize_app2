@@ -1125,6 +1125,21 @@ function AppContent() {
     ],
     [t]
   );
+  const importExcelPreviewRows = useMemo(
+    () => [
+      {
+        no: "1",
+        front: t("save.textImportExampleFrontOne"),
+        back: t("save.textImportExampleBackOne"),
+      },
+      {
+        no: "2",
+        front: t("save.textImportExampleFrontTwo"),
+        back: t("save.textImportExampleBackTwo"),
+      },
+    ],
+    [t]
+  );
   const todayKey = getLocalDayKey(new Date());
   const todaySessions = useMemo(
     () => studyStats.sessions.filter((item) => getLocalDayKey(item.completedAt) === todayKey),
@@ -3956,24 +3971,56 @@ function AppContent() {
                   <View style={styles.importPreviewDot} />
                   <View style={styles.importPreviewDot} />
                 </View>
-                <Text style={styles.importPreviewFileName}>cards-example.txt</Text>
+                <Text numberOfLines={1} style={styles.importPreviewFileName}>
+                  cards-example.txt / cards-example.xls
+                </Text>
               </View>
               <View style={styles.importPreviewSheet}>
-                {importPreviewLines.map((line) => (
-                  <View key={`${line.no}-${line.text || "blank"}`} style={styles.importPreviewLine}>
-                    <Text style={styles.importPreviewLineNo}>{line.no}</Text>
-                    <Text
-                      style={[
-                        styles.importPreviewLineText,
-                        line.tone === "front" && styles.importPreviewLineFront,
-                        line.tone === "back" && styles.importPreviewLineBack,
-                        line.tone === "blank" && styles.importPreviewLineBlank,
-                      ]}
-                    >
-                      {line.text || " "}
+                <View style={styles.importTextPreviewPane}>
+                  {importPreviewLines.map((line) => (
+                    <View key={`${line.no}-${line.text || "blank"}`} style={styles.importPreviewLine}>
+                      <Text style={styles.importPreviewLineNo}>{line.no}</Text>
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.importPreviewLineText,
+                          line.tone === "front" && styles.importPreviewLineFront,
+                          line.tone === "back" && styles.importPreviewLineBack,
+                          line.tone === "blank" && styles.importPreviewLineBlank,
+                        ]}
+                      >
+                        {line.text || " "}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.importPreviewSheetDivider} />
+                <View style={styles.importExcelPreviewPane}>
+                  <View style={styles.importExcelHeaderRow}>
+                    <Text numberOfLines={1} style={styles.importExcelHeaderCell}>
+                      {t("save.textImportExcelFrontHeader")}
+                    </Text>
+                    <Text numberOfLines={1} style={styles.importExcelHeaderCell}>
+                      {t("save.textImportExcelBackHeader")}
                     </Text>
                   </View>
-                ))}
+                  {importExcelPreviewRows.map((row) => (
+                    <View key={`${row.no}-${row.front}-${row.back}`} style={styles.importExcelRow}>
+                      <Text
+                        numberOfLines={1}
+                        style={[styles.importExcelCell, styles.importExcelFrontCell]}
+                      >
+                        {row.front}
+                      </Text>
+                      <Text
+                        numberOfLines={1}
+                        style={[styles.importExcelCell, styles.importExcelBackCell]}
+                      >
+                        {row.back}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
               </View>
               <View style={styles.importPreviewFooter}>
                 <MaterialCommunityIcons name="cards-outline" size={15} color={theme.accent} />
@@ -8078,17 +8125,73 @@ const createStyles = (theme) => StyleSheet.create({
     opacity: 0.7,
   },
   importPreviewFileName: {
+    flex: 1,
     fontSize: 12,
     fontWeight: "700",
     color: theme.textMuted,
   },
   importPreviewSheet: {
+    flexDirection: "row",
+    alignItems: "stretch",
     gap: 6,
     padding: 12,
     borderRadius: 16,
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
+  },
+  importTextPreviewPane: {
+    flex: 1,
+    gap: 6,
+    minWidth: 0,
+  },
+  importPreviewSheetDivider: {
+    width: 1,
+    borderRadius: 1,
+    backgroundColor: theme.surfaceBorderSoft,
+  },
+  importExcelPreviewPane: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: 10,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  importExcelHeaderRow: {
+    flexDirection: "row",
+    backgroundColor: theme.accentSoft,
+  },
+  importExcelRow: {
+    flexDirection: "row",
+    borderTopWidth: 1,
+    borderTopColor: theme.surfaceBorderSoft,
+  },
+  importExcelHeaderCell: {
+    flex: 1,
+    paddingHorizontal: 5,
+    paddingVertical: 5,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: "900",
+    textAlign: "center",
+    color: theme.accent,
+  },
+  importExcelCell: {
+    flex: 1,
+    paddingHorizontal: 5,
+    paddingVertical: 6,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "800",
+  },
+  importExcelFrontCell: {
+    color: theme.textPrimary,
+    borderRightWidth: 1,
+    borderRightColor: theme.surfaceBorderSoft,
+  },
+  importExcelBackCell: {
+    color: theme.accent,
   },
   importPreviewLine: {
     flexDirection: "row",
