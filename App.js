@@ -70,7 +70,7 @@ const MEMORIA_CHARACTER_IMAGE = require("./assets/ghost_character.png");
 const MEMORIA_BACKGROUND_IMAGE = require("./assets/background_decor.png");
 
 WebBrowser.maybeCompleteAuthSession();
-const APP_VERSION = "1.0.0";
+const APP_VERSION = require("./app.json").expo.version;
 const STORAGE_KEY = "@memoria/cards";
 const FOLDERS_STORAGE_KEY = "@memoria/folders";
 const ROOT_FOLDER_ID = "root";
@@ -1264,8 +1264,8 @@ function AppContent() {
 
       setAdminMetrics(mapAdminDashboardMetrics(metricRecord));
       setAdminSupportRequests((inquiriesResponse.data ?? []).map(mapSupportInquiryRecord));
-    } catch (error) {
-      setAdminNotice(error?.message || t("about.adminLoadFail"));
+    } catch {
+      setAdminNotice(t("about.adminLoadFail"));
     } finally {
       setAdminLoading(false);
     }
@@ -1814,9 +1814,9 @@ function AppContent() {
           ]);
           setTranslatedNote("notes.synced");
         }
-      } catch (error) {
+      } catch {
         if (active) {
-          setNoteState({ raw: error?.message || t("common.retryLater") });
+          setTranslatedNote("notes.cloudLocalOnly");
         }
       } finally {
         if (active) {
@@ -1970,7 +1970,7 @@ function AppContent() {
     cloudUserStateSyncTimerRef.current = setTimeout(() => {
       void persistCloudUserState(nextStudyStats, nextDailyGoal).catch((error) => {
         if (!isCloudUserStateSchemaError(error)) {
-          setNoteState({ raw: error?.message || t("common.retryLater") });
+          setTranslatedNote("notes.cloudLocalOnly");
         }
       });
     }, 900);
@@ -2055,7 +2055,7 @@ function AppContent() {
         nextFolder = mapFolderRecord(response.data);
       } catch (error) {
         if (!isCloudFolderSchemaError(error)) {
-          Alert.alert(t("folders.createFailTitle"), error?.message || t("common.retryLater"));
+          Alert.alert(t("folders.createFailTitle"), t("common.retryLater"));
           return;
         }
 
@@ -2186,7 +2186,7 @@ function AppContent() {
         renamedFolder = mapFolderRecord(response.data);
       } catch (error) {
         if (!isCloudFolderSchemaError(error)) {
-          Alert.alert(t("folders.renameFailTitle"), error?.message || t("common.retryLater"));
+          Alert.alert(t("folders.renameFailTitle"), t("common.retryLater"));
           return;
         }
 
@@ -2254,7 +2254,7 @@ function AppContent() {
           }
         } catch (error) {
           if (!isCloudFolderSchemaError(error)) {
-            Alert.alert(t("folders.deleteFailTitle"), error?.message || t("common.retryLater"));
+            Alert.alert(t("folders.deleteFailTitle"), t("common.retryLater"));
             return;
           }
 
@@ -2382,7 +2382,7 @@ function AppContent() {
         }
       } catch (error) {
         if (!isCloudFolderSchemaError(error)) {
-          Alert.alert(t("folders.bulkMoveFailTitle"), error?.message || t("common.retryLater"));
+          Alert.alert(t("folders.bulkMoveFailTitle"), t("common.retryLater"));
           return;
         }
 
@@ -2678,10 +2678,10 @@ function AppContent() {
         uniqueEntries: preview.uniqueEntries,
         skippedDuplicates: preview.skippedDuplicates,
       });
-    } catch (error) {
+    } catch {
       Alert.alert(
         t("alerts.importFailTitle"),
-        error?.message || t("alerts.importFailBody")
+        t("alerts.importFailBody")
       );
     } finally {
       setImporting(false);
@@ -2736,10 +2736,10 @@ function AppContent() {
       }
 
       Alert.alert(t("alerts.importDoneTitle"), messages.join(" "));
-    } catch (error) {
+    } catch {
       Alert.alert(
         t("alerts.importFailTitle"),
-        error?.message || t("alerts.importFailBody")
+        t("alerts.importFailBody")
       );
     } finally {
       setImportPreviewSaving(false);
@@ -2937,8 +2937,8 @@ function AppContent() {
           ? t("about.supportSavedCloud")
           : t("about.supportSavedLocal")
       );
-    } catch (error) {
-      setSupportNotice(error?.message || t("about.supportFail"));
+    } catch {
+      setSupportNotice(t("about.supportFail"));
     } finally {
       setSupportSending(false);
     }
@@ -3022,8 +3022,8 @@ function AppContent() {
         params: {},
       });
       Alert.alert(t("about.dataDeletionDoneTitle"), t("about.dataDeletionDoneBody"));
-    } catch (error) {
-      Alert.alert(t("about.dataDeletionFailTitle"), error?.message || t("common.retryLater"));
+    } catch {
+      Alert.alert(t("about.dataDeletionFailTitle"), t("common.retryLater"));
     } finally {
       setDataDeleting(false);
     }
@@ -3066,8 +3066,8 @@ function AppContent() {
         openOnly: adminOnlyUnresolved,
         preserveNotice: true,
       });
-    } catch (error) {
-      setAdminNotice(error?.message || t("about.adminStateChangeFail"));
+    } catch {
+      setAdminNotice(t("about.adminStateChangeFail"));
     } finally {
       setAdminUpdatingId(null);
     }
@@ -3368,7 +3368,7 @@ function AppContent() {
 
       if (response.error) {
         if (!isCloudFolderSchemaError(response.error)) {
-          Alert.alert(t("manage.editFail"), response.error.message);
+          Alert.alert(t("manage.editFail"), t("common.retryLater"));
           return;
         }
 
@@ -3399,7 +3399,7 @@ function AppContent() {
         .eq("user_id", session.user.id);
 
       if (response.error) {
-        Alert.alert(t("manage.deleteFail"), response.error.message);
+        Alert.alert(t("manage.deleteFail"), t("common.retryLater"));
         return;
       }
     }
@@ -3420,8 +3420,8 @@ function AppContent() {
       if (error) {
         throw error;
       }
-    } catch (error) {
-      Alert.alert(t("about.signOutFailTitle"), error?.message || t("common.retryLater"));
+    } catch {
+      Alert.alert(t("about.signOutFailTitle"), t("common.retryLater"));
     } finally {
       setAuthBusy(false);
     }
@@ -3473,8 +3473,8 @@ function AppContent() {
       }
 
       return false;
-    } catch (error) {
-      Alert.alert(t("about.authFailTitle"), error?.message || t("about.authFailBody"));
+    } catch {
+      Alert.alert(t("about.authFailTitle"), t("about.authFailBody"));
       return false;
     } finally {
       setAuthBusy(false);
@@ -6349,6 +6349,7 @@ function AppContent() {
           styles={styles}
           theme={theme}
           t={t}
+          version={APP_VERSION}
           layoutMetrics={launchLayoutMetrics}
           authBusy={authBusy}
           authReady={authReady && storageReady}
@@ -6973,6 +6974,7 @@ function LaunchScreen({
   styles,
   theme,
   t,
+  version,
   layoutMetrics,
   authBusy,
   authReady,
@@ -6997,6 +6999,18 @@ function LaunchScreen({
           resizeMode="cover"
         />
       </View>
+      <Text
+        pointerEvents="none"
+        style={[
+          styles.launchVersionText,
+          {
+            top: Math.max(12, layoutMetrics.topInset - 18),
+            right: layoutMetrics.horizontalPadding,
+          },
+        ]}
+      >
+        v{version}
+      </Text>
 
       <Animated.View
         style={[
@@ -10734,54 +10748,15 @@ const createStyles = (theme) => StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-  launchDecorOrb: {
+  launchVersionText: {
     position: "absolute",
-    borderRadius: 999,
-    backgroundColor: theme.accentSoft,
-  },
-  launchDecorOrbTop: {
-    top: -128,
-    right: -82,
-    width: 286,
-    height: 286,
-  },
-  launchDecorOrbBottom: {
-    bottom: -112,
-    left: -96,
-    width: 264,
-    height: 264,
-  },
-  launchDecorDot: {
-    position: "absolute",
-    width: 9,
-    height: 9,
-    borderRadius: 999,
-    backgroundColor: theme.accent,
-    opacity: 0.22,
-  },
-  launchDecorDotTopLeft: {
-    top: Platform.OS === "android" ? 72 : 92,
-    left: 28,
-  },
-  launchDecorDotTopMid: {
-    top: Platform.OS === "android" ? 116 : 136,
-    right: 152,
-  },
-  launchDecorDotBottomLeft: {
-    bottom: Platform.OS === "android" ? 142 : 166,
-    left: 36,
-  },
-  launchDecorStarRight: {
-    position: "absolute",
-    top: Platform.OS === "android" ? 286 : 310,
-    right: 54,
-    opacity: 0.86,
-  },
-  launchDecorMoonLeft: {
-    position: "absolute",
-    top: Platform.OS === "android" ? 260 : 288,
-    left: 48,
-    opacity: 0.82,
+    zIndex: 3,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: "800",
+    letterSpacing: 0,
+    color: theme.textMuted,
+    opacity: 0.52,
   },
   launchContent: {
     ...StyleSheet.absoluteFillObject,
@@ -10895,189 +10870,6 @@ const createStyles = (theme) => StyleSheet.create({
     width: "84%",
     height: "90%",
   },
-  memoriaOrbitRing: {
-    position: "absolute",
-    width: "86%",
-    height: "86%",
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderStyle: "dashed",
-    borderColor: "rgba(142, 123, 255, 0.24)",
-  },
-  memoriaMoon: {
-    position: "absolute",
-    top: 27,
-    left: 42,
-    opacity: 0.78,
-  },
-  memoriaStarTop: {
-    position: "absolute",
-    top: 45,
-    right: 40,
-    opacity: 0.84,
-  },
-  memoriaStarBottom: {
-    position: "absolute",
-    bottom: 36,
-    right: 56,
-    opacity: 0.7,
-  },
-  memoriaSparkDot: {
-    position: "absolute",
-    width: 9,
-    height: 9,
-    borderRadius: 999,
-    backgroundColor: "#8E7BFF",
-    opacity: 0.36,
-  },
-  memoriaSparkDotLeft: {
-    left: 34,
-    bottom: 66,
-  },
-  memoriaSparkDotRight: {
-    right: 28,
-    top: 102,
-  },
-  memoriaHood: {
-    position: "absolute",
-    top: 60,
-    width: 204,
-    height: 212,
-    borderTopLeftRadius: 102,
-    borderTopRightRadius: 102,
-    borderBottomLeftRadius: 58,
-    borderBottomRightRadius: 58,
-    backgroundColor: "#DCD3FF",
-  },
-  memoriaFace: {
-    position: "absolute",
-    top: 86,
-    width: 154,
-    height: 158,
-    borderTopLeftRadius: 77,
-    borderTopRightRadius: 77,
-    borderBottomLeftRadius: 26,
-    borderBottomRightRadius: 26,
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-  },
-  memoriaEyeRow: {
-    position: "absolute",
-    top: 47,
-    flexDirection: "row",
-    gap: 48,
-  },
-  memoriaEye: {
-    width: 17,
-    height: 31,
-    borderRadius: 999,
-    backgroundColor: "#10182B",
-  },
-  memoriaMouth: {
-    position: "absolute",
-    top: 78,
-    width: 36,
-    height: 20,
-    borderBottomWidth: 6,
-    borderColor: "#10182B",
-    borderRadius: 18,
-  },
-  memoriaBackCard: {
-    position: "absolute",
-    width: 86,
-    height: 116,
-    right: 72,
-    top: 148,
-    paddingTop: 51,
-    paddingHorizontal: 14,
-    gap: 11,
-    borderRadius: 16,
-    backgroundColor: "#D7CBFF",
-    transform: [{ rotate: "9deg" }],
-  },
-  memoriaBackLine: {
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: "#8E7BFF",
-    opacity: 0.84,
-  },
-  memoriaBackLineShort: {
-    width: "70%",
-  },
-  memoriaFrontCard: {
-    position: "absolute",
-    width: 104,
-    height: 136,
-    left: 82,
-    top: 142,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 18,
-    backgroundColor: "#7F66F2",
-    transform: [{ rotate: "-9deg" }],
-    zIndex: 8,
-  },
-  memoriaHand: {
-    position: "absolute",
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    backgroundColor: "#FFFFFF",
-    zIndex: 10,
-  },
-  memoriaHandLeft: {
-    left: 64,
-    top: 190,
-  },
-  memoriaHandRight: {
-    right: 58,
-    top: 190,
-  },
-  memoriaMiniMascot: {
-    width: 62,
-    height: 64,
-    alignItems: "center",
-    justifyContent: "flex-end",
-    paddingBottom: 9,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
-  memoriaMiniEyeRow: {
-    position: "absolute",
-    top: 16,
-    flexDirection: "row",
-    gap: 14,
-  },
-  memoriaMiniEye: {
-    width: 6,
-    height: 10,
-    borderRadius: 999,
-    backgroundColor: theme.textPrimary,
-  },
-  memoriaMiniBook: {
-    width: 40,
-    height: 27,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 10,
-    backgroundColor: theme.accent,
-  },
-  memoriaCardLine: {
-    width: 70,
-    height: 7,
-    marginTop: 16,
-    borderRadius: 999,
-    backgroundColor: theme.accentSoftStrong,
-  },
-  memoriaCardLineShort: {
-    width: 48,
-    marginTop: 8,
-  },
   launchTitle: {
     fontSize: 31,
     lineHeight: 42,
@@ -11088,9 +10880,6 @@ const createStyles = (theme) => StyleSheet.create({
   tutorialOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: theme.launchBg,
-  },
-  tutorialIntroDecor: {
-    ...StyleSheet.absoluteFillObject,
   },
   tutorialWelcomeContent: {
     flex: 1,

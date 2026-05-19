@@ -142,7 +142,7 @@ npx eas-cli build:list --platform android --limit 1 --non-interactive
 
 ## 7. 브랜딩 / 이미지 자산 관련 매우 중요한 주의사항
 
-사용자는 AI가 새로 그린 듯한 변형을 싫어했다. 특히 캐릭터의 머리 곡률, 손, 카드 위치, 입과 카드의 겹침, 아이콘에서 머리가 잘리는 문제를 여러 번 지적했다.
+사용자는 원본과 다르게 새로 그린 듯한 변형을 싫어했다. 특히 캐릭터의 머리 곡률, 손, 카드 위치, 입과 카드의 겹침, 아이콘에서 머리가 잘리는 문제를 여러 번 지적했다.
 
 따라서 다음 작업에서 브랜딩 이미지를 건드릴 때는 다음 원칙을 지켜야 한다.
 
@@ -168,7 +168,7 @@ const MEMORIA_BACKGROUND_IMAGE = require("./assets/background_decor.png");
 `App.js`의 주요 상수:
 
 ```js
-const APP_VERSION = "1.0.0";
+const APP_VERSION = require("./app.json").expo.version;
 const STORAGE_KEY = "@memoria/cards";
 const FOLDERS_STORAGE_KEY = "@memoria/folders";
 const DAILY_STUDY_GOAL_KEY = "@memoria/daily-study-goal";
