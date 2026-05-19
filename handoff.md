@@ -1,6 +1,6 @@
 # MEMORIA / 메모리아 Handoff
 
-Last updated: 2026-05-19 KST
+Last updated: 2026-05-20 KST
 
 이 문서는 다음 채팅 또는 다른 작업자가 `D:\github\APP\memorize_app2` 프로젝트를 바로 이어받기 위한 최신 상태 요약이다. 이전 `handoff.md`는 이 내용으로 새로 덮어썼다.
 
@@ -12,29 +12,30 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 
 - 작업 폴더: `D:\github\APP\memorize_app2`
 - 기본 작업 브랜치: `develop`
-- 현재 최신 커밋: `03f7898 chore: bump release version and polish policies`
-- 현재 `develop`, `origin/develop`, `main`, `origin/main`은 같은 커밋을 가리킨다.
+- 현재 최신 기능 커밋: `cfd951f fix: restore saving and add bulk delete`
+- 현재 `develop`, `origin/develop`은 `cfd951f`를 가리킨다.
+- 현재 `main`, `origin/main`은 이전 릴리스 커밋 `03f7898`에 머물러 있다.
 - 현재 추적되지 않은 파일: `want.png`
   - 사용자가 둔 참고 파일로 보인다.
   - 별도 요청 전에는 건드리지 말 것.
 
 최근 릴리스 빌드:
 
-- EAS build ID: `6a0956fb-0931-43be-bfaa-fe3cd0a7d6a0`
+- EAS build ID: `cfa0066e-5ffa-47e7-b88d-47fb1aa39a6e`
 - Profile: `production`
 - Distribution: `store`
-- App versionName: `1.0.1`
-- Android versionCode: `8`
-- Commit: `03f78988812cd3cf158cfac620c465b23490c461`
-- AAB: https://expo.dev/artifacts/eas/e6rEJs1rALf3q7ad9ZBeRJ.aab
-- Logs: https://expo.dev/accounts/zinnn/projects/memoria/builds/6a0956fb-0931-43be-bfaa-fe3cd0a7d6a0
+- App versionName: `1.0.2`
+- Android versionCode: `9`
+- Commit: `cfd951f8ce58f87e7314dcc6c8e29fee90b4de0b`
+- AAB: https://expo.dev/artifacts/eas/rD2FNeHu4EaUXitKJ9ZYTq.aab
+- Logs: https://expo.dev/accounts/zinnn/projects/memoria/builds/cfa0066e-5ffa-47e7-b88d-47fb1aa39a6e
 
 중요한 배경:
 
 - 이전 AAB는 `versionCode 7`이었고 Play Console에서 이미 사용된 코드라고 나왔다.
 - Google Play에서 실제로 막는 것은 `versionName`이 아니라 정수 `versionCode`다.
-- 새 빌드는 EAS production의 `autoIncrement`로 `7 -> 8` 증가했다.
-- `versionName 1.0.1`은 필수는 아니었지만 이미 정상 생성되었으므로 현재는 그대로 유지하는 것이 낫다.
+- 새 빌드는 EAS production의 `autoIncrement`로 `8 -> 9` 증가했다.
+- `versionName`은 이번 내부 테스트용 버그 수정 빌드에서 `1.0.2`로 올렸다.
 
 ## 3. 기술 스택
 
@@ -103,7 +104,7 @@ npx eas-cli build:list --platform android --limit 1 --json
 ### `package.json`
 
 - `name`: `memorize_app2`
-- `version`: `1.0.1`
+- `version`: `1.0.2`
 - `main`: `node_modules/expo/AppEntry.js`
 - `private`: `true`
 
@@ -111,7 +112,7 @@ npx eas-cli build:list --platform android --limit 1 --json
 
 - Expo app name: `MEMORIA`
 - slug: `memoria`
-- version: `1.0.1`
+- version: `1.0.2`
 - scheme: `memoria`
 - owner: `zinnn`
 - EAS project id: `6caf9ed8-f402-4743-8222-5e05fcedb0f2`
@@ -213,7 +214,7 @@ OAuth redirect:
 - 캐릭터 주변 점선 원은 앱에서 dashed border로 렌더링한다.
 - 캐릭터/점선/버튼 배치는 `react-native-safe-area-context`와 `createIntroLayoutMetrics`로 화면 크기와 safe area를 고려한다.
 - `MEMORIA` 텍스트는 이미지 안 글자가 아니라 네이티브 `Text`로 렌더링해 글자 깨짐을 줄인다.
-- 시작 화면 우측 상단에는 아주 작게 `v1.0.1` 같은 앱 버전을 표시한다.
+- 시작 화면 우측 상단에는 아주 작게 `v1.0.2` 같은 앱 버전을 표시한다.
 - 하단 Google/게스트 버튼은 Android 내비게이션 바와 겹치지 않도록 safe area를 고려한다.
 
 `App.js` 상단 자산 연결:
@@ -541,6 +542,17 @@ npx eas-cli build --platform android --profile production --non-interactive --no
 - TXT 예시 옆에 XLS/Excel 예시 UI 추가
 - 개인정보/데이터 삭제 문구와 Play 등록 정보 초안 정리
 - production AAB `1.0.1 / versionCode 8` 생성
+- 2026-05-20 내부 테스트 저장 실패 수정
+  - `saveEntryBatch`가 함수 밖 변수 `existingPairs`를 참조해 단일 카드 저장과 파일 가져오기 저장이 중단될 수 있던 문제를 수정했다.
+  - 원인은 Supabase DB보다 앱 저장 로직의 스코프 오류에 가까웠다. Supabase 저장이 실패해도 로컬 저장까지는 이어질 수 있게 기존 카드 목록을 `prepareEntryBatch` 결과로 명시 전달한다.
+- 보관함 다중 선택 삭제 추가
+  - 카드 왼쪽 체크 버튼으로 여러 카드를 선택할 수 있다.
+  - 보관함 상단 선택 바에서 전체 선택, 선택 해제, 선택 삭제를 할 수 있다.
+  - Google 로그인 상태에서 cloud 카드가 선택되면 `memory_pairs`에서도 선택 카드들을 삭제한다.
+- production AAB `1.0.2 / versionCode 9` 생성
+  - EAS build ID: `cfa0066e-5ffa-47e7-b88d-47fb1aa39a6e`
+  - AAB: https://expo.dev/artifacts/eas/rD2FNeHu4EaUXitKJ9ZYTq.aab
+  - Commit: `cfd951f8ce58f87e7314dcc6c8e29fee90b4de0b`
 
 ## 21. 다음 작업자가 꼭 기억할 것
 
