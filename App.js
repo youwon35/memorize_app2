@@ -662,6 +662,8 @@ function AppContent() {
   const [saveComposerVisible, setSaveComposerVisible] = useState(false);
   const [manageSort, setManageSort] = useState("recent");
   const [manageSortMenuOpen, setManageSortMenuOpen] = useState(false);
+  const [manageSelectionMode, setManageSelectionMode] = useState(false);
+  const [manageBulkMoveOpen, setManageBulkMoveOpen] = useState(false);
   const [manageSearch, setManageSearch] = useState("");
   const [historyDateKey, setHistoryDateKey] = useState(() => getLocalDayKey(new Date()));
   const [historyCalendarOpen, setHistoryCalendarOpen] = useState(false);
@@ -2109,6 +2111,8 @@ function AppContent() {
     setEditingLeft("");
     setEditingRight("");
     setEditingFolderId(ROOT_FOLDER_ID);
+    setManageSelectionMode(false);
+    setManageBulkMoveOpen(false);
   };
 
   const openFolderCards = (folderId) => {
@@ -2393,6 +2397,8 @@ function AppContent() {
 
     await savePairs(nextPairs);
     setSelectedManagePairIds([]);
+    setManageSelectionMode(false);
+    setManageBulkMoveOpen(false);
     setManageFolderId(normalizedTargetFolderId);
     Alert.alert(
       t("folders.bulkMoveDoneTitle"),
@@ -3437,6 +3443,8 @@ function AppContent() {
 
     await savePairs(pairsRef.current.filter((pair) => !selectedIds.has(pair.id)));
     setSelectedManagePairIds([]);
+    setManageSelectionMode(false);
+    setManageBulkMoveOpen(false);
     setOpenManageSwipeId(null);
 
     if (editingId && selectedIds.has(editingId)) {
@@ -3450,6 +3458,29 @@ function AppContent() {
       t("manage.deleteSelectedDoneTitle"),
       t("manage.deleteSelectedDoneBody", { count: selectedPairs.length })
     );
+  };
+
+  const enterManageSelectionMode = () => {
+    if (editingId) {
+      setEditingId(null);
+      setEditingLeft("");
+      setEditingRight("");
+      setEditingFolderId(ROOT_FOLDER_ID);
+    }
+
+    if (openManageSwipeId) {
+      closeManageSwipe(openManageSwipeId);
+    }
+
+    setManageSortMenuOpen(false);
+    setManageSelectionMode(true);
+    setManageBulkMoveOpen(false);
+  };
+
+  const exitManageSelectionMode = () => {
+    setSelectedManagePairIds([]);
+    setManageSelectionMode(false);
+    setManageBulkMoveOpen(false);
   };
 
   const confirmDeleteSelectedManagePairs = () => {
@@ -4040,9 +4071,14 @@ function AppContent() {
                   <View style={styles.importPreviewDot} />
                   <View style={styles.importPreviewDot} />
                 </View>
-                <Text numberOfLines={1} style={styles.importPreviewFileName}>
-                  cards-example.txt / cards-example.xls
-                </Text>
+                <View style={styles.importPreviewFileNames}>
+                  <Text numberOfLines={1} style={styles.importPreviewFileName}>
+                    cards-example.txt
+                  </Text>
+                  <Text numberOfLines={1} style={styles.importPreviewFileName}>
+                    cards-example.xls
+                  </Text>
+                </View>
               </View>
               <View style={styles.importPreviewSheet}>
                 <View style={styles.importTextPreviewPane}>
@@ -4090,10 +4126,6 @@ function AppContent() {
                     </View>
                   ))}
                 </View>
-              </View>
-              <View style={styles.importPreviewFooter}>
-                <MaterialCommunityIcons name="cards-outline" size={15} color={theme.accent} />
-                <Text style={styles.importPreviewHint}>{t("save.textImportHint")}</Text>
               </View>
             </View>
           </View>
@@ -5644,30 +5676,36 @@ function AppContent() {
           snapToOffsets={[0, 152]}
           decelerationRate="fast"
           overScrollMode="never"
+          scrollEnabled={!manageSelectionMode}
           onMomentumScrollEnd={(event) => syncManageSwipeState(pair.id, event)}
           onScrollEndDrag={(event) => syncManageSwipeState(pair.id, event)}
           contentContainerStyle={styles.manageSwipeTrack}
         >
           <View style={[styles.manageCard, styles.manageSwipeCard, styles.manageListCard, { width: manageSwipeCardWidth }]}>
-            <View style={styles.managePairInlineRow}>
-              <Pressable
-                accessibilityLabel={selected ? t("manage.unselectCard") : t("manage.selectCard")}
-                onPress={() => {
-                  closeManageSwipe(pair.id);
-                  toggleManagePairSelection(pair.id);
-                }}
-                style={({ pressed }) => [
-                  styles.manageSelectButton,
-                  selected && styles.manageSelectButtonActive,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name={selected ? "checkbox-marked-circle" : "checkbox-blank-circle-outline"}
-                  size={17}
-                  color={selected ? theme.accentText : theme.textSecondary}
-                />
-              </Pressable>
+            <Pressable
+              accessibilityLabel={selected ? t("manage.unselectCard") : t("manage.selectCard")}
+              disabled={!manageSelectionMode}
+              onPress={() => toggleManagePairSelection(pair.id)}
+              style={({ pressed }) => [
+                styles.managePairInlineRow,
+                manageSelectionMode && styles.managePairSelectableRow,
+                pressed && styles.pressed,
+              ]}
+            >
+              {manageSelectionMode ? (
+                <View
+                  style={[
+                    styles.manageSelectButton,
+                    selected && styles.manageSelectButtonActive,
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name={selected ? "check-circle" : "checkbox-blank-circle-outline"}
+                    size={21}
+                    color={selected ? theme.accentText : theme.textSecondary}
+                  />
+                </View>
+              ) : null}
               <View style={styles.managePairColumn}>
                 <View style={styles.manageTextBlock}>
                   <Text style={styles.managePairText} numberOfLines={1} ellipsizeMode="tail">
@@ -5685,14 +5723,16 @@ function AppContent() {
                   </Text>
                 </View>
               </View>
-              <Pressable
-                accessibilityLabel={t("manage.openActions")}
-                onPress={() => toggleManageSwipe(pair.id)}
-                style={({ pressed }) => [styles.manageSwipeHint, pressed && styles.pressed]}
-              >
-                <MaterialCommunityIcons name="format-list-bulleted" size={20} color={theme.textSecondary} />
-              </Pressable>
-            </View>
+              {!manageSelectionMode ? (
+                <Pressable
+                  accessibilityLabel={t("manage.openActions")}
+                  onPress={() => toggleManageSwipe(pair.id)}
+                  style={({ pressed }) => [styles.manageSwipeHint, pressed && styles.pressed]}
+                >
+                  <MaterialCommunityIcons name="format-list-bulleted" size={20} color={theme.textSecondary} />
+                </Pressable>
+              ) : null}
+            </Pressable>
           </View>
           <View style={styles.manageSwipeActions}>
             <Pressable
@@ -5742,12 +5782,24 @@ function AppContent() {
                 <Text style={styles.panelTitle}>{t("manage.listTitle")}</Text>
                 <Text style={styles.panelBody}>{t("manage.listBody")}</Text>
               </View>
-              <View style={styles.manageSortControl}>
+              <View style={styles.manageListHeaderActions}>
+                {!manageSelectionMode ? (
+                  <Pressable
+                    onPress={enterManageSelectionMode}
+                    style={({ pressed }) => [styles.manageSelectionModeButton, pressed && styles.pressed]}
+                  >
+                    <MaterialCommunityIcons name="checkbox-multiple-blank-outline" size={16} color={theme.accent} />
+                    <Text style={styles.manageSelectionModeButtonText}>{t("manage.enterSelectionMode")}</Text>
+                  </Pressable>
+                ) : null}
+                <View style={styles.manageSortControl}>
                 <Pressable
+                  disabled={manageSelectionMode}
                   onPress={() => setManageSortMenuOpen((currentValue) => !currentValue)}
                   style={({ pressed }) => [
                     styles.manageSortButton,
                     manageSortMenuOpen && styles.manageSortButtonActive,
+                    manageSelectionMode && styles.manageSortButtonDisabled,
                     pressed && styles.pressed,
                   ]}
                 >
@@ -5782,52 +5834,98 @@ function AppContent() {
                     })}
                   </View>
                 ) : null}
+                </View>
               </View>
             </View>
             <View style={styles.manageListDivider} />
-            <View style={styles.manageBulkBar}>
-              <View style={styles.manageBulkCopy}>
-                <Text style={styles.manageBulkTitle}>
-                  {t("manage.selectedCount", { count: selectedManagePairIds.length })}
-                </Text>
-                <Text style={styles.manageBulkBody}>{t("manage.bulkSelectHint")}</Text>
-              </View>
-              <View style={styles.manageBulkActions}>
-                <Pressable
-                  onPress={selectAllVisibleManagePairs}
-                  style={({ pressed }) => [styles.manageBulkButton, pressed && styles.pressed]}
-                >
-                  <Text style={styles.manageBulkButtonText}>{t("manage.selectAllVisible")}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setSelectedManagePairIds([])}
-                  style={({ pressed }) => [styles.manageBulkButton, pressed && styles.pressed]}
-                >
-                  <Text style={styles.manageBulkButtonText}>{t("manage.clearSelection")}</Text>
-                </Pressable>
-                <Pressable
-                  disabled={!selectedManagePairIds.length}
-                  onPress={confirmDeleteSelectedManagePairs}
-                  style={({ pressed }) => [
-                    styles.manageBulkButton,
-                    styles.manageBulkDangerButton,
-                    !selectedManagePairIds.length && styles.manageBulkButtonDisabled,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.manageBulkButtonText,
-                      styles.manageBulkDangerText,
-                      !selectedManagePairIds.length && styles.manageBulkButtonTextDisabled,
-                    ]}
-                  >
-                    {t("manage.deleteSelected")}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-            <View style={styles.manageListDivider} />
+            {manageSelectionMode ? (
+              <>
+                <View style={styles.manageBulkBar}>
+                  <View style={styles.manageBulkCopy}>
+                    <Text style={styles.manageBulkTitle}>
+                      {t("manage.selectedCount", { count: selectedManagePairIds.length })}
+                    </Text>
+                    <Text style={styles.manageBulkBody}>{t("manage.bulkSelectHint")}</Text>
+                  </View>
+                  <View style={styles.manageBulkActions}>
+                    <Pressable
+                      onPress={selectAllVisibleManagePairs}
+                      style={({ pressed }) => [styles.manageBulkButton, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.manageBulkButtonText}>{t("manage.selectAllVisible")}</Text>
+                    </Pressable>
+                    <Pressable
+                      disabled={!selectedManagePairIds.length}
+                      onPress={() => setManageBulkMoveOpen((currentValue) => !currentValue)}
+                      style={({ pressed }) => [
+                        styles.manageBulkButton,
+                        !selectedManagePairIds.length && styles.manageBulkButtonDisabled,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.manageBulkButtonText,
+                          !selectedManagePairIds.length && styles.manageBulkButtonTextDisabled,
+                        ]}
+                      >
+                        {t("manage.moveSelected")}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      disabled={!selectedManagePairIds.length}
+                      onPress={confirmDeleteSelectedManagePairs}
+                      style={({ pressed }) => [
+                        styles.manageBulkButton,
+                        styles.manageBulkDangerButton,
+                        !selectedManagePairIds.length && styles.manageBulkButtonDisabled,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.manageBulkButtonText,
+                          styles.manageBulkDangerText,
+                          !selectedManagePairIds.length && styles.manageBulkButtonTextDisabled,
+                        ]}
+                      >
+                        {t("manage.deleteSelected")}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={exitManageSelectionMode}
+                      style={({ pressed }) => [styles.manageBulkButton, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.manageBulkButtonText}>{t("manage.cancelSelectionMode")}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+                {manageBulkMoveOpen ? (
+                  <View style={styles.bulkMovePanel}>
+                    <View style={styles.bulkMoveHeader}>
+                      <View style={styles.bulkMoveHeaderCopy}>
+                        <Text style={styles.bulkMoveTitle}>{t("folders.bulkMoveTitle")}</Text>
+                        <Text style={styles.bulkMoveBody}>{t("manage.moveSelectedHint")}</Text>
+                      </View>
+                    </View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderPickerRow}>
+                      {selectableFolders.map((folder) => (
+                        <Pressable
+                          key={`move-selected-${folder.id}`}
+                          onPress={() => void moveSelectedPairsToFolder(folder.id)}
+                          style={({ pressed }) => [styles.folderPickerChip, pressed && styles.pressed]}
+                        >
+                          <Text style={styles.folderPickerText}>
+                            {folder.id === ROOT_FOLDER_ID ? folder.name : getFolderLabel(folder.id)}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ) : null}
+                <View style={styles.manageListDivider} />
+              </>
+            ) : null}
             {visibleManagePairs.map(renderManagePairCard)}
           </View>
         ) : (
@@ -8269,8 +8367,15 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.textPlaceholder,
     opacity: 0.7,
   },
-  importPreviewFileName: {
+  importPreviewFileNames: {
     flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  importPreviewFileName: {
+    flexShrink: 1,
     fontSize: 12,
     fontWeight: "700",
     color: theme.textMuted,
@@ -8440,6 +8545,12 @@ const createStyles = (theme) => StyleSheet.create({
     minWidth: 0,
     gap: 4,
   },
+  manageListHeaderActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: 8,
+  },
   manageSortControl: {
     position: "relative",
     zIndex: 50,
@@ -8460,7 +8571,26 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.accentSoft,
     borderColor: theme.accent,
   },
+  manageSortButtonDisabled: {
+    opacity: 0.45,
+  },
   manageSortButtonText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: theme.accent,
+  },
+  manageSelectionModeButton: {
+    minHeight: 34,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  manageSelectionModeButtonText: {
     fontSize: 11,
     fontWeight: "800",
     color: theme.accent,
@@ -9545,6 +9675,9 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: "center",
     gap: 8,
     minHeight: 46,
+  },
+  managePairSelectableRow: {
+    borderRadius: 12,
   },
   managePairColumn: {
     flex: 1,
