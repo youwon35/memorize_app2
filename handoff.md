@@ -2,53 +2,64 @@
 
 Last updated: 2026-05-19 KST
 
-이 문서는 다음 채팅이나 다른 작업자가 `D:\github\APP\memorize_app2` 프로젝트를 바로 이어받기 위한 현재 상태 요약이다. 기존 `handoff.md`는 이 내용으로 새로 덮어썼다.
+이 문서는 다음 채팅 또는 다른 작업자가 `D:\github\APP\memorize_app2` 프로젝트를 바로 이어받기 위한 최신 상태 요약이다. 이전 `handoff.md`는 이 내용으로 새로 덮어썼다.
 
-## 1. 프로젝트 개요
+## 1. 한 줄 요약
 
-- 앱 이름: 한국어 `메모리아`, 영어 `Memoria`, 일본어 `メモリア`
-- 앱 성격: 사용자가 암기용 카드쌍을 만들고, 폴더로 정리한 뒤, 문제 형태로 풀고 기록을 확인하는 개인 학습/암기 앱
-- 주요 흐름:
-  1. 저장 탭에서 폴더와 카드쌍을 만든다.
-  2. 암기 탭에서 폴더 범위, 문제 수, 출제 방향을 고르고 푼다.
-  3. 기록 탭에서 학습 기록과 오답을 다시 본다.
-  4. 보관함 탭에서 카드와 폴더를 수정/삭제한다.
-  5. 앱 정보 탭에서 계정, 동기화, 화면 모드, 언어, 정책, 문의, 데이터 삭제를 관리한다.
+MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이다. 사용자가 앞면/뒷면 카드쌍을 만들고 폴더로 정리한 뒤, 암기 탭에서 문제를 풀고 기록/오답/일일 목표를 관리한다. Google 로그인 시 Supabase로 카드, 폴더, 학습 상태, 일일 목표, 문의 기록 등을 동기화한다.
 
-## 2. 현재 Git 상태와 최근 빌드
+## 2. 현재 Git / 릴리스 상태
 
 - 작업 폴더: `D:\github\APP\memorize_app2`
 - 기본 작업 브랜치: `develop`
-- 마지막으로 확인한 앱 코드 기준 커밋: `fd430d0` (`fix: sync study state with account data`)
-- 현재 작업 중인 변경: 시작/튜토리얼 인트로는 `background_decor.png` + `ghost_character.png` 분리 자산과 `react-native-safe-area-context` 기반 안전 영역 계산으로 반응형 배치하고, 파일 가져오기는 저장 전 미리보기 모달을 통해 저장 예정/중복/오류 개수를 확인하도록 변경
-- 현재 미추적 `want.png`는 사용자가 둔 참고 파일로 보이며, 별도 요청 전에는 건드리지 않는다.
-- 최근 Android development build:
-  - EAS build id: `64ddcb4e-c22d-4b79-ad9e-6d74874cbb93`
-  - EAS commit: `db3fc05fad7a0edd7d51e3278b5aa468554126b9`
-  - APK: https://expo.dev/artifacts/eas/dsq1aiQWWnA6pZ4mipi3G4.apk
-  - Build logs: https://expo.dev/accounts/zinnn/projects/memoria/builds/64ddcb4e-c22d-4b79-ad9e-6d74874cbb93
+- 현재 최신 커밋: `03f7898 chore: bump release version and polish policies`
+- 현재 `develop`, `origin/develop`, `main`, `origin/main`은 같은 커밋을 가리킨다.
+- 현재 추적되지 않은 파일: `want.png`
+  - 사용자가 둔 참고 파일로 보인다.
+  - 별도 요청 전에는 건드리지 말 것.
 
-주의: 이 `handoff.md` 자체를 커밋하면 최신 Git 커밋은 위 앱 빌드 커밋보다 새로워질 수 있다. 위 APK는 `db3fc05` 앱 코드 기준이다.
+최근 릴리스 빌드:
+
+- EAS build ID: `6a0956fb-0931-43be-bfaa-fe3cd0a7d6a0`
+- Profile: `production`
+- Distribution: `store`
+- App versionName: `1.0.1`
+- Android versionCode: `8`
+- Commit: `03f78988812cd3cf158cfac620c465b23490c461`
+- AAB: https://expo.dev/artifacts/eas/e6rEJs1rALf3q7ad9ZBeRJ.aab
+- Logs: https://expo.dev/accounts/zinnn/projects/memoria/builds/6a0956fb-0931-43be-bfaa-fe3cd0a7d6a0
+
+중요한 배경:
+
+- 이전 AAB는 `versionCode 7`이었고 Play Console에서 이미 사용된 코드라고 나왔다.
+- Google Play에서 실제로 막는 것은 `versionName`이 아니라 정수 `versionCode`다.
+- 새 빌드는 EAS production의 `autoIncrement`로 `7 -> 8` 증가했다.
+- `versionName 1.0.1`은 필수는 아니었지만 이미 정상 생성되었으므로 현재는 그대로 유지하는 것이 낫다.
 
 ## 3. 기술 스택
 
 - Expo SDK: `~54.0.34`
 - React Native: `0.81.5`
 - React: `19.1.0`
-- Expo dev client 사용: 일반 Expo Go가 아니라 development build로 테스트하는 구조
-- 주요 패키지:
-  - `@react-native-async-storage/async-storage`
-  - `@supabase/supabase-js`
-  - `expo-auth-session`
-  - `expo-crypto`
-  - `expo-dev-client`
-  - `expo-document-picker`
-  - `expo-file-system`
-  - `expo-secure-store`
-  - `expo-web-browser`
-  - `react-native-safe-area-context`
-  - `xlsx`
-  - `jszip`
+- Expo dev client 사용
+- 일반 Expo Go만으로는 네이티브 모듈 변경 확인이 충분하지 않다. 최신 development build 설치 후 Metro에 연결해 테스트하는 구조다.
+
+주요 패키지:
+
+- `@react-native-async-storage/async-storage`
+- `@supabase/supabase-js`
+- `expo-auth-session`
+- `expo-crypto`
+- `expo-dev-client`
+- `expo-document-picker`
+- `expo-file-system`
+- `expo-linear-gradient`
+- `expo-secure-store`
+- `expo-web-browser`
+- `react-native-safe-area-context`
+- `react-native-url-polyfill`
+- `xlsx`
+- `jszip`
 
 ## 4. 주요 명령어
 
@@ -64,18 +75,27 @@ npm run build:production
 npm run submit:production
 ```
 
-- `npm start`는 `scripts/start-dev-build.ps1`를 실행한다.
-- 이 앱은 `expo-dev-client`를 사용하므로 실제 기기 테스트는 최신 dev build 설치 후 Metro에 연결하는 방식이 기본이다.
-- EAS development build:
+검증 때 자주 쓰는 명령:
 
 ```powershell
-npx eas-cli build --platform android --profile development --non-interactive --no-wait
+npx tsc --noEmit
+git diff --check
+npx expo export --platform android --output-dir .expo-export --clear
+npx expo-doctor
 ```
 
-- EAS build 상태 확인:
+`expo export` 후 생성되는 `.expo-export`는 작업 폴더 내부 경로인지 확인한 뒤 삭제한다.
+
+EAS production AAB 빌드:
 
 ```powershell
-npx eas-cli build:list --platform android --limit 1 --non-interactive
+npx eas-cli build --platform android --profile production --non-interactive --no-wait
+```
+
+EAS 상태 확인:
+
+```powershell
+npx eas-cli build:list --platform android --limit 1 --json
 ```
 
 ## 5. 설정 파일
@@ -83,92 +103,139 @@ npx eas-cli build:list --platform android --limit 1 --non-interactive
 ### `package.json`
 
 - `name`: `memorize_app2`
-- `version`: `1.0.0`
+- `version`: `1.0.1`
 - `main`: `node_modules/expo/AppEntry.js`
-- 주요 scripts:
-  - `start`
-  - `start:lan`
-  - `start:tunnel`
-  - `start:go`
-  - `android`
-  - `ios`
-  - `web`
-  - `build:dev`
-  - `build:preview`
-  - `build:production`
-  - `submit:production`
+- `private`: `true`
 
 ### `app.json`
 
 - Expo app name: `MEMORIA`
 - slug: `memoria`
+- version: `1.0.1`
 - scheme: `memoria`
 - owner: `zinnn`
 - EAS project id: `6caf9ed8-f402-4743-8222-5e05fcedb0f2`
 - Android package: `com.youwon35.memoria`
 - iOS bundle id: `com.youwon35.memoria`
 - app icon: `./app-icon.png`
-- Android adaptive icon:
-  - foreground: `./assets/adaptive-icon.png`
-  - background: `#DED7FF`
-- splash:
+- native splash:
   - image: `./assets/splash_full_preview.png`
   - resizeMode: `contain`
+  - backgroundColor: `#F7F5FF`
+- Android adaptive icon:
+  - foreground: `./assets/adaptive-icon.png`
   - backgroundColor: `#F7F5FF`
 
 ### `eas.json`
 
 - CLI version: `>= 16.0.0`
+- `appVersionSource`: `remote`
 - `development`: dev client enabled, internal distribution
 - `preview`: internal distribution, Android APK
-- `production`: auto increment enabled
+- `production`: `autoIncrement: true`
 
-## 6. 파일 구조와 역할
+## 6. EAS / 환경변수 / Google 로그인
+
+Google 로그인 버튼이 비활성화되어 `Google 로그인 설정 필요`라고 보였던 원인은 EAS production 환경에 Supabase 환경변수가 없었기 때문이다. 현재는 EAS production 환경에 아래 값들이 등록되어 있다.
+
+- `EXPO_PUBLIC_SUPABASE_URL`
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- `EXPO_PUBLIC_APP_SCHEME=memoria`
+
+코드상 Google 로그인 설정 판정:
+
+- 파일: `src/lib/supabase.js`
+- `isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)`
+- 이 값이 false이면 시작 화면 Google 버튼이 비활성화된다.
+
+OAuth redirect:
+
+- 앱 scheme: `memoria`
+- redirect URI 흐름: `memoria://auth/callback`
+- Supabase Dashboard의 Auth URL Configuration 또는 Google provider 설정에 `memoria://auth/callback`이 허용 redirect URL로 들어가 있어야 production 앱에서 로그인 완료까지 성공한다.
+
+보안 메모:
+
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY`는 클라이언트 공개 anon key다.
+- Supabase service role key 같은 서버 전용 비밀키를 앱 코드, `.env`, EAS public env에 넣으면 안 된다.
+
+## 7. 주요 파일 구조
 
 핵심 파일:
 
-- `App.js`: 앱 대부분의 화면, 상태, 데이터 흐름, 튜토리얼, Supabase 동기화 로직이 들어 있는 메인 파일
-- `src/i18n.js`: 한국어/영어/일본어 번역 전체
-- `src/lib/supabase.js`: Supabase client 생성, SecureStore/AsyncStorage 기반 auth storage, PKCE 설정
-- `src/utils/import-files.js`: TXT/CSV/XLS/XLSX/DOCX 파일에서 카드쌍 import
-- `src/utils/memory.js`: 학습/복습 관련 보조 로직
-- `scripts/start-dev-build.ps1`: dev build용 Expo 시작 스크립트
+- `App.js`
+  - 화면 대부분, 상태, 폴더/카드 로직, 튜토리얼, Google 로그인, Supabase 동기화, 계정 삭제 흐름이 들어 있는 메인 파일
+- `src/i18n.js`
+  - 한국어/영어/일본어 번역 전체
+- `src/lib/supabase.js`
+  - Supabase client 생성, SecureStore/AsyncStorage 기반 auth storage, PKCE 설정
+- `src/utils/import-files.js`
+  - TXT/CSV/XLS/XLSX/DOCX 파일에서 카드쌍 import
+- `src/utils/memory.js`
+  - 답안 정규화, 학습 통계, 학습 상태 병합 로직
+- `scripts/start-dev-build.ps1`
+  - dev build용 Expo 시작 스크립트
+- `docs/privacy-policy-ko.md`
+  - Google Play에 공개 URL로 올릴 개인정보처리방침 초안
+- `docs/data-deletion-ko.md`
+  - Google Play 계정/데이터 삭제 안내 URL용 문서
+- `store/google-play-listing.md`
+  - Play Store 등록 정보 초안
+- `supabase/schema.sql`
+  - 전체 Supabase schema
+- `supabase/migrations/20260514_add_memory_folders.sql`
+  - 폴더 테이블 관련 migration
+- `supabase/migrations/20260519_add_memory_user_state.sql`
+  - 학습 상태/일일 목표 동기화 테이블 및 삭제 policy 관련 migration
+
+주요 자산:
+
 - `app-icon.png`: 앱 아이콘
 - `assets/adaptive-icon.png`: Android adaptive icon foreground
-- `assets/splash_full_preview.png`: native splash와 Figma 전체 프리뷰 참고 이미지
-- `assets/background_decor.png`: 시작/튜토리얼 인트로의 배경 장식 레이어
-- `assets/ghost_character.png`: 시작/튜토리얼 인트로의 Figma 캐릭터 이미지
-- `assets/google-g.png`: Google 로그인 버튼용 표준 컬러 G 아이콘
+- `assets/splash_full_preview.png`: native splash와 Figma 전체 프리뷰
+- `assets/background_decor.png`: 시작/튜토리얼 인트로 배경 장식
+- `assets/background_decor.svg`: Figma 배경 장식 원본 계열
+- `assets/ghost_character.png`: 시작/튜토리얼 인트로 캐릭터
+- `assets/ghost_character.png.svg`: Figma 캐릭터 원본 계열
+- `assets/total.svg`: Figma 전체 원본 계열
+- `assets/google-g.png`: Google 로그인 버튼용 공식 스타일 컬러 G 아이콘
 
-## 7. 브랜딩 / 이미지 자산 관련 매우 중요한 주의사항
+## 8. 브랜딩 / 시작 화면 / 튜토리얼 인트로 주의사항
 
-사용자는 원본과 다르게 새로 그린 듯한 변형을 싫어했다. 특히 캐릭터의 머리 곡률, 손, 카드 위치, 입과 카드의 겹침, 아이콘에서 머리가 잘리는 문제를 여러 번 지적했다.
+사용자는 캐릭터 비율, 입 모양, 카드 위치, 점선 원, 하단 버튼 위치에 매우 민감하다. 새로 그린 듯한 변형이나 AI 이미지의 울퉁불퉁한 경계를 싫어했다.
 
-따라서 다음 작업에서 브랜딩 이미지를 건드릴 때는 다음 원칙을 지켜야 한다.
+현재 원칙:
 
-- Figma에서 만든 `assets/background_decor.png`, `assets/ghost_character.png`, `assets/splash_full_preview.png`를 현재 기준 자산으로 삼는다.
-- 캐릭터를 새로 그리거나 SVG로 재해석하지 말 것.
-- 시작 화면과 튜토리얼 인트로는 전체 PNG 한 장을 `cover`로 확대하지 않고, 배경 장식과 캐릭터를 분리해 배치한다.
+- 캐릭터는 Figma 출력물인 `assets/ghost_character.png`를 기준으로 사용한다.
+- 배경은 `assets/background_decor.png`를 사용한다.
+- 전체 화면 PNG 한 장을 `cover`로 확대하는 방식은 쓰지 않는다.
+- 시작 화면과 튜토리얼 인트로는 배경 장식과 캐릭터를 분리해 배치한다.
 - 캐릭터 주변 점선 원은 앱에서 dashed border로 렌더링한다.
-- 튜토리얼 시작 화면 캐릭터는 `assets/ghost_character.png`를 사용한다.
-- 앱 아이콘은 `app-icon.png`와 `assets/adaptive-icon.png`를 사용한다.
-- Android adaptive icon은 런처에서 머리통이 잘리지 않도록 safe area를 고려해야 한다.
-- 튜토리얼 시작 화면의 브랜드 텍스트는 현재 `MEMORIA`이며, 글자 간격을 둔 디자인이다.
+- 캐릭터/점선/버튼 배치는 `react-native-safe-area-context`와 `createIntroLayoutMetrics`로 화면 크기와 safe area를 고려한다.
+- `MEMORIA` 텍스트는 이미지 안 글자가 아니라 네이티브 `Text`로 렌더링해 글자 깨짐을 줄인다.
+- 시작 화면 우측 상단에는 아주 작게 `v1.0.1` 같은 앱 버전을 표시한다.
+- 하단 Google/게스트 버튼은 Android 내비게이션 바와 겹치지 않도록 safe area를 고려한다.
 
-현재 `App.js` 상단 자산 연결:
+`App.js` 상단 자산 연결:
 
 ```js
 const GOOGLE_G_ICON = require("./assets/google-g.png");
 const MEMORIA_CHARACTER_IMAGE = require("./assets/ghost_character.png");
 const MEMORIA_BACKGROUND_IMAGE = require("./assets/background_decor.png");
+const APP_VERSION = require("./app.json").expo.version;
 ```
 
-## 8. 앱 내부 주요 상수와 저장 키
+Google 버튼:
 
-`App.js`의 주요 상수:
+- 버튼 텍스트는 한국어 기준 `Google 계정으로 계속하기`
+- Google 로고는 `assets/google-g.png`
+- Google 로그인 설정이 없으면 `Google 로그인 설정 필요`로 비활성화된다.
+
+## 9. 앱 내부 주요 상수와 저장 키
+
+`App.js`의 주요 키:
 
 ```js
-const APP_VERSION = require("./app.json").expo.version;
 const STORAGE_KEY = "@memoria/cards";
 const FOLDERS_STORAGE_KEY = "@memoria/folders";
 const DAILY_STUDY_GOAL_KEY = "@memoria/daily-study-goal";
@@ -178,62 +245,58 @@ const STUDY_STATS_KEY = "@memoria/study-stats";
 const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen-v5";
 const SUPPORT_REQUESTS_KEY = "@memoria/support-requests";
 const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
-const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
-const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
 ```
 
-기타 기본값:
+기본값:
 
 - root folder id: `root`
 - 기본 일일 목표: 5
 - 기본 문제 수: 10
 - session history 최대치: 60
 
-## 9. 메인 탭 구조
+## 10. 메인 탭 구조
 
 탭은 5개다.
 
-1. 저장 탭
-   - 카드쌍 직접 입력
-   - 텍스트/파일 기반 일괄 입력
-   - 폴더 생성 및 카드 저장
-   - OCR/카메라 기반 저장 기능은 과거에 비활성화되었고 현재 코드에서도 제거된 상태
+1. 저장
+   - 한 장씩 카드 저장
+   - 파일 가져오기
+   - 폴더 생성/선택
+   - 카드 저장 전 중복/오류 처리
 
-2. 암기 탭
+2. 암기
    - 폴더 범위 선택
    - 문제 수 선택: 5 / 10 / 20 / 전체
    - 출제 방향 선택: 양방향 / 앞면만 / 뒷면만
-   - 문제 풀이 시작
-   - 오답만 다시 풀기 지원
-   - 폴더 영역은 탭 진입 시 접힌 상태가 기본이 되도록 이전에 조정됨
+   - 오답만 다시 풀기
+   - 학습 상태와 오답 기록 갱신
 
-3. 기록 탭
+3. 기록
    - 오늘 학습 요약
    - 최근 암기 기록
-   - 날짜별 기록 확인
-   - 오답 다시 풀기
+   - 날짜별 기록
+   - 오답 복습 진입
 
-4. 보관함 탭
-   - 저장된 카드 목록
+4. 보관함
+   - 카드 목록
    - 카드 수정/삭제
    - 폴더 수정/삭제
-   - 정렬 메뉴
-   - 폴더 영역은 탭 진입 시 접힌 상태가 기본이 되도록 이전에 조정됨
+   - 정렬
 
-5. 앱 정보 탭
+5. 앱 정보
    - Google 로그인/로그아웃
    - 관리자 표시
    - 계정 / 데이터 삭제
-   - 화면 모드: 라이트/다크
-   - 언어: 한국어/English/日本語
+   - 라이트/다크 모드
+   - 언어: 한국어 / English / 日本語
    - 문의하기
    - 튜토리얼 다시보기
    - 앱 버전
-   - 개인정보 처리방침/이용약관
+   - 개인정보 처리방침 / 이용약관 / 오픈소스 라이선스
 
-## 10. 튜토리얼 상태
+## 11. 튜토리얼 상태
 
-튜토리얼은 예전의 긴 단계들이 제거되고, 현재는 5개 탭 설명 중심으로 단순화되어 있다.
+튜토리얼은 긴 실습형 단계가 아니라 현재 5개 탭 설명 중심으로 단순화되어 있다.
 
 순서:
 
@@ -246,83 +309,173 @@ const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
 중요 동작:
 
 - 튜토리얼 시작 화면은 유지한다.
-- 튜토리얼 시작 화면의 캐릭터 이미지는 `assets/ghost_character.png`다.
-- 튜토리얼 시작 화면도 시작 화면과 같은 `background_decor.png` + `ghost_character.png` 분리 배치를 사용한다.
-- 튜토리얼 시작 화면의 브랜드 표기는 `MEMORIA`다.
-- 튜토리얼 step overlay에서 강조된 영역 자체는 누르는 대상이 아니다.
-- 사용자는 강조 영역을 누르는 것이 아니라 `다음으로` 또는 마지막 단계의 `튜토리얼 종료` 버튼으로만 진행하길 원했다.
-- 마지막 앱 정보 탭 단계는 `다음으로`가 아니라 `튜토리얼 종료` 텍스트를 사용한다.
+- 튜토리얼 시작 화면은 시작 화면과 같은 캐릭터/배경 자산을 쓴다.
+- 강조된 UI 자체를 눌러 진행하지 않는다.
+- 사용자는 `다음으로` 버튼으로만 진행한다.
+- 마지막 단계 버튼은 `튜토리얼 종료`다.
+- 튜토리얼 완료 저장 키는 `@memoria/tutorial-seen-v5`다.
 
-## 11. 파일 import / OCR 상태
+## 12. 파일 가져오기 상태
 
-지원 import:
+지원 확장자:
 
-- `.txt`
-- `.csv`
-- `.xls`
-- `.xlsx`
-- `.docx`
+- `txt`
+- `csv`
+- `xls`
+- `xlsx`
+- `docx`
 
-구현 위치:
+구현 파일:
 
 - `src/utils/import-files.js`
 
-구현 방식:
+형식:
 
-- XLS/XLSX: `xlsx`
-- DOCX: `jszip`으로 `word/document.xml` 파싱
-- TXT/CSV: 줄과 구분자를 기반으로 앞/뒤 카드쌍 추출
-- 파일 선택 후 즉시 저장하지 않고 미리보기 모달에서 저장 예정, 중복 제외, 형식 오류, 읽은 항목, 저장 위치와 예시 3개를 확인한다.
-- 미리보기와 실제 저장은 `prepareEntryBatch` 기준을 공유해 중복 판정 결과가 흔들리지 않게 했다.
+- TXT/DOCX:
+  - 앞면 한 줄, 뒷면 다음 줄
+  - 빈 줄로 카드와 카드를 구분
+- CSV/XLS/XLSX:
+  - 1열에 앞면
+  - 2열에 뒷면
+  - 현재는 첫 시트, 첫 두 열 기준으로 읽는다.
 
-OCR/카메라 관련:
+현재 UX:
 
-- 사용자가 과거에 비활성화했던 OCR 촬영 저장 기능은 제거된 상태다.
-- 최근 확인 기준 `camera`, `ocr`, `ImagePicker`, `Camera`, `scan` 관련 실사용 코드가 남아 있지 않다.
-
-## 12. Supabase / 계정 / 동기화
-
-Supabase client:
-
-- 파일: `src/lib/supabase.js`
-- 환경변수:
-  - `EXPO_PUBLIC_SUPABASE_URL`
-  - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
-- Google OAuth + PKCE 흐름
-- native에서는 `expo-secure-store`, web에서는 `AsyncStorage`를 auth storage로 사용
-
-`App.js`에서 사용되는 주요 테이블/기능:
-
-- `memory_pairs`
-- `memory_folders`
-- `memory_user_state` (학습 기록, 오답 통계, 일일 목표)
-- `support_inquiries`
-- `app_usage_events`
-- RPC: `get_admin_dashboard_metrics`
-
-계정 / 데이터 삭제:
-
-- 앱 정보 탭의 제목은 `계정 / 데이터 삭제`
-- 설명은 Google 계정 자체는 삭제되지 않으며, 메모리아에 저장된 카드/폴더/학습 기록/오답 기록/일일 목표/문의 기록/동기화 데이터만 삭제된다는 의미
-- 버튼 텍스트는 `계정 삭제하기`
-- 버튼을 누르면 삭제될 데이터 목록을 보여주는 커스텀 확인 팝업이 뜬다.
-- 계속을 누르면 “삭제 요청”이 아니라 실제 삭제가 실행된다.
-- 관련 함수: `deleteMemoriaAccountData`
+- 파일 선택 후 즉시 저장하지 않는다.
+- 미리보기 모달에서 저장 예정, 중복 제외, 형식 오류, 읽은 항목, 저장 위치, 예시 3개를 보여준다.
+- 저장 확정 시 `prepareEntryBatch` 기준으로 미리보기와 같은 판정 기준을 사용한다.
+- 형식이 맞지 않으면 앱 커스텀 팝업 느낌의 안내가 뜬다.
 
 주의:
 
-- 기존 Supabase 프로젝트는 `supabase/migrations/20260519_add_memory_user_state.sql`를 한 번 실행해야 학습 기록/오답 통계/일일 목표 클라우드 동기화가 활성화된다.
-- 삭제 함수는 `memory_pairs`, `memory_folders`, `memory_user_state`, `app_usage_events`, `support_inquiries`를 삭제하도록 맞춰져 있다.
+- 사용자는 대량 가져오기를 1열/2열 방식으로 이해하고 있다.
+- 행이 많아도 이 구조면 대량 저장 가능하다.
+- 다만 여러 시트 선택, 열 매핑, 헤더 자동 인식 같은 고급 UX는 아직 없다.
 
-## 13. 다국어 / 번역 상태
+## 13. OCR / 카메라 상태
 
-번역 파일: `src/i18n.js`
+- 과거에 있던 사진 OCR 저장 기능은 제거되었다.
+- 카메라, OCR, ImagePicker, ML Kit 관련 흐름은 현재 앱 기능에서 제외된 상태다.
+- 다시 추가하려면 기능 플래그와 개인정보/권한 안내까지 함께 설계해야 한다.
 
-현재 언어:
+## 14. 답안 판정 / 학습 상태
+
+구현 파일:
+
+- `src/utils/memory.js`
+
+현재 답안 판정:
+
+- 정규화 후 비교
+- 앞뒤 공백, 중복 공백, 대소문자 등은 어느 정도 처리한다.
+- 내부 띄어쓰기 자체를 완전히 무시하는 수준은 아니다.
+
+의견 메모:
+
+- 기본은 너무 빡빡하지 않게 공백/대소문자 정도는 봐주는 쪽이 좋다.
+- 장기적으로는 `엄격 모드`와 `관대한 모드`를 옵션으로 나누는 것이 좋다.
+
+학습 상태:
+
+- `study_stats`에는 카드별 통계와 세션 기록이 들어간다.
+- 원격 동기화 시 `mergeStudyStats`로 로컬/원격 학습 상태를 병합한다.
+- `memory_user_state` 테이블이 있어야 계정 간 학습 기록, 오답 기록, 일일 목표 동기화가 제대로 동작한다.
+
+## 15. Supabase DB 구조
+
+주요 테이블:
+
+- `user_profiles`
+  - 사용자 프로필, role
+- `app_usage_events`
+  - 로그인 사용자의 앱 실행 기록
+- `memory_pairs`
+  - 카드 앞면/뒷면, folder_id
+- `memory_folders`
+  - 폴더 구조
+- `memory_user_state`
+  - `daily_study_goal`
+  - `study_stats`
+- `support_inquiries`
+  - 문의하기 내용과 처리 상태
+
+관리자 관련:
+
+- `user_profiles.role = 'admin'`
+- `get_admin_dashboard_metrics()` RPC
+- 앱 정보 탭에서 관리자 문의함/운영 지표가 보이는 구조
+
+중요 migration:
+
+- `supabase/migrations/20260519_add_memory_user_state.sql`
+- Supabase 프로젝트에 이 migration 또는 최신 `supabase/schema.sql`이 적용되어 있어야 한다.
+- 이 migration에는 `memory_user_state` RLS와 support/app usage 삭제 policy도 포함되어 있다.
+
+## 16. 계정 / 데이터 삭제
+
+앱 정보 탭 문구:
+
+- Google 계정 자체는 삭제되지 않는다.
+- 메모리아에 저장된 데이터만 삭제된다.
+
+삭제 대상:
+
+- 저장 카드
+- 폴더
+- 학습 기록
+- 오답 기록
+- 일일 목표
+- 문의 기록
+- 동기화 데이터
+- 앱 실행 기록
+
+구현 함수:
+
+- `deleteMemoriaAccountData`
+
+원격 삭제 대상:
+
+- `memory_pairs`
+- `memory_folders`
+- `memory_user_state`
+- `app_usage_events`
+- `support_inquiries`
+
+문서:
+
+- `docs/privacy-policy-ko.md`
+- `docs/data-deletion-ko.md`
+
+현재 공개 문서 placeholder는 `youwon35`, `youwon35@gmail.com`으로 교체되어 있다. Google Play에 노출할 공식 개발자명/고객지원 이메일이 다르면 출시 전 이 값들을 통일해야 한다.
+
+## 17. 개인정보 / 약관 / Play 등록 정보
+
+최근 점검에서 실제 동작과 맞춘 부분:
+
+- 앱 내 개인정보 처리방침 한국어/영어/일본어 문구 보강
+- 일일 목표, 문의 기록, 앱 실행 기록, 동기화 데이터까지 삭제 범위에 명시
+- 오픈소스 라이선스 문구에서 `배포 전 점검`처럼 보이는 표현 제거
+- `docs/privacy-policy-ko.md`와 `docs/data-deletion-ko.md`의 placeholder 제거
+- `store/google-play-listing.md`의 출시 노트와 데이터 삭제 요청 가능 문구 갱신
+
+출시 전 해야 할 일:
+
+- 개인정보처리방침 문서를 실제 공개 URL로 게시
+- 계정/데이터 삭제 안내 문서를 실제 공개 URL로 게시
+- Play Console의 Data safety 답변을 앱 동작과 맞게 입력
+- 고객지원 이메일/개발자명 표기를 최종 결정
+
+## 18. 다국어 상태
+
+파일:
+
+- `src/i18n.js`
+
+지원 언어:
 
 - 한국어
-- 영어
-- 일본어
+- English
+- 日本語
 
 앱 이름:
 
@@ -330,92 +483,87 @@ Supabase client:
 - en: `Memoria`
 - ja: `メモリア`
 
-릴리스 전 점검 권장:
+주의:
 
-- 개인정보 처리방침/이용약관 문구
-- 계정 / 데이터 삭제 문구
-- 튜토리얼 5단계 문구
-- 파일 import 관련 오류 문구
-- 영어/일본어에서 너무 기계적인 표현이 없는지 최종 검토
+- `src/i18n.js`가 매우 크다.
+- 번역 수정 시 중괄호 placeholder와 키 이름을 망가뜨리지 않게 조심해야 한다.
+- 한국어에서 `Memoria`와 `메모리아` 표기가 섞이지 않도록 의도적으로 확인한다.
 
-## 14. 최근 완료된 주요 변경사항
+## 19. 출시 / 브랜치 운영 방식
 
-이 채팅에서 이어진 큰 흐름:
+현재 합의한 흐름:
 
-- 튜토리얼 overlay 강조 위치 오류 수정
-- 강조된 영역은 클릭하지 못하고 `다음으로`만 누르게 조정
-- 튜토리얼 단계를 5개 탭 중심으로 단순화
-- 예전 긴 튜토리얼 단계 제거
-- 튜토리얼 팝업 디자인을 앱 내부 커스텀 모달 스타일과 맞춤
-- 앱 정보 탭 마지막 튜토리얼 버튼을 `튜토리얼 종료`로 변경
-- 암기 탭의 상단 학습 범위 카드 정리
-- 암기/보관함 쪽 폴더 영역 기본 접힘 처리
-- 폴더 추가 카드에서 `+` 버튼을 작게 하고 `폴더 추가` 텍스트 추가
-- OCR/카메라 저장 기능 제거
-- 계정 / 데이터 삭제 문구와 삭제 흐름 개선
-- 앱 시작 splash, 튜토리얼 시작 캐릭터, 앱 아이콘을 사용자 제공 자산 기준으로 정리
-- 최신 dev build 생성 및 APK 확인
+1. 평소 개발은 `develop`에서 한다.
+2. 충분히 검증되면 버전 필요 여부를 판단한다.
+3. Play Console에 새 AAB를 올려야 하면 Android `versionCode`는 반드시 증가해야 한다.
+4. 사용자에게 보이는 `versionName`은 꼭 매번 올릴 필요는 없다.
+5. 정식 릴리스로 삼을 때 `main`에도 같은 커밋을 반영한다.
 
-## 15. 검증에 사용한 명령들
+현재 `eas.json` 설정상 production build는 versionCode를 자동 증가한다.
 
-최근 변경 검증 때 사용한 명령들:
+릴리스 전 검증 추천:
 
 ```powershell
-node -e "const fs=require('fs'); JSON.parse(fs.readFileSync('app.json','utf8')); JSON.parse(fs.readFileSync('package.json','utf8')); console.log('json ok')"
-node -e "const fs=require('fs'); const parser=require('@babel/parser'); for (const file of ['App.js','src/i18n.js']) { parser.parse(fs.readFileSync(file,'utf8'), {sourceType:'module', plugins:['jsx','classProperties','optionalChaining','nullishCoalescingOperator']}); } console.log('babel parse ok')"
+npx tsc --noEmit
 git diff --check
 npx expo export --platform android --output-dir .expo-export --clear
 npx expo-doctor
+npx eas-cli build --platform android --profile production --non-interactive --no-wait
 ```
 
-`expo export` 후 생성되는 `.expo-export`는 검증 후 제거했다.
+실기기에서 꼭 볼 것:
 
-## 16. 출시 준비 관점
+- 신규 설치 첫 실행
+- 시작 화면 Google 버튼 활성화 여부
+- Google 로그인 완료 여부
+- 게스트 시작
+- 튜토리얼 시작/종료
+- 파일 가져오기 미리보기
+- 카드 저장/암기/기록/오답
+- 계정 / 데이터 삭제
+- Android launcher icon이 잘리지 않는지
 
-Google Play 출시 전 확인할 것:
+## 20. 최근 완료된 큰 작업 흐름
 
-- `main` 브랜치로 release 후보를 올릴지 결정
-- `develop`에서 충분히 검증 후 `main`에 merge하는 방식이 일반적
-- production build 생성:
+최근 작업 흐름 요약:
 
-```powershell
-npm run build:production
-```
+- 튜토리얼을 5개 탭 중심으로 단순화
+- 튜토리얼 overlay 강조 클릭을 막고 `다음으로` 버튼 중심으로 진행
+- 튜토리얼 종료 팝업을 앱 커스텀 모달 디자인으로 통일
+- 시작 화면과 튜토리얼 인트로를 Figma 자산 기반으로 재구성
+- 캐릭터/배경을 분리하고 safe area 기반 반응형 배치 적용
+- 캐릭터 주변 점선 원 위치 조정
+- Google 로그인 버튼에 공식 스타일 컬러 G 아이콘 적용
+- Google 로그인 production 환경변수 누락 수정
+- 학습 기록/오답 기록/일일 목표를 `memory_user_state`로 동기화
+- 계정 삭제 시 원격 카드/폴더뿐 아니라 학습 상태, 문의, 앱 실행 기록까지 삭제하도록 보강
+- 파일 가져오기 전 미리보기 추가
+- TXT 예시 옆에 XLS/Excel 예시 UI 추가
+- 개인정보/데이터 삭제 문구와 Play 등록 정보 초안 정리
+- production AAB `1.0.1 / versionCode 8` 생성
 
-- Play Console 등록 정보 준비:
-  - 앱 이름
-  - 짧은 설명
-  - 전체 설명
-  - 스크린샷
-  - 앱 아이콘
-  - 개인정보 처리방침 URL
-  - 데이터 보안 설문
-  - 타겟 연령/콘텐츠 등급
-  - 테스트 트랙 또는 프로덕션 트랙
+## 21. 다음 작업자가 꼭 기억할 것
 
-릴리스 전 앱 차원에서 특히 볼 것:
-
-- Supabase에 최신 `memory_user_state` 마이그레이션이 적용되어 학습 상태 동기화와 데이터 삭제가 실제 원격 DB에서 동작하는지
-- Google OAuth redirect scheme이 release build에서 동작하는지
-- 신규 설치 첫 실행 splash와 튜토리얼 흐름
-- Android launcher icon이 기기마다 잘리지 않는지
-- 라이트/다크, 한국어/영어/일본어 UI 깨짐 여부
-
-## 17. 다음 작업자가 꼭 기억할 것
-
-- 사용자는 한국어로 작업한다.
-- 사용자는 디자인 디테일에 민감하다. 특히 캐릭터/아이콘은 원본과 달라지면 바로 어색함을 느낀다.
+- 사용자는 한국어로 대화한다.
+- 사용자는 디자인 디테일, 특히 캐릭터 원본 비율과 시작 화면 균형에 민감하다.
 - 앱은 웹앱이 아니라 실제 Expo/React Native 모바일 앱이다.
-- 사용자는 Expo Go SDK 54를 언급했지만 현재 프로젝트는 `expo-dev-client` 기반이므로 dev build 테스트가 핵심이다.
-- 코드 변경이 생기면 AGENTS.md 지시에 따라 `develop`에 commit/push까지 해야 한다.
-- 중요한 작업 후에는 `F:\동기화용 파일\인쇄용\memorize_app2_print.py`에도 작업 요약을 이어 붙이고, Notion의 해당 프로젝트 페이지 `요약` 토글에도 같은 흐름을 문서형으로 남기는 규칙이 있다.
+- Expo Go SDK 54를 언급했지만 현재 프로젝트는 `expo-dev-client` 기반이다.
+- 네이티브 모듈이 바뀌면 기존 dev build로는 오류가 날 수 있고, 새 development build가 필요하다.
+- 코드 변경이 생기면 AGENTS.md 지시에 따라 `develop`에 commit/push까지 완료해야 한다.
+- 중요한 작업 후에는 `F:\동기화용 파일\인쇄용\memorize_app2_print.py`에도 작업 요약을 이어 붙이고, Notion 프로젝트 페이지의 `요약` 토글에도 같은 흐름을 문서형으로 남기는 규칙이 있다.
 - 수동 파일 수정은 `apply_patch`를 사용한다.
 - 기존 사용자 변경사항은 임의로 되돌리지 않는다.
+- 미추적 `want.png`는 건드리지 않는다.
 
-## 18. 현재 가장 조심해야 할 미해결/재점검 포인트
+## 22. 현재 남은 재점검 포인트
 
-- 기존 Supabase 프로젝트에는 `supabase/migrations/20260519_add_memory_user_state.sql` 또는 최신 `supabase/schema.sql` 적용 필요
-- Android adaptive icon이 모든 런처 마스크에서 충분히 안전한지 실기기 추가 확인 권장
-- `src/i18n.js`가 매우 크므로 번역 수정 시 키 이름/중괄호 placeholder를 망가뜨리지 않게 조심
-- `App.js`가 큰 단일 파일이라 UI 수정 시 주변 state와 tutorial target ref 연결을 같이 확인해야 함
-- production release 전에는 `npx expo-doctor`, Android production build, 실제 기기 smoke test를 다시 수행하는 것이 좋음
+- Supabase production 프로젝트에 최신 schema/migration이 실제 적용되어 있는지 확인
+- Supabase redirect URL에 `memoria://auth/callback`이 들어가 있는지 확인
+- Play Console에 개인정보처리방침 URL과 데이터 삭제 URL을 공개 웹페이지로 연결
+- Google Play Data safety 입력을 현재 문서와 맞추기
+- 내부 테스트 AAB 설치 후 Google 로그인 버튼이 활성화되는지 확인
+- 실제 Google 로그인 완료 후 카드/폴더/학습 상태 동기화 확인
+- 계정 / 데이터 삭제 실행 후 Supabase 원격 데이터가 실제로 지워지는지 확인
+- 태블릿/긴 화면/짧은 화면에서 시작 화면과 튜토리얼 인트로 균형 확인
+- Android 런처 아이콘 adaptive mask 확인
+- `src/i18n.js`의 영어/일본어 정책 문구를 사람이 자연스럽게 읽히는지 마지막으로 확인
