@@ -83,7 +83,7 @@ Rebuild the dev build only when native config changes, for example:
 6. Add `memoria://auth/callback` to the Supabase redirect allow list.
 7. Add the same redirect URI to your Google / Supabase auth setup before testing a dev build or APK.
 
-## Folder sync migration
+## Cloud sync migrations
 
 If your Supabase project already has the older `memory_pairs` table, run this migration once in the Supabase SQL editor:
 
@@ -93,6 +93,15 @@ If your Supabase project already has the older `memory_pairs` table, run this mi
 ```
 
 This creates `public.memory_folders`, adds `memory_pairs.folder_id`, and applies row-level security so each signed-in user can only see and edit their own folders. New Supabase projects can run the full [supabase/schema.sql](./supabase/schema.sql) instead.
+
+To sync study history, missed-answer stats, and the daily goal between signed-in devices, also run:
+
+```sql
+-- Copy and run the full contents of:
+-- supabase/migrations/20260519_add_memory_user_state.sql
+```
+
+This creates `public.memory_user_state` and lets each signed-in user read, update, and delete only their own study state.
 
 ## Admin role setup on Supabase
 

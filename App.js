@@ -46,6 +46,7 @@ import {
   createSignature,
   migrateStudyStatsEntry,
   mapPairRecord,
+  mergeStudyStats,
   mergePairsBySignature,
   parseImportedPairs,
   recordStudyAttempt,
@@ -254,6 +255,13 @@ const createFolderScopedSignature = (left, right, folderId) =>
 const createFolderViewKey = (scope, folderId) =>
   `${scope}:${normalizeFolderId(folderId)}`;
 
+const normalizeDailyStudyGoal = (value, fallback = DEFAULT_DAILY_STUDY_GOAL) => {
+  const parsedValue = Number.parseInt(`${value}`, 10);
+  const normalizedFallback = Number.isFinite(fallback) ? fallback : DEFAULT_DAILY_STUDY_GOAL;
+
+  return Math.max(1, Math.min(99, Number.isFinite(parsedValue) ? parsedValue : normalizedFallback));
+};
+
 const isCloudFolderSchemaError = (error) => {
   const code = String(error?.code ?? "");
   const message = String(error?.message ?? "").toLowerCase();
@@ -264,6 +272,31 @@ const isCloudFolderSchemaError = (error) => {
     message.includes("memory_folders") ||
     message.includes("folder_id")
   );
+};
+
+const isCloudUserStateSchemaError = (error) => {
+  const code = String(error?.code ?? "");
+  const message = String(error?.message ?? "").toLowerCase();
+
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    message.includes("memory_user_state") ||
+    message.includes("daily_study_goal") ||
+    message.includes("study_stats")
+  );
+};
+
+const mapUserStateRecord = (record, pairs = []) => {
+  if (!record) {
+    return null;
+  }
+
+  return {
+    dailyStudyGoal: normalizeDailyStudyGoal(record.daily_study_goal),
+    studyStats: createPersistableStudyStats(record.study_stats, pairs),
+    updatedAt: record.updated_at ?? record.created_at ?? null,
+  };
 };
 
 const getDeviceLocaleCandidates = () => {
@@ -651,11 +684,15 @@ export default function App() {
   const pairsRef = useRef(pairs);
   const foldersRef = useRef(folders);
   const cloudFoldersReadyRef = useRef(false);
+  const cloudUserStateReadyRef = useRef(true);
   const studyStatsRef = useRef(studyStats);
+  const dailyStudyGoalRef = useRef(dailyStudyGoal);
+  const sessionRef = useRef(session);
   const manageSwipeRefs = useRef({});
   const appOpenTrackedUserRef = useRef(null);
   const roundMetaRef = useRef(null);
   const roundSnapshotRef = useRef(null);
+  const cloudUserStateSyncTimerRef = useRef(null);
   const launchOpacity = useRef(new Animated.Value(1)).current;
   const launchScale = useRef(new Animated.Value(0.94)).current;
 
@@ -1150,6 +1187,15 @@ export default function App() {
   }, [studyStats]);
 
   useEffect(() => {
+    dailyStudyGoalRef.current = dailyStudyGoal;
+  }, [dailyStudyGoal]);
+
+  useEffect(() => {
+    sessionRef.current = session;
+    cloudUserStateReadyRef.current = true;
+  }, [session?.user?.id]);
+
+  useEffect(() => {
     setSelectedManagePairIds((currentIds) => {
       if (!currentIds.length) {
         return currentIds;
@@ -1202,8 +1248,9 @@ export default function App() {
         const parsedStudyGoal = Number.parseInt(storedStudyGoal, 10);
 
         if (Number.isFinite(parsedStudyGoal) && parsedStudyGoal > 0) {
-          const nextGoal = Math.min(99, parsedStudyGoal);
+          const nextGoal = normalizeDailyStudyGoal(parsedStudyGoal);
 
+          dailyStudyGoalRef.current = nextGoal;
           setDailyStudyGoal(nextGoal);
           setDailyGoalInput(`${nextGoal}`);
         }
@@ -1277,6 +1324,7 @@ export default function App() {
     return () => {
       active = false;
       clearTimeout(timerRef.current);
+      clearTimeout(cloudUserStateSyncTimerRef.current);
     };
   }, []);
 
@@ -1302,6 +1350,7 @@ export default function App() {
     }
 
     void AsyncStorage.setItem(DAILY_STUDY_GOAL_KEY, `${dailyStudyGoal}`);
+    scheduleCloudUserStateSync(studyStatsRef.current, dailyStudyGoal);
   }, [dailyStudyGoal, preferencesReady]);
 
   useEffect(() => {
@@ -1325,6 +1374,7 @@ export default function App() {
     studyStatsRef.current = syncedStudyStats;
     setStudyStats(syncedStudyStats);
     void AsyncStorage.setItem(STUDY_STATS_KEY, JSON.stringify(syncedStudyStats));
+    scheduleCloudUserStateSync(syncedStudyStats, dailyStudyGoalRef.current);
   }, [pairs, storageReady]);
 
   useEffect(() => {
@@ -1597,12 +1647,74 @@ export default function App() {
         }
 
         const merged = mergePairsBySignature(remote, inserted, pairsRef.current);
+        let syncedStudyStats = createPersistableStudyStats(studyStatsRef.current, merged);
+        let syncedDailyGoal = dailyStudyGoalRef.current;
+
+        if (cloudUserStateReadyRef.current) {
+          try {
+            const userStateResponse = await supabase
+              .from("memory_user_state")
+              .select("*")
+              .eq("user_id", session.user.id)
+              .maybeSingle();
+
+            if (userStateResponse.error) {
+              throw userStateResponse.error;
+            }
+
+            const remoteState = mapUserStateRecord(userStateResponse.data, merged);
+
+            if (remoteState) {
+              syncedStudyStats = mergeStudyStats(
+                syncedStudyStats,
+                remoteState.studyStats,
+                merged,
+                MAX_SESSION_HISTORY
+              );
+              syncedDailyGoal = remoteState.dailyStudyGoal;
+            }
+
+            const upsertUserStateResponse = await supabase
+              .from("memory_user_state")
+              .upsert(
+                {
+                  user_id: session.user.id,
+                  daily_study_goal: syncedDailyGoal,
+                  study_stats: syncedStudyStats,
+                },
+                { onConflict: "user_id" }
+              );
+
+            if (upsertUserStateResponse.error) {
+              throw upsertUserStateResponse.error;
+            }
+
+            cloudUserStateReadyRef.current = true;
+          } catch (error) {
+            if (!isCloudUserStateSchemaError(error)) {
+              throw error;
+            }
+
+            cloudUserStateReadyRef.current = false;
+          }
+        }
 
         if (active) {
+          foldersRef.current = syncedFolders;
+          pairsRef.current = merged;
+          studyStatsRef.current = syncedStudyStats;
+          dailyStudyGoalRef.current = syncedDailyGoal;
           setFolders(syncedFolders);
           setPairs(merged);
-          await AsyncStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(syncedFolders));
-          await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+          setStudyStats(syncedStudyStats);
+          setDailyStudyGoal(syncedDailyGoal);
+          setDailyGoalInput(`${syncedDailyGoal}`);
+          await Promise.all([
+            AsyncStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(syncedFolders)),
+            AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged)),
+            AsyncStorage.setItem(STUDY_STATS_KEY, JSON.stringify(syncedStudyStats)),
+            AsyncStorage.setItem(DAILY_STUDY_GOAL_KEY, `${syncedDailyGoal}`),
+          ]);
           setTranslatedNote("notes.synced");
         }
       } catch (error) {
@@ -1720,6 +1832,53 @@ export default function App() {
     roundSnapshotRef.current = null;
   }, [pairs.length]);
 
+  async function persistCloudUserState(nextStudyStats = studyStatsRef.current, nextDailyGoal = dailyStudyGoalRef.current) {
+    const activeSession = sessionRef.current;
+
+    if (!storageReady || !supabase || !activeSession?.user?.id || !cloudUserStateReadyRef.current) {
+      return false;
+    }
+
+    const persistableStudyStats = createPersistableStudyStats(nextStudyStats, pairsRef.current);
+    const response = await supabase
+      .from("memory_user_state")
+      .upsert(
+        {
+          user_id: activeSession.user.id,
+          daily_study_goal: normalizeDailyStudyGoal(nextDailyGoal, dailyStudyGoalRef.current),
+          study_stats: persistableStudyStats,
+        },
+        { onConflict: "user_id" }
+      );
+
+    if (response.error) {
+      if (isCloudUserStateSchemaError(response.error)) {
+        cloudUserStateReadyRef.current = false;
+        return false;
+      }
+
+      throw response.error;
+    }
+
+    cloudUserStateReadyRef.current = true;
+    return true;
+  }
+
+  function scheduleCloudUserStateSync(nextStudyStats = studyStatsRef.current, nextDailyGoal = dailyStudyGoalRef.current) {
+    if (!storageReady || !sessionRef.current?.user?.id || !supabase || !cloudUserStateReadyRef.current) {
+      return;
+    }
+
+    clearTimeout(cloudUserStateSyncTimerRef.current);
+    cloudUserStateSyncTimerRef.current = setTimeout(() => {
+      void persistCloudUserState(nextStudyStats, nextDailyGoal).catch((error) => {
+        if (!isCloudUserStateSchemaError(error)) {
+          setNoteState({ raw: error?.message || t("common.retryLater") });
+        }
+      });
+    }, 900);
+  }
+
   const savePairs = async (nextPairs) => {
     const sorted = sortPairs(nextPairs.map(normalizePairFolder));
 
@@ -1739,6 +1898,7 @@ export default function App() {
     const syncedStudyStats = createPersistableStudyStats(nextStudyStats, pairsRef.current);
     studyStatsRef.current = syncedStudyStats;
     setStudyStats(syncedStudyStats);
+    scheduleCloudUserStateSync(syncedStudyStats, dailyStudyGoalRef.current);
     return AsyncStorage.setItem(STUDY_STATS_KEY, JSON.stringify(syncedStudyStats));
   };
 
@@ -2654,35 +2814,44 @@ export default function App() {
 
     try {
       if (supabase && session?.user?.id) {
-        const [pairsResponse, foldersResponse] = await Promise.all([
+        const deletionResponses = await Promise.all([
           supabase.from("memory_pairs").delete().eq("user_id", session.user.id),
           supabase.from("memory_folders").delete().eq("user_id", session.user.id),
+          supabase.from("memory_user_state").delete().eq("user_id", session.user.id),
+          supabase.from("app_usage_events").delete().eq("user_id", session.user.id),
+          supabase.from("support_inquiries").delete().eq("user_id", session.user.id),
         ]);
+        const blockingError = deletionResponses
+          .map((response) => response.error)
+          .find((error) => error && !isCloudUserStateSchemaError(error));
 
-        if (pairsResponse.error) {
-          throw pairsResponse.error;
-        }
-
-        if (foldersResponse.error) {
-          throw foldersResponse.error;
+        if (blockingError) {
+          throw blockingError;
         }
       }
 
       const emptyStudyStats = createEmptyStudyStats();
 
+      clearTimeout(cloudUserStateSyncTimerRef.current);
+      cloudUserStateReadyRef.current = false;
       pairsRef.current = [];
       foldersRef.current = [];
       studyStatsRef.current = emptyStudyStats;
+      dailyStudyGoalRef.current = DEFAULT_DAILY_STUDY_GOAL;
       await Promise.all([
         savePairs([]),
         saveFolders([]),
         updateStudyStats(emptyStudyStats),
+        AsyncStorage.setItem(DAILY_STUDY_GOAL_KEY, `${DEFAULT_DAILY_STUDY_GOAL}`),
       ]);
 
+      setDailyStudyGoal(DEFAULT_DAILY_STUDY_GOAL);
+      setDailyGoalInput(`${DEFAULT_DAILY_STUDY_GOAL}`);
       setSaveFolderId(ROOT_FOLDER_ID);
       setQuizFolderId(ROOT_FOLDER_ID);
       setManageFolderId(ROOT_FOLDER_ID);
       setSelectedManagePairIds([]);
+      setSupportRequests([]);
       setFolderActionMenuKey(null);
       setCreatingFolderKey(null);
       setOpenManageSwipeId(null);
@@ -3951,8 +4120,12 @@ export default function App() {
 
   const saveDailyGoal = () => {
     const parsedValue = Number.parseInt(dailyGoalInput, 10);
-    const nextGoal = Math.max(1, Math.min(99, Number.isFinite(parsedValue) ? parsedValue : dailyStudyGoal));
+    const nextGoal = normalizeDailyStudyGoal(
+      Number.isFinite(parsedValue) ? parsedValue : dailyStudyGoal,
+      dailyStudyGoal
+    );
 
+    dailyStudyGoalRef.current = nextGoal;
     setDailyStudyGoal(nextGoal);
     setDailyGoalInput(`${nextGoal}`);
     setDailyGoalModalVisible(false);
@@ -4117,7 +4290,9 @@ export default function App() {
       { icon: "folder-outline", label: t("about.dataDeletionFolders") },
       { icon: "history", label: t("about.dataDeletionStudyHistory") },
       { icon: "close-box-outline", label: t("about.dataDeletionWrongAnswers") },
+      { icon: "target", label: t("about.dataDeletionDailyGoal") },
       { icon: "cloud-outline", label: t("about.dataDeletionSyncData") },
+      { icon: "message-text-outline", label: t("about.dataDeletionSupportRequests") },
     ];
 
     return (

@@ -84,6 +84,52 @@ export const createPersistableStudyStats = (studyStats, pairs = []) => {
   };
 };
 
+export const mergeStudyStats = (localStats, remoteStats, pairs = [], maxSessions = 60) => {
+  const safeLocalStats = ensureStudyStats(localStats);
+  const safeRemoteStats = ensureStudyStats(remoteStats);
+  const mergedSessions = new Map();
+
+  [...safeRemoteStats.sessions, ...safeLocalStats.sessions].forEach((session) => {
+    const persistableSession = createPersistableStudySession(session);
+
+    if (!persistableSession) {
+      return;
+    }
+
+    const currentSession = mergedSessions.get(persistableSession.id);
+
+    if (
+      !currentSession ||
+      new Date(persistableSession.completedAt) >= new Date(currentSession.completedAt)
+    ) {
+      mergedSessions.set(persistableSession.id, persistableSession);
+    }
+  });
+
+  const mergedCards = {};
+  const signatures = new Set([
+    ...Object.keys(safeRemoteStats.cards),
+    ...Object.keys(safeLocalStats.cards),
+  ]);
+
+  signatures.forEach((signature) => {
+    mergedCards[signature] = mergeCloudCardStats(
+      safeLocalStats.cards[signature],
+      safeRemoteStats.cards[signature]
+    );
+  });
+
+  return createPersistableStudyStats(
+    {
+      cards: mergedCards,
+      sessions: [...mergedSessions.values()]
+        .sort((left, right) => new Date(right.completedAt) - new Date(left.completedAt))
+        .slice(0, maxSessions),
+    },
+    pairs
+  );
+};
+
 export const syncStudyStatsWithPairs = (studyStats, pairs) => {
   const safeStats = ensureStudyStats(studyStats);
   const nextCards = { ...safeStats.cards };
@@ -980,6 +1026,89 @@ function mergeDirectionStats(previousStats, nextStats) {
     lastIncorrectAt: laterTimestamp(safePrevious.lastIncorrectAt, safeNext.lastIncorrectAt),
     lastResult: safeNext.lastResult ?? safePrevious.lastResult ?? null,
   };
+}
+
+function mergeCloudCardStats(localStats, remoteStats) {
+  const safeLocal = ensureCardStats(localStats);
+  const safeRemote = ensureCardStats(remoteStats);
+  const selectedCard = pickMostActiveCardStats(safeLocal, safeRemote);
+  const directions = {
+    A_TO_B: pickMostActiveDirectionStats(
+      safeLocal.directions.A_TO_B,
+      safeRemote.directions.A_TO_B
+    ),
+    B_TO_A: pickMostActiveDirectionStats(
+      safeLocal.directions.B_TO_A,
+      safeRemote.directions.B_TO_A
+    ),
+  };
+  const directionTotals = Object.values(directions).reduce(
+    (totals, direction) => ({
+      attempts: totals.attempts + (direction.attempts ?? 0),
+      correct: totals.correct + (direction.correct ?? 0),
+      incorrect: totals.incorrect + (direction.incorrect ?? 0),
+    }),
+    { attempts: 0, correct: 0, incorrect: 0 }
+  );
+
+  return {
+    left: selectedCard.left || safeLocal.left || safeRemote.left,
+    right: selectedCard.right || safeLocal.right || safeRemote.right,
+    createdAt: earlierTimestamp(safeLocal.createdAt, safeRemote.createdAt) ?? selectedCard.createdAt,
+    attempts: directionTotals.attempts || selectedCard.attempts,
+    correct: directionTotals.attempts ? directionTotals.correct : selectedCard.correct,
+    incorrect: directionTotals.attempts ? directionTotals.incorrect : selectedCard.incorrect,
+    lastStudiedAt: laterTimestamp(safeLocal.lastStudiedAt, safeRemote.lastStudiedAt),
+    lastCorrectAt: laterTimestamp(safeLocal.lastCorrectAt, safeRemote.lastCorrectAt),
+    lastIncorrectAt: laterTimestamp(safeLocal.lastIncorrectAt, safeRemote.lastIncorrectAt),
+    lastResult: selectedCard.lastResult,
+    directions,
+  };
+}
+
+function pickMostActiveCardStats(firstStats, secondStats) {
+  const safeFirst = ensureCardStats(firstStats);
+  const safeSecond = ensureCardStats(secondStats);
+
+  return compareStatsActivity(safeFirst, safeSecond) >= 0 ? safeFirst : safeSecond;
+}
+
+function pickMostActiveDirectionStats(firstStats, secondStats) {
+  const safeFirst = ensureDirectionStats(firstStats);
+  const safeSecond = ensureDirectionStats(secondStats);
+
+  return compareStatsActivity(safeFirst, safeSecond) >= 0 ? safeFirst : safeSecond;
+}
+
+function compareStatsActivity(firstStats, secondStats) {
+  const firstStudiedAt = firstStats.lastStudiedAt ? new Date(firstStats.lastStudiedAt).getTime() : 0;
+  const secondStudiedAt = secondStats.lastStudiedAt ? new Date(secondStats.lastStudiedAt).getTime() : 0;
+
+  if (firstStudiedAt !== secondStudiedAt) {
+    return firstStudiedAt - secondStudiedAt;
+  }
+
+  const firstAttempts = firstStats.attempts ?? 0;
+  const secondAttempts = secondStats.attempts ?? 0;
+
+  if (firstAttempts !== secondAttempts) {
+    return firstAttempts - secondAttempts;
+  }
+
+  return (firstStats.incorrect ?? 0) + (firstStats.correct ?? 0) -
+    ((secondStats.incorrect ?? 0) + (secondStats.correct ?? 0));
+}
+
+function earlierTimestamp(first, second) {
+  if (!first) {
+    return second ?? null;
+  }
+
+  if (!second) {
+    return first;
+  }
+
+  return new Date(first) <= new Date(second) ? first : second;
 }
 
 function laterTimestamp(first, second) {

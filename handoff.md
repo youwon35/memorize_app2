@@ -288,16 +288,15 @@ Supabase client:
 
 - `memory_pairs`
 - `memory_folders`
-- `study_sessions`
-- `missed_answers`
-- `support_requests`
+- `memory_user_state` (학습 기록, 오답 통계, 일일 목표)
+- `support_inquiries`
 - `app_usage_events`
 - RPC: `get_admin_dashboard_metrics`
 
 계정 / 데이터 삭제:
 
 - 앱 정보 탭의 제목은 `계정 / 데이터 삭제`
-- 설명은 Google 계정 자체는 삭제되지 않으며, 메모리아에 저장된 카드/폴더/학습 기록/오답 기록/동기화 데이터만 삭제된다는 의미
+- 설명은 Google 계정 자체는 삭제되지 않으며, 메모리아에 저장된 카드/폴더/학습 기록/오답 기록/일일 목표/문의 기록/동기화 데이터만 삭제된다는 의미
 - 버튼 텍스트는 `계정 삭제하기`
 - 버튼을 누르면 삭제될 데이터 목록을 보여주는 커스텀 확인 팝업이 뜬다.
 - 계속을 누르면 “삭제 요청”이 아니라 실제 삭제가 실행된다.
@@ -305,7 +304,8 @@ Supabase client:
 
 주의:
 
-- 현재 삭제 함수는 Supabase에서 `memory_pairs`, `memory_folders`를 삭제하는 코드가 핵심이다. 학습 기록/오답/동기화 데이터 삭제 범위가 정책 문구와 100% 맞는지 릴리스 전 한 번 더 점검하는 것이 좋다.
+- 기존 Supabase 프로젝트는 `supabase/migrations/20260519_add_memory_user_state.sql`를 한 번 실행해야 학습 기록/오답 통계/일일 목표 클라우드 동기화가 활성화된다.
+- 삭제 함수는 `memory_pairs`, `memory_folders`, `memory_user_state`, `app_usage_events`, `support_inquiries`를 삭제하도록 맞춰져 있다.
 
 ## 13. 다국어 / 번역 상태
 
@@ -388,7 +388,7 @@ npm run build:production
 
 릴리스 전 앱 차원에서 특히 볼 것:
 
-- 데이터 삭제가 정책 문구대로 실제로 모든 관련 Supabase 데이터를 지우는지
+- Supabase에 최신 `memory_user_state` 마이그레이션이 적용되어 학습 상태 동기화와 데이터 삭제가 실제 원격 DB에서 동작하는지
 - Google OAuth redirect scheme이 release build에서 동작하는지
 - 신규 설치 첫 실행 splash와 튜토리얼 흐름
 - Android launcher icon이 기기마다 잘리지 않는지
@@ -407,7 +407,7 @@ npm run build:production
 
 ## 18. 현재 가장 조심해야 할 미해결/재점검 포인트
 
-- `deleteMemoriaAccountData`가 정책 문구의 “학습 기록, 오답 기록, 동기화 데이터”까지 실제로 모두 삭제하는지 확인 필요
+- 기존 Supabase 프로젝트에는 `supabase/migrations/20260519_add_memory_user_state.sql` 또는 최신 `supabase/schema.sql` 적용 필요
 - Android adaptive icon이 모든 런처 마스크에서 충분히 안전한지 실기기 추가 확인 권장
 - `src/i18n.js`가 매우 크므로 번역 수정 시 키 이름/중괄호 placeholder를 망가뜨리지 않게 조심
 - `App.js`가 큰 단일 파일이라 UI 수정 시 주변 state와 tutorial target ref 연결을 같이 확인해야 함

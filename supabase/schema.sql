@@ -66,12 +66,22 @@ create table if not exists public.memory_folders (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
+create table if not exists public.memory_user_state (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  daily_study_goal integer not null default 5,
+  study_stats jsonb not null default '{"cards":{},"sessions":[]}'::jsonb,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
 alter table public.memory_pairs
   add column if not exists folder_id text not null default 'root';
 
 alter table public.memory_folders enable row level security;
 
 alter table public.memory_pairs enable row level security;
+
+alter table public.memory_user_state enable row level security;
 
 do $$
 begin
@@ -97,6 +107,20 @@ begin
     alter table public.memory_folders
       add constraint memory_folders_parent_not_self
       check (parent_id <> id);
+  end if;
+end
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'memory_user_state_daily_goal_range'
+  ) then
+    alter table public.memory_user_state
+      add constraint memory_user_state_daily_goal_range
+      check (daily_study_goal between 1 and 99);
   end if;
 end
 $$;
@@ -262,6 +286,13 @@ before update on public.memory_folders
 for each row
 execute procedure public.set_memory_pairs_updated_at();
 
+drop trigger if exists memory_user_state_set_updated_at on public.memory_user_state;
+
+create trigger memory_user_state_set_updated_at
+before update on public.memory_user_state
+for each row
+execute procedure public.set_memory_pairs_updated_at();
+
 drop trigger if exists user_profiles_set_updated_at on public.user_profiles;
 
 create trigger user_profiles_set_updated_at
@@ -297,6 +328,9 @@ on public.memory_folders (user_id, parent_id);
 
 create unique index if not exists memory_folders_user_parent_lower_name_idx
 on public.memory_folders (user_id, parent_id, lower(name));
+
+create index if not exists memory_user_state_updated_at_idx
+on public.memory_user_state (updated_at desc);
 
 drop policy if exists "Users can view their own profile" on public.user_profiles;
 create policy "Users can view their own profile"
@@ -376,6 +410,31 @@ on public.memory_folders
 for delete
 using (auth.uid() = user_id);
 
+drop policy if exists "Users can view their own memory user state" on public.memory_user_state;
+create policy "Users can view their own memory user state"
+on public.memory_user_state
+for select
+using (auth.uid() = user_id);
+
+drop policy if exists "Users can insert their own memory user state" on public.memory_user_state;
+create policy "Users can insert their own memory user state"
+on public.memory_user_state
+for insert
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can update their own memory user state" on public.memory_user_state;
+create policy "Users can update their own memory user state"
+on public.memory_user_state
+for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can delete their own memory user state" on public.memory_user_state;
+create policy "Users can delete their own memory user state"
+on public.memory_user_state
+for delete
+using (auth.uid() = user_id);
+
 create table if not exists public.support_inquiries (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users (id) on delete cascade,
@@ -415,11 +474,23 @@ on public.support_inquiries
 for insert
 with check (auth.uid() = user_id);
 
+drop policy if exists "Users can delete their own support inquiries" on public.support_inquiries;
+create policy "Users can delete their own support inquiries"
+on public.support_inquiries
+for delete
+using (auth.uid() = user_id);
+
 drop policy if exists "Users can insert their own app usage events" on public.app_usage_events;
 create policy "Users can insert their own app usage events"
 on public.app_usage_events
 for insert
 with check (auth.uid() = user_id and event_type = 'app_open');
+
+drop policy if exists "Users can delete their own app usage events" on public.app_usage_events;
+create policy "Users can delete their own app usage events"
+on public.app_usage_events
+for delete
+using (auth.uid() = user_id);
 
 drop policy if exists "Admins can view all app usage events" on public.app_usage_events;
 create policy "Admins can view all app usage events"
