@@ -1,6 +1,6 @@
 # MEMORIA / 메모리아 Handoff
 
-Last updated: 2026-05-18 KST
+Last updated: 2026-05-19 KST
 
 이 문서는 다음 채팅이나 다른 작업자가 `D:\github\APP\memorize_app2` 프로젝트를 바로 이어받기 위한 현재 상태 요약이다. 기존 `handoff.md`는 이 내용으로 새로 덮어썼다.
 
@@ -19,8 +19,9 @@ Last updated: 2026-05-18 KST
 
 - 작업 폴더: `D:\github\APP\memorize_app2`
 - 기본 작업 브랜치: `develop`
-- 마지막으로 확인한 앱 코드 기준 커밋: `db3fc05` (`fix: use provided branding artwork`)
-- 이 문서 작성 전 작업트리 상태: `develop...origin/develop`, 변경 없음
+- 마지막으로 확인한 앱 코드 기준 커밋: `fd430d0` (`fix: sync study state with account data`)
+- 현재 작업 중인 변경: 시작/튜토리얼 인트로는 `background_decor.png` + `ghost_character.png` 분리 자산과 `react-native-safe-area-context` 기반 안전 영역 계산으로 반응형 배치하고, 파일 가져오기는 저장 전 미리보기 모달을 통해 저장 예정/중복/오류 개수를 확인하도록 변경
+- 현재 미추적 `want.png`는 사용자가 둔 참고 파일로 보이며, 별도 요청 전에는 건드리지 않는다.
 - 최근 Android development build:
   - EAS build id: `64ddcb4e-c22d-4b79-ad9e-6d74874cbb93`
   - EAS commit: `db3fc05fad7a0edd7d51e3278b5aa468554126b9`
@@ -45,6 +46,7 @@ Last updated: 2026-05-18 KST
   - `expo-file-system`
   - `expo-secure-store`
   - `expo-web-browser`
+  - `react-native-safe-area-context`
   - `xlsx`
   - `jszip`
 
@@ -110,9 +112,9 @@ npx eas-cli build:list --platform android --limit 1 --non-interactive
   - foreground: `./assets/adaptive-icon.png`
   - background: `#DED7FF`
 - splash:
-  - image: `./assets/memoria-splash.png`
-  - resizeMode: `cover`
-  - backgroundColor: `#F5F7FB`
+  - image: `./assets/splash_full_preview.png`
+  - resizeMode: `contain`
+  - backgroundColor: `#F7F5FF`
 
 ### `eas.json`
 
@@ -133,10 +135,10 @@ npx eas-cli build:list --platform android --limit 1 --non-interactive
 - `scripts/start-dev-build.ps1`: dev build용 Expo 시작 스크립트
 - `app-icon.png`: 앱 아이콘
 - `assets/adaptive-icon.png`: Android adaptive icon foreground
-- `assets/memoria-splash.png`: 앱 시작 splash image
-- `assets/memoria-character.png`: 튜토리얼 시작 화면 캐릭터 이미지
-- `assets/want1.png`: 사용자가 직접 넣은 아이콘 원본
-- `assets/want2.png`: 사용자가 직접 넣은 시작화면 원본
+- `assets/splash_full_preview.png`: native splash와 Figma 전체 프리뷰 참고 이미지
+- `assets/background_decor.png`: 시작/튜토리얼 인트로의 배경 장식 레이어
+- `assets/ghost_character.png`: 시작/튜토리얼 인트로의 Figma 캐릭터 이미지
+- `assets/google-g.png`: Google 로그인 버튼용 표준 컬러 G 아이콘
 
 ## 7. 브랜딩 / 이미지 자산 관련 매우 중요한 주의사항
 
@@ -144,10 +146,11 @@ npx eas-cli build:list --platform android --limit 1 --non-interactive
 
 따라서 다음 작업에서 브랜딩 이미지를 건드릴 때는 다음 원칙을 지켜야 한다.
 
-- `assets/want1.png`와 `assets/want2.png`를 원본 기준으로 삼는다.
+- Figma에서 만든 `assets/background_decor.png`, `assets/ghost_character.png`, `assets/splash_full_preview.png`를 현재 기준 자산으로 삼는다.
 - 캐릭터를 새로 그리거나 SVG로 재해석하지 말 것.
-- 시작 화면은 사용자가 준 `want2.png`와 같은 느낌이어야 하며, 현재는 태그라인 텍스트만 제거된 `assets/memoria-splash.png`를 사용한다.
-- 튜토리얼 시작 화면 캐릭터는 `assets/memoria-character.png`를 사용한다.
+- 시작 화면과 튜토리얼 인트로는 전체 PNG 한 장을 `cover`로 확대하지 않고, 배경 장식과 캐릭터를 분리해 배치한다.
+- 캐릭터 주변 점선 원은 앱에서 dashed border로 렌더링한다.
+- 튜토리얼 시작 화면 캐릭터는 `assets/ghost_character.png`를 사용한다.
 - 앱 아이콘은 `app-icon.png`와 `assets/adaptive-icon.png`를 사용한다.
 - Android adaptive icon은 런처에서 머리통이 잘리지 않도록 safe area를 고려해야 한다.
 - 튜토리얼 시작 화면의 브랜드 텍스트는 현재 `MEMORIA`이며, 글자 간격을 둔 디자인이다.
@@ -155,8 +158,9 @@ npx eas-cli build:list --platform android --limit 1 --non-interactive
 현재 `App.js` 상단 자산 연결:
 
 ```js
-const LAUNCH_IMAGE = require("./assets/memoria-splash.png");
-const CHARACTER_IMAGE = require("./assets/memoria-character.png");
+const GOOGLE_G_ICON = require("./assets/google-g.png");
+const MEMORIA_CHARACTER_IMAGE = require("./assets/ghost_character.png");
+const MEMORIA_BACKGROUND_IMAGE = require("./assets/background_decor.png");
 ```
 
 ## 8. 앱 내부 주요 상수와 저장 키
@@ -242,7 +246,8 @@ const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
 중요 동작:
 
 - 튜토리얼 시작 화면은 유지한다.
-- 튜토리얼 시작 화면의 캐릭터 이미지는 `assets/memoria-character.png`다.
+- 튜토리얼 시작 화면의 캐릭터 이미지는 `assets/ghost_character.png`다.
+- 튜토리얼 시작 화면도 시작 화면과 같은 `background_decor.png` + `ghost_character.png` 분리 배치를 사용한다.
 - 튜토리얼 시작 화면의 브랜드 표기는 `MEMORIA`다.
 - 튜토리얼 step overlay에서 강조된 영역 자체는 누르는 대상이 아니다.
 - 사용자는 강조 영역을 누르는 것이 아니라 `다음으로` 또는 마지막 단계의 `튜토리얼 종료` 버튼으로만 진행하길 원했다.
@@ -267,6 +272,8 @@ const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
 - XLS/XLSX: `xlsx`
 - DOCX: `jszip`으로 `word/document.xml` 파싱
 - TXT/CSV: 줄과 구분자를 기반으로 앞/뒤 카드쌍 추출
+- 파일 선택 후 즉시 저장하지 않고 미리보기 모달에서 저장 예정, 중복 제외, 형식 오류, 읽은 항목, 저장 위치와 예시 3개를 확인한다.
+- 미리보기와 실제 저장은 `prepareEntryBatch` 기준을 공유해 중복 판정 결과가 흔들리지 않게 했다.
 
 OCR/카메라 관련:
 

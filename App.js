@@ -10,7 +10,6 @@ import {
   NativeModules,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -22,6 +21,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 import { makeRedirectUri } from "expo-auth-session";
 import { File } from "expo-file-system";
@@ -67,7 +67,7 @@ import {
 
 const GOOGLE_G_ICON = require("./assets/google-g.png");
 const MEMORIA_CHARACTER_IMAGE = require("./assets/ghost_character.png");
-const MEMORIA_SPLASH_PREVIEW_IMAGE = require("./assets/splash_full_preview.png");
+const MEMORIA_BACKGROUND_IMAGE = require("./assets/background_decor.png");
 
 WebBrowser.maybeCompleteAuthSession();
 const APP_VERSION = "1.0.0";
@@ -492,6 +492,64 @@ const LIGHT_THEME = {
 
 const getQuizModeConfig = (mode) =>
   QUIZ_MODE_OPTIONS.find((option) => option.key === mode) ?? QUIZ_MODE_OPTIONS[0];
+
+const createIntroLayoutMetrics = (
+  screenWidth,
+  screenHeight,
+  {
+    actionReservedHeight = 220,
+    maxArtworkSize = 440,
+    isTabletLayout = false,
+    safeAreaInsets = {},
+  } = {}
+) => {
+  const safeWidth = Math.max(320, screenWidth || 390);
+  const safeHeight = Math.max(560, screenHeight || 844);
+  const safeTopInset = Math.max(0, safeAreaInsets.top ?? 0);
+  const safeBottomInset = Math.max(0, safeAreaInsets.bottom ?? 0);
+  const statusBarFallback = Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
+  const responsiveTopInset = Math.max(
+    isTabletLayout ? 52 : 48,
+    Math.round(safeHeight * (isTabletLayout ? 0.04 : 0.055))
+  );
+  const responsiveBottomInset =
+    Platform.OS === "android"
+      ? Math.max(86, Math.min(124, Math.round(safeHeight * 0.11)))
+      : Math.max(56, Math.min(94, Math.round(safeHeight * 0.075)));
+  const topInset = Math.max(
+    safeTopInset + (isTabletLayout ? 28 : 24),
+    statusBarFallback + 28,
+    responsiveTopInset
+  );
+  const bottomInset = Math.max(
+    safeBottomInset + (isTabletLayout ? 28 : 24),
+    responsiveBottomInset
+  );
+  const horizontalPadding = isTabletLayout ? 32 : 20;
+  const maxByWidth = safeWidth - horizontalPadding * 2;
+  const maxByHeight = safeHeight - topInset - bottomInset - actionReservedHeight;
+  const minArtworkSize = safeHeight < 700 ? 236 : 284;
+  const artworkSize = Math.round(
+    Math.max(
+      220,
+      Math.min(maxByWidth, Math.max(minArtworkSize, maxByHeight), maxArtworkSize)
+    )
+  );
+  const titleFontSize = Math.round(
+    Math.max(28, Math.min(isTabletLayout ? 38 : 34, safeWidth * 0.075))
+  );
+
+  return {
+    topInset,
+    bottomInset,
+    horizontalPadding,
+    artworkSize,
+    titleFontSize,
+    titleLineHeight: titleFontSize + 10,
+    actionMaxWidth: isTabletLayout ? 560 : 560,
+  };
+};
+
 const getNextTutorialStep = (currentKey) => {
   const currentIndex = TUTORIAL_STEPS.findIndex((step) => step.key === currentKey);
 
@@ -589,8 +647,9 @@ const mergeSupportRequests = (...collections) => {
   );
 };
 
-export default function App() {
+function AppContent() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const safeAreaInsets = useSafeAreaInsets();
   const [tab, setTab] = useState("save");
   const [language, setLanguage] = useState(getInitialLanguage());
   const [preferencesReady, setPreferencesReady] = useState(false);
@@ -649,6 +708,8 @@ export default function App() {
   const [retryWindowVisible, setRetryWindowVisible] = useState(false);
   const [retryDaysInput, setRetryDaysInput] = useState("7");
   const [importing, setImporting] = useState(false);
+  const [importPreview, setImportPreview] = useState(null);
+  const [importPreviewSaving, setImportPreviewSaving] = useState(false);
   const [roundComplete, setRoundComplete] = useState(false);
   const [roundIncorrectIds, setRoundIncorrectIds] = useState([]);
   const [supportCategory, setSupportCategory] = useState(SUPPORT_CATEGORY_OPTIONS[0]);
@@ -730,12 +791,33 @@ export default function App() {
   );
   const hasSavedCards = quizFolderPairs.length > 0;
   const maxQuizCount = quizFolderPairs.length ? quizFolderPairs.length * (quizMode === "both" ? 2 : 1) : 0;
-  const contentTopPadding = 18 + (Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0);
+  const contentTopPadding =
+    18 + Math.max(safeAreaInsets.top ?? 0, Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0);
   const isTabletLayout = screenWidth >= 768;
   const contentMaxWidth = isTabletLayout ? 820 : null;
   const contentResolvedWidth = contentMaxWidth ?? Math.max(280, screenWidth - 36);
   const manageSwipeCardWidth = contentResolvedWidth - 36;
   const tutorialMaxWidth = isTabletLayout ? 560 : null;
+  const launchLayoutMetrics = useMemo(
+    () =>
+      createIntroLayoutMetrics(screenWidth, screenHeight, {
+        actionReservedHeight: 230,
+        maxArtworkSize: isTabletLayout ? 540 : 430,
+        isTabletLayout,
+        safeAreaInsets,
+      }),
+    [isTabletLayout, safeAreaInsets, screenHeight, screenWidth]
+  );
+  const tutorialIntroLayoutMetrics = useMemo(
+    () =>
+      createIntroLayoutMetrics(screenWidth, screenHeight, {
+        actionReservedHeight: 188,
+        maxArtworkSize: isTabletLayout ? 520 : 430,
+        isTabletLayout,
+        safeAreaInsets,
+      }),
+    [isTabletLayout, safeAreaInsets, screenHeight, screenWidth]
+  );
   const tabBarWidth = isTabletLayout ? Math.min(screenWidth - 28, 820) : null;
   const tabBarLeft = tabBarWidth ? Math.max(14, (screenWidth - tabBarWidth) / 2) : null;
   const parsedQuizCount = Number.parseInt(quizCountInput, 10);
@@ -2376,33 +2458,7 @@ export default function App() {
   };
 
   const saveEntryBatch = async (entries, options = {}) => {
-    const targetFolderId = normalizeFolderId(options.folderId ?? saveFolderId);
-    const existingPairs = pairsRef.current;
-    const knownSignatures = new Set(
-      existingPairs.map((pair) => createFolderScopedSignature(pair.left, pair.right, pair.folderId))
-    );
-    const uniqueEntries = [];
-    let skippedDuplicates = 0;
-
-    entries.forEach((entry) => {
-      const left = entry.left.trim();
-      const right = entry.right.trim();
-
-      if (!left || !right) {
-        return;
-      }
-
-      const folderId = normalizeFolderId(entry.folderId ?? targetFolderId);
-      const signature = createFolderScopedSignature(left, right, folderId);
-
-      if (knownSignatures.has(signature)) {
-        skippedDuplicates += 1;
-        return;
-      }
-
-      knownSignatures.add(signature);
-      uniqueEntries.push({ left, right, folderId });
-    });
+    const { uniqueEntries, skippedDuplicates } = prepareEntryBatch(entries, options);
 
     if (!uniqueEntries.length) {
       return { savedCount: 0, skippedDuplicates, cloudSaved: false, savedPairs: [] };
@@ -2431,18 +2487,18 @@ export default function App() {
           .insert(rows)
           .select();
 
-      if (inserted.error) {
-        throw inserted.error;
-      }
+        if (inserted.error) {
+          throw inserted.error;
+        }
 
-      savedPairs = (inserted.data ?? []).map((record, index) => ({
-        ...mapPairRecord(record),
-        folderId: normalizeFolderId(uniqueEntries[index]?.folderId),
-      }));
-      cloudSaved = true;
-    } catch {
-      setTranslatedNote("notes.cloudLocalOnly");
-    }
+        savedPairs = (inserted.data ?? []).map((record, index) => ({
+          ...mapPairRecord(record),
+          folderId: normalizeFolderId(uniqueEntries[index]?.folderId),
+        }));
+        cloudSaved = true;
+      } catch {
+        setTranslatedNote("notes.cloudLocalOnly");
+      }
     }
 
     await savePairs([...savedPairs, ...existingPairs]);
@@ -2452,6 +2508,42 @@ export default function App() {
       skippedDuplicates,
       cloudSaved,
       savedPairs,
+    };
+  };
+
+  const prepareEntryBatch = (entries, options = {}) => {
+    const targetFolderId = normalizeFolderId(options.folderId ?? saveFolderId);
+    const existingPairs = pairsRef.current;
+    const knownSignatures = new Set(
+      existingPairs.map((pair) => createFolderScopedSignature(pair.left, pair.right, pair.folderId))
+    );
+    const uniqueEntries = [];
+    let skippedDuplicates = 0;
+
+    entries.forEach((entry) => {
+      const left = String(entry?.left ?? "").trim();
+      const right = String(entry?.right ?? "").trim();
+
+      if (!left || !right) {
+        return;
+      }
+
+      const folderId = normalizeFolderId(entry.folderId ?? targetFolderId);
+      const signature = createFolderScopedSignature(left, right, folderId);
+
+      if (knownSignatures.has(signature)) {
+        skippedDuplicates += 1;
+        return;
+      }
+
+      knownSignatures.add(signature);
+      uniqueEntries.push({ left, right, folderId });
+    });
+
+    return {
+      targetFolderId,
+      uniqueEntries,
+      skippedDuplicates,
     };
   };
 
@@ -2559,7 +2651,48 @@ export default function App() {
         return;
       }
 
-      const saveResult = await saveEntryBatch(entries);
+      const targetFolderId = normalizeFolderId(saveFolderId);
+      const preview = prepareEntryBatch(entries, { folderId: targetFolderId });
+
+      setImportPreview({
+        fileName: asset.name || t("alerts.importPreviewUnknownFile"),
+        extension,
+        entries,
+        invalidEntryIndexes,
+        targetFolderId,
+        uniqueEntries: preview.uniqueEntries,
+        skippedDuplicates: preview.skippedDuplicates,
+      });
+    } catch (error) {
+      Alert.alert(
+        t("alerts.importFailTitle"),
+        error?.message || t("alerts.importFailBody")
+      );
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const closeImportPreview = () => {
+    if (importPreviewSaving) {
+      return;
+    }
+
+    setImportPreview(null);
+  };
+
+  const confirmImportPreview = async () => {
+    if (!importPreview || importPreviewSaving || !importPreview.uniqueEntries.length) {
+      return;
+    }
+
+    setImportPreviewSaving(true);
+
+    try {
+      const saveResult = await saveEntryBatch(importPreview.entries, {
+        folderId: importPreview.targetFolderId,
+      });
+      const invalidCount = importPreview.invalidEntryIndexes.length;
       const messages = [];
 
       if (saveResult.savedCount) {
@@ -2570,23 +2703,23 @@ export default function App() {
         messages.push(t("alerts.importSkippedDuplicates", { count: saveResult.skippedDuplicates }));
       }
 
-      if (invalidEntryIndexes.length) {
-        messages.push(t("alerts.importInvalidGroups", { count: invalidEntryIndexes.length }));
+      if (invalidCount) {
+        messages.push(t("alerts.importInvalidGroups", { count: invalidCount }));
       }
 
-      if (!saveResult.savedCount) {
-        Alert.alert(t("alerts.importDoneTitle"), messages.join(" "));
-        return;
-      }
-
-      setQuizFolderId(saveFolderId);
-      setManageFolderId(saveFolderId);
+      setQuizFolderId(importPreview.targetFolderId);
+      setManageFolderId(importPreview.targetFolderId);
       setSaveComposerVisible(false);
       setSaveActionMenuOpen(false);
-      setTranslatedNote(
-        saveResult.cloudSaved ? "notes.importSavedCloud" : "notes.importSavedLocal",
-        { count: saveResult.savedCount }
-      );
+      setImportPreview(null);
+
+      if (saveResult.savedCount) {
+        setTranslatedNote(
+          saveResult.cloudSaved ? "notes.importSavedCloud" : "notes.importSavedLocal",
+          { count: saveResult.savedCount }
+        );
+      }
+
       Alert.alert(t("alerts.importDoneTitle"), messages.join(" "));
     } catch (error) {
       Alert.alert(
@@ -2594,7 +2727,7 @@ export default function App() {
         error?.message || t("alerts.importFailBody")
       );
     } finally {
-      setImporting(false);
+      setImportPreviewSaving(false);
     }
   };
 
@@ -4129,6 +4262,170 @@ export default function App() {
     setDailyStudyGoal(nextGoal);
     setDailyGoalInput(`${nextGoal}`);
     setDailyGoalModalVisible(false);
+  };
+
+  const renderImportPreviewModal = () => {
+    if (!importPreview) {
+      return null;
+    }
+
+    const invalidCount = importPreview.invalidEntryIndexes.length;
+    const duplicateCount = importPreview.skippedDuplicates;
+    const createCount = importPreview.uniqueEntries.length;
+    const totalCount = importPreview.entries.length + invalidCount;
+    const sampleEntries = importPreview.uniqueEntries.slice(0, 3);
+    const modalMaxHeight = Math.max(420, screenHeight - 72);
+    const stats = [
+      {
+        key: "new",
+        label: t("alerts.importPreviewNew"),
+        value: createCount,
+        tone: "accent",
+      },
+      {
+        key: "duplicate",
+        label: t("alerts.importPreviewDuplicate"),
+        value: duplicateCount,
+      },
+      {
+        key: "invalid",
+        label: t("alerts.importPreviewInvalid"),
+        value: invalidCount,
+        tone: invalidCount ? "danger" : "default",
+      },
+      {
+        key: "total",
+        label: t("alerts.importPreviewTotal"),
+        value: totalCount,
+      },
+    ];
+
+    return (
+      <Modal
+        visible={Boolean(importPreview)}
+        transparent
+        animationType="fade"
+        onRequestClose={closeImportPreview}
+      >
+        <View style={styles.focusModalOverlay}>
+          <Pressable
+            style={styles.focusModalBackdrop}
+            disabled={importPreviewSaving}
+            onPress={closeImportPreview}
+          />
+          <View
+            style={[
+              styles.focusModalCard,
+              styles.importConfirmCard,
+              contentMaxWidth ? { maxWidth: Math.min(contentMaxWidth, 460) } : null,
+              { maxHeight: modalMaxHeight },
+            ]}
+          >
+            <View style={styles.focusModalIconWrap}>
+              <MaterialCommunityIcons name="file-eye-outline" size={30} color={theme.accent} />
+            </View>
+            <Text style={styles.focusModalTitle}>{t("alerts.importPreviewTitle")}</Text>
+            <Text style={styles.focusModalBody}>
+              {t("alerts.importPreviewBody", { fileName: importPreview.fileName })}
+            </Text>
+
+            <ScrollView
+              style={styles.importConfirmScroll}
+              contentContainerStyle={styles.importConfirmScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.importConfirmTargetRow}>
+                <MaterialCommunityIcons name="folder-outline" size={17} color={theme.accent} />
+                <Text style={styles.importConfirmTargetText}>
+                  {t("alerts.importPreviewTarget", {
+                    folder: getFolderLabel(importPreview.targetFolderId),
+                  })}
+                </Text>
+              </View>
+
+              <View style={styles.importConfirmStatsGrid}>
+                {stats.map((item) => (
+                  <View key={item.key} style={styles.importConfirmStatItem}>
+                    <Text
+                      style={[
+                        styles.importConfirmStatValue,
+                        item.tone === "accent" && styles.importConfirmStatValueAccent,
+                        item.tone === "danger" && styles.importConfirmStatValueDanger,
+                      ]}
+                    >
+                      {item.value}
+                    </Text>
+                    <Text style={styles.importConfirmStatLabel}>{item.label}</Text>
+                  </View>
+                ))}
+              </View>
+
+              <View style={styles.importConfirmSampleBlock}>
+                <Text style={styles.importConfirmSectionTitle}>
+                  {sampleEntries.length
+                    ? t("alerts.importPreviewSampleTitle")
+                    : t("alerts.importPreviewNoNew")}
+                </Text>
+                {sampleEntries.map((entry, index) => (
+                  <View key={`${entry.left}-${entry.right}-${index}`} style={styles.importConfirmSampleRow}>
+                    <View style={styles.importConfirmSampleBadge}>
+                      <Text style={styles.importConfirmSampleBadgeText}>{index + 1}</Text>
+                    </View>
+                    <View style={styles.importConfirmSampleTextGroup}>
+                      <Text numberOfLines={1} style={styles.importConfirmSampleFront}>
+                        {entry.left}
+                      </Text>
+                      <Text numberOfLines={1} style={styles.importConfirmSampleBack}>
+                        {entry.right}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+
+            <Pressable
+              disabled={importPreviewSaving || !createCount}
+              onPress={() => void confirmImportPreview()}
+              style={({ pressed }) => [
+                styles.focusModalPrimaryButton,
+                (!createCount || importPreviewSaving) && styles.primaryButtonDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.focusModalPrimaryText,
+                  (!createCount || importPreviewSaving) && styles.primaryButtonTextDisabled,
+                ]}
+              >
+                {importPreviewSaving
+                  ? t("alerts.importPreviewSaving")
+                  : t("alerts.importPreviewSave", { count: createCount })}
+              </Text>
+            </Pressable>
+            <Pressable
+              disabled={importPreviewSaving}
+              onPress={closeImportPreview}
+              style={({ pressed }) => [
+                styles.focusModalSecondaryButton,
+                importPreviewSaving && styles.secondaryButtonDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.focusModalSecondaryText,
+                  importPreviewSaving && styles.secondaryButtonTextDisabled,
+                ]}
+              >
+                {t("common.cancel")}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    );
   };
 
   const renderDailyGoalModal = () => (
@@ -5884,7 +6181,12 @@ export default function App() {
   );
 
   return (
-    <SafeAreaView ref={appRootRef} collapsable={false} style={styles.safeArea}>
+    <SafeAreaView
+      ref={appRootRef}
+      collapsable={false}
+      edges={["left", "right"]}
+      style={styles.safeArea}
+    >
       <StatusBar barStyle={theme.statusBarStyle} backgroundColor={theme.statusBarBg} />
 
       <View pointerEvents="none" style={styles.backgroundLayer}>
@@ -5987,6 +6289,7 @@ export default function App() {
       </KeyboardAvoidingView>
 
       {renderDailyGoalModal()}
+      {renderImportPreviewModal()}
       {renderStopQuizModal()}
       {renderTutorialCompletionModal()}
       {renderDataDeletionModal()}
@@ -5999,6 +6302,7 @@ export default function App() {
           styles={styles}
           theme={theme}
           t={t}
+          layoutMetrics={launchLayoutMetrics}
           authBusy={authBusy}
           authReady={authReady && storageReady}
           isConfigured={isSupabaseConfigured}
@@ -6013,6 +6317,7 @@ export default function App() {
           theme={theme}
           t={t}
           maxWidth={tutorialMaxWidth}
+          layoutMetrics={tutorialIntroLayoutMetrics}
           onClose={() => closeTutorial()}
           onStart={startGuidedTutorial}
         />
@@ -6039,6 +6344,14 @@ export default function App() {
   );
 }
 
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppContent />
+    </SafeAreaProvider>
+  );
+}
+
 function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) {
   return (
     <View style={styles.emptyPanel}>
@@ -6058,37 +6371,54 @@ function EmptyPanel({ icon, title, body, actionLabel, onPress, styles, theme }) 
   );
 }
 
-function MemoriaArtwork({ styles, variant = "intro" }) {
+function MemoriaLaunchArtwork({ styles, size }) {
   return (
-    <View style={[styles.memoriaArtwork, variant === "launch" && styles.memoriaArtworkLaunch]}>
+    <View style={[styles.memoriaLaunchArtwork, { width: size, height: size }]}>
+      <View style={styles.memoriaLaunchOrbitRing} />
       <Image
         source={MEMORIA_CHARACTER_IMAGE}
-        style={styles.memoriaCharacterImage}
+        style={styles.memoriaLaunchCharacterImage}
         resizeMode="contain"
       />
     </View>
   );
 }
 
-function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
+function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth, layoutMetrics }) {
   return (
     <View style={styles.tutorialOverlay}>
-      <View pointerEvents="none" style={styles.tutorialIntroDecor}>
+      <View pointerEvents="none" style={styles.launchDecorLayer}>
         <Image
-          source={MEMORIA_SPLASH_PREVIEW_IMAGE}
-          style={styles.memoriaPreviewImage}
-          resizeMode="contain"
+          source={MEMORIA_BACKGROUND_IMAGE}
+          style={styles.launchBackgroundImage}
+          resizeMode="cover"
         />
       </View>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
+
+      <View
+        style={[
           styles.tutorialWelcomeContent,
+          {
+            paddingTop: layoutMetrics.topInset,
+            paddingBottom: layoutMetrics.bottomInset,
+            paddingHorizontal: layoutMetrics.horizontalPadding,
+          },
           maxWidth ? { maxWidth, alignSelf: "center", width: "100%" } : null,
         ]}
       >
-        <View style={styles.tutorialBrandBlock}>
-          <Text style={styles.tutorialBrandTitle}>M E M O R I A</Text>
+        <View style={styles.tutorialHeroBlock}>
+          <MemoriaLaunchArtwork styles={styles} size={layoutMetrics.artworkSize} />
+          <Text
+            style={[
+              styles.tutorialBrandTitle,
+              {
+                fontSize: layoutMetrics.titleFontSize,
+                lineHeight: layoutMetrics.titleLineHeight,
+              },
+            ]}
+          >
+            M E M O R I A
+          </Text>
         </View>
 
         <View style={styles.tutorialWelcomeActions}>
@@ -6106,7 +6436,7 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth }) {
             <Text style={styles.tutorialSkipText}>{t("tutorial.skip")}</Text>
           </Pressable>
         </View>
-      </ScrollView>
+      </View>
     </View>
   );
 }
@@ -6591,6 +6921,7 @@ function LaunchScreen({
   styles,
   theme,
   t,
+  layoutMetrics,
   authBusy,
   authReady,
   isConfigured,
@@ -6609,56 +6940,87 @@ function LaunchScreen({
     <Animated.View style={[styles.launchScreen, { opacity }]}>
       <View pointerEvents="none" style={styles.launchDecorLayer}>
         <Image
-          source={MEMORIA_SPLASH_PREVIEW_IMAGE}
-          style={styles.memoriaPreviewImage}
-          resizeMode="contain"
+          source={MEMORIA_BACKGROUND_IMAGE}
+          style={styles.launchBackgroundImage}
+          resizeMode="cover"
         />
       </View>
 
-      <Animated.View style={[styles.launchContent, { transform: [{ scale }] }]}>
-        <View style={styles.launchBottomStack}>
-          <Text style={styles.launchTitle}>M E M O R I A</Text>
+      <Animated.View
+        style={[
+          styles.launchContent,
+          {
+            paddingTop: layoutMetrics.topInset,
+            paddingBottom: layoutMetrics.bottomInset,
+            paddingHorizontal: layoutMetrics.horizontalPadding,
+            transform: [{ scale }],
+          },
+        ]}
+      >
+        <View style={styles.launchHeroBlock}>
+          <MemoriaLaunchArtwork styles={styles} size={layoutMetrics.artworkSize} />
+          <Text
+            style={[
+              styles.launchTitle,
+              {
+                fontSize: layoutMetrics.titleFontSize,
+                lineHeight: layoutMetrics.titleLineHeight,
+              },
+            ]}
+          >
+            M E M O R I A
+          </Text>
+        </View>
 
-          <View style={styles.launchActionGroup}>
-            <Pressable
-              disabled={googleDisabled}
-              onPress={onGooglePress}
-              style={({ pressed }) => [styles.launchGoogleButtonShell, pressed && styles.pressed]}
+        <View style={[styles.launchActionGroup, { maxWidth: layoutMetrics.actionMaxWidth }]}>
+          <Pressable
+            disabled={googleDisabled}
+            onPress={onGooglePress}
+            style={({ pressed }) => [styles.launchGoogleButtonShell, pressed && styles.pressed]}
+          >
+            <LinearGradient
+              colors={googleDisabled ? ["#C9D0E3", "#BCC4DA"] : ["#9F8FFF", "#8572F4"]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={styles.launchGoogleButton}
             >
-              <LinearGradient
-                colors={googleDisabled ? ["#C9D0E3", "#BCC4DA"] : ["#9F8FFF", "#8572F4"]}
-                start={{ x: 0, y: 0.5 }}
-                end={{ x: 1, y: 0.5 }}
-                style={styles.launchGoogleButton}
-              >
-                <View style={styles.launchGoogleIconCircle}>
-                  <Image
-                    source={GOOGLE_G_ICON}
-                    style={styles.launchGoogleIconImage}
-                    resizeMode="contain"
-                  />
-                </View>
-                <Text style={styles.launchGoogleButtonText}>
-                  {authBusy ? t("about.authConnecting") : googleLabel}
-                </Text>
-              </LinearGradient>
-            </Pressable>
-
-            <Pressable
-              disabled={!authReady}
-              onPress={onGuestPress}
-              style={({ pressed }) => [
-                styles.launchGuestButton,
-                !authReady && styles.launchGuestButtonDisabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              <View style={styles.launchGuestIconWrap}>
-                <MaterialCommunityIcons name="account-star" size={30} color={theme.accent} />
+              <View style={styles.launchGoogleIconCircle}>
+                <Image
+                  source={GOOGLE_G_ICON}
+                  style={styles.launchGoogleIconImage}
+                  resizeMode="contain"
+                />
               </View>
-              <Text style={styles.launchGuestButtonText}>{t("launch.guestStart")}</Text>
-            </Pressable>
-          </View>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                style={styles.launchGoogleButtonText}
+              >
+                {authBusy ? t("about.authConnecting") : googleLabel}
+              </Text>
+            </LinearGradient>
+          </Pressable>
+
+          <Pressable
+            disabled={!authReady}
+            onPress={onGuestPress}
+            style={({ pressed }) => [
+              styles.launchGuestButton,
+              !authReady && styles.launchGuestButtonDisabled,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={styles.launchGuestIconWrap}>
+              <MaterialCommunityIcons name="account-star" size={30} color={theme.accent} />
+            </View>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              style={styles.launchGuestButtonText}
+            >
+              {t("launch.guestStart")}
+            </Text>
+          </Pressable>
         </View>
       </Animated.View>
     </Animated.View>
@@ -9585,6 +9947,118 @@ const createStyles = (theme) => StyleSheet.create({
   focusModalDangerText: {
     color: theme.danger,
   },
+  importConfirmCard: {
+    alignItems: "stretch",
+  },
+  importConfirmScroll: {
+    width: "100%",
+    flexShrink: 1,
+  },
+  importConfirmScrollContent: {
+    gap: 14,
+    paddingBottom: 2,
+  },
+  importConfirmTargetRow: {
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: theme.accentSoft,
+  },
+  importConfirmTargetText: {
+    flexShrink: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "800",
+    color: theme.accent,
+  },
+  importConfirmStatsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  importConfirmStatItem: {
+    flexGrow: 1,
+    flexBasis: "46%",
+    minHeight: 72,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  importConfirmStatValue: {
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  importConfirmStatValueAccent: {
+    color: theme.accent,
+  },
+  importConfirmStatValueDanger: {
+    color: theme.danger,
+  },
+  importConfirmStatLabel: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "800",
+    color: theme.textSecondary,
+  },
+  importConfirmSampleBlock: {
+    width: "100%",
+    gap: 10,
+  },
+  importConfirmSectionTitle: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  importConfirmSampleRow: {
+    minHeight: 50,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 14,
+    backgroundColor: theme.surfaceSoft,
+  },
+  importConfirmSampleBadge: {
+    width: 26,
+    height: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 13,
+    backgroundColor: theme.accent,
+  },
+  importConfirmSampleBadgeText: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: theme.accentText,
+  },
+  importConfirmSampleTextGroup: {
+    flex: 1,
+    gap: 2,
+  },
+  importConfirmSampleFront: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  importConfirmSampleBack: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: theme.textSecondary,
+  },
   goalStepperCard: {
     width: "100%",
     flexDirection: "row",
@@ -10147,7 +10621,7 @@ const createStyles = (theme) => StyleSheet.create({
   launchDecorLayer: {
     ...StyleSheet.absoluteFillObject,
   },
-  memoriaPreviewImage: {
+  launchBackgroundImage: {
     ...StyleSheet.absoluteFillObject,
     width: "100%",
     height: "100%",
@@ -10204,19 +10678,18 @@ const createStyles = (theme) => StyleSheet.create({
   launchContent: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
-    justifyContent: "flex-end",
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === "android" ? 42 : 58,
-    paddingBottom: Platform.OS === "android" ? 108 : 78,
+    justifyContent: "space-between",
   },
-  launchBottomStack: {
+  launchHeroBlock: {
+    flex: 1,
     width: "100%",
-    maxWidth: 560,
     alignItems: "center",
-    gap: 18,
+    justifyContent: "center",
+    gap: 10,
   },
   launchActionGroup: {
     width: "100%",
+    alignSelf: "center",
     gap: 14,
   },
   launchGoogleButtonShell: {
@@ -10258,6 +10731,7 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "900",
     textAlign: "center",
     color: "#FFFFFF",
+    maxWidth: "78%",
   },
   launchGuestButton: {
     minHeight: 64,
@@ -10293,20 +10767,25 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "900",
     textAlign: "center",
     color: theme.accent,
+    maxWidth: "76%",
   },
-  memoriaArtwork: {
-    width: 292,
-    height: 292,
+  memoriaLaunchArtwork: {
     alignItems: "center",
     justifyContent: "center",
+    overflow: "visible",
   },
-  memoriaArtworkLaunch: {
-    width: 318,
-    height: 318,
+  memoriaLaunchOrbitRing: {
+    position: "absolute",
+    width: "94%",
+    height: "94%",
+    borderRadius: 999,
+    borderWidth: 1.6,
+    borderStyle: "dashed",
+    borderColor: "rgba(142, 123, 255, 0.34)",
   },
-  memoriaCharacterImage: {
-    width: "100%",
-    height: "100%",
+  memoriaLaunchCharacterImage: {
+    width: "84%",
+    height: "90%",
   },
   memoriaOrbitRing: {
     position: "absolute",
@@ -10506,16 +10985,14 @@ const createStyles = (theme) => StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   tutorialWelcomeContent: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) + 38 : 58,
-    paddingBottom: Platform.OS === "android" ? 104 : 76,
-    justifyContent: "flex-end",
+    flex: 1,
+    justifyContent: "space-between",
   },
-  tutorialBrandBlock: {
+  tutorialHeroBlock: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 18,
+    gap: 10,
   },
   tutorialBrandTitle: {
     fontSize: 28,
@@ -10525,8 +11002,10 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textPrimary,
   },
   tutorialWelcomeActions: {
+    width: "100%",
+    maxWidth: 560,
+    alignSelf: "center",
     gap: 12,
-    marginTop: 10,
   },
   tutorialStartButton: {
     minHeight: 58,
