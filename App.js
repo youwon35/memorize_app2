@@ -771,7 +771,7 @@ function AppContent() {
       ? t("about.authRemoteTitle")
       : t("about.authLocalTitle");
   const authCaption = syncing ? t("notes.syncing") : note;
-  const isAdmin = userRole === "admin";
+  const isAdmin = Boolean(session?.user?.id) && userRole === "admin";
   const hasActiveQuizRound = tab === "quiz" && deck.length > 0 && !roundComplete;
   const quizFolderSubtreeIds = useMemo(() => getFolderSubtreeIds(folders, quizFolderId), [folders, quizFolderId]);
   const manageFolderSubtreeIds = useMemo(() => getFolderSubtreeIds(folders, manageFolderId), [folders, manageFolderId]);
@@ -1063,7 +1063,6 @@ function AppContent() {
     return deck.filter((card) => incorrectIdSet.has(card.id));
   }, [deck, roundIncorrectIds]);
   const roundCorrectCount = deck.length - roundIncorrectCards.length;
-  const latestSupportRequests = useMemo(() => supportRequests.slice(0, 3), [supportRequests]);
   const latestAdminSupportRequests = useMemo(
     () => adminSupportRequests.slice(0, ADMIN_SUPPORT_PREVIEW_LIMIT),
     [adminSupportRequests]
@@ -1453,8 +1452,12 @@ function AppContent() {
   }, [dailyStudyGoal, preferencesReady]);
 
   useEffect(() => {
+    if (!storageReady) {
+      return;
+    }
+
     void AsyncStorage.setItem(SUPPORT_REQUESTS_KEY, JSON.stringify(supportRequests));
-  }, [supportRequests]);
+  }, [storageReady, supportRequests]);
 
   useEffect(() => {
     if (!storageReady) {
@@ -1507,6 +1510,19 @@ function AppContent() {
       setSession(nextSession ?? null);
       setAuthReady(true);
       setTranslatedNote(nextSession?.user ? "notes.authLinked" : "notes.googleSyncAvailable");
+
+      if (!nextSession?.user) {
+        setUserRole("user");
+        setSupportRequests([]);
+        setSupportNotice("");
+        setAdminMetrics(null);
+        setAdminSupportRequests([]);
+        setAdminOnlyUnresolved(false);
+        setAdminLoading(false);
+        setAdminUpdatingId(null);
+        setAdminNotice("");
+        void AsyncStorage.removeItem(SUPPORT_REQUESTS_KEY);
+      }
     });
 
     return () => {
@@ -1522,7 +1538,11 @@ function AppContent() {
 
     if (!session?.user?.id) {
       setUserRole("user");
+      setAdminMetrics(null);
       setAdminSupportRequests([]);
+      setAdminOnlyUnresolved(false);
+      setAdminLoading(false);
+      setAdminUpdatingId(null);
       setAdminNotice("");
       return;
     }
@@ -6241,26 +6261,6 @@ function AppContent() {
             </Pressable>
           </View>
 
-          {latestSupportRequests.length ? (
-            <View style={styles.supportHistory}>
-              <Text style={styles.supportHistoryTitle}>{t("about.supportRecent")}</Text>
-              {latestSupportRequests.map((item) => (
-                <View key={item.id} style={styles.supportHistoryItem}>
-                  <View style={styles.supportHistoryMeta}>
-                    <View style={styles.supportHistoryLead}>
-                      <Text style={styles.supportHistoryCategory}>{t(`supportCategories.${normalizeSupportCategory(item.category)}`)}</Text>
-                      <Text style={styles.supportHistoryStatus}>{t(`supportStatuses.${normalizeSupportStatus(item.status)}`)}</Text>
-                    </View>
-                    <Text style={styles.supportHistoryDate}>{formatDateTimeForLanguage(item.createdAt, language)}</Text>
-                  </View>
-                  <Text style={styles.supportHistoryEmail}>{item.replyEmail}</Text>
-                  <Text style={styles.supportHistoryMessage} numberOfLines={3}>
-                    {item.message}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
         </View>
 
         <View style={styles.settingsCard}>
