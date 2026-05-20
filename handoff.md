@@ -1,6 +1,6 @@
 # MEMORIA / 메모리아 Handoff
 
-Last updated: 2026-05-20 KST
+Last updated: 2026-05-21 KST
 
 이 문서는 다음 채팅 또는 다른 작업자가 `D:\github\APP\memorize_app2` 프로젝트를 바로 이어받기 위한 최신 상태 요약이다. 이전 `handoff.md`는 이 내용으로 새로 덮어썼다.
 
@@ -12,14 +12,14 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 
 - 작업 폴더: `D:\github\APP\memorize_app2`
 - 기본 작업 브랜치: `develop`
-- 현재 최신 기능 커밋: `c6ec4e9 feat: refine import examples and bulk selection`
-- 현재 `develop`, `origin/develop`은 `c6ec4e9` 기반이며, 이 문서 갱신 커밋이 추가될 예정이다.
+- 현재 최신 기능 커밋: `aa54d05 fix: hide support history from non-admin users`
+- 현재 `develop`, `origin/develop`은 `aa54d05` 기반이며, 이 문서 갱신 커밋이 추가될 예정이다.
 - 현재 `main`, `origin/main`은 이전 릴리스 커밋 `03f7898`에 머물러 있다.
 - 현재 추적되지 않은 파일: `want.png`
   - 사용자가 둔 참고 파일로 보인다.
   - 별도 요청 전에는 건드리지 말 것.
 
-최근 릴리스 빌드:
+최근 성공한 릴리스 빌드:
 
 - EAS build ID: `6539f525-e33c-44f0-858d-a8cea15fb13a`
 - Profile: `production`
@@ -36,6 +36,10 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 - Google Play에서 실제로 막는 것은 `versionName`이 아니라 정수 `versionCode`다.
 - 새 빌드는 EAS production의 `autoIncrement`로 `9 -> 10` 증가했다.
 - `versionName`은 이번 내부 테스트용 기능 수정 빌드에서 `1.0.3`으로 올렸다.
+- 2026-05-21 관리자 문의 노출 수정 후 `1.0.4` production AAB 생성을 시도했지만, Expo/EAS 무료 플랜 Android 월간 빌드 한도 소진으로 실패했다.
+  - EAS 메시지: Android builds from the Free plan this month used, reset on Mon Jun 01 2026.
+  - 빌드 목록에는 새 실패 빌드가 생성되지 않았고, 최신 성공 AAB는 여전히 `1.0.3 / versionCode 10`이다.
+  - EAS가 실패 직전 remote `versionCode`를 `10 -> 11`로 증가시켰다고 출력했으므로, 다음 성공 빌드에서 실제 versionCode를 반드시 확인해야 한다.
 
 ## 3. 기술 스택
 
@@ -104,7 +108,7 @@ npx eas-cli build:list --platform android --limit 1 --json
 ### `package.json`
 
 - `name`: `memorize_app2`
-- `version`: `1.0.3`
+- `version`: `1.0.4`
 - `main`: `node_modules/expo/AppEntry.js`
 - `private`: `true`
 
@@ -112,7 +116,7 @@ npx eas-cli build:list --platform android --limit 1 --json
 
 - Expo app name: `MEMORIA`
 - slug: `memoria`
-- version: `1.0.3`
+- version: `1.0.4`
 - scheme: `memoria`
 - owner: `zinnn`
 - EAS project id: `6caf9ed8-f402-4743-8222-5e05fcedb0f2`
@@ -214,7 +218,7 @@ OAuth redirect:
 - 캐릭터 주변 점선 원은 앱에서 dashed border로 렌더링한다.
 - 캐릭터/점선/버튼 배치는 `react-native-safe-area-context`와 `createIntroLayoutMetrics`로 화면 크기와 safe area를 고려한다.
 - `MEMORIA` 텍스트는 이미지 안 글자가 아니라 네이티브 `Text`로 렌더링해 글자 깨짐을 줄인다.
-- 시작 화면 우측 상단에는 아주 작게 `v1.0.3` 같은 앱 버전을 표시한다.
+- 시작 화면 우측 상단에는 아주 작게 `v1.0.4` 같은 앱 버전을 표시한다.
 - 하단 Google/게스트 버튼은 Android 내비게이션 바와 겹치지 않도록 safe area를 고려한다.
 
 `App.js` 상단 자산 연결:
@@ -563,6 +567,18 @@ npx eas-cli build --platform android --profile production --non-interactive --no
   - EAS build ID: `6539f525-e33c-44f0-858d-a8cea15fb13a`
   - AAB: https://expo.dev/artifacts/eas/duZy4o5t6LMbyXqq5iiqTm.aab
   - Commit: `c6ec4e9c9b7dfb859977a8df754d0082e90cbd66`
+- 2026-05-21 앱 정보 탭 관리자 전용 정보 노출 수정
+  - 로그아웃/일반 사용자 상태에서 문의하기 카드 아래 `최근 문의` 목록이 보이지 않도록 제거했다.
+  - 관리자 여부를 단순 `role === admin`이 아니라 `로그인 세션 존재 + admin role`로 판단하도록 강화했다.
+  - 로그아웃 시 관리자 지표, 관리자 문의 목록, 관리자 필터 상태, 로컬 문의 기록 상태를 즉시 비우도록 했다.
+  - 앱 정보 탭 기준 일반 사용자에게 남는 항목은 로그인/로그아웃, 계정/데이터 삭제(로그인 시), 화면 모드, 언어, 문의하기 작성 폼, 튜토리얼 다시보기, 앱 버전/정책/라이선스다.
+  - 관리자만 보는 항목은 관리자 배지, 운영 지표, 관리자 문의함, 전체 문의 상태 변경 UI다.
+  - 앱 버전을 `1.0.4`로 올렸다.
+- production AAB `1.0.4` 생성 시도
+  - 기능 커밋: `aa54d059e2b13053b42dca8680f34be8c4199a8c`
+  - EAS가 versionCode를 `10 -> 11`로 증가시킨 뒤 무료 플랜 Android 빌드 한도 소진으로 실패했다.
+  - 새 AAB URL은 생성되지 않았다.
+  - 다음 시도는 EAS 플랜 업그레이드 또는 2026-06-01 한도 리셋 이후 가능하다.
 
 ## 21. 다음 작업자가 꼭 기억할 것
 
@@ -589,3 +605,4 @@ npx eas-cli build --platform android --profile production --non-interactive --no
 - 태블릿/긴 화면/짧은 화면에서 시작 화면과 튜토리얼 인트로 균형 확인
 - Android 런처 아이콘 adaptive mask 확인
 - `src/i18n.js`의 영어/일본어 정책 문구를 사람이 자연스럽게 읽히는지 마지막으로 확인
+- `1.0.4` 관리자 문의 노출 수정 AAB는 아직 생성되지 않았다. EAS 빌드 한도 리셋 또는 플랜 업그레이드 후 다시 production build를 실행하고, 실제 versionCode와 AAB URL을 확인해야 한다.
