@@ -1,6 +1,6 @@
 # MEMORIA / 메모리아 Handoff
 
-Last updated: 2026-05-21 KST
+Last updated: 2026-05-28 KST
 
 이 문서는 다음 채팅 또는 다른 작업자가 `D:\github\APP\memorize_app2` 프로젝트를 바로 이어받기 위한 최신 상태 요약이다. 이전 `handoff.md`는 이 내용으로 새로 덮어썼다.
 
@@ -12,8 +12,8 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 
 - 작업 폴더: `D:\github\APP\memorize_app2`
 - 기본 작업 브랜치: `develop`
-- 현재 최신 기능 커밋: `aa54d05 fix: hide support history from non-admin users`
-- 현재 `develop`, `origin/develop`은 `aa54d05` 기반이며, 이 문서 갱신 커밋이 추가될 예정이다.
+- 현재 최신 기능 커밋: `06dc255 feat: add study reminders and refine app icon`
+- 현재 `develop`, `origin/develop`은 `06dc255` 기반이며, 이 문서 갱신 커밋이 바로 다음 커밋으로 추가될 예정이다.
 - 현재 `main`, `origin/main`은 이전 릴리스 커밋 `03f7898`에 머물러 있다.
 - 현재 추적되지 않은 파일: `want.png`
   - 사용자가 둔 참고 파일로 보인다.
@@ -40,6 +40,18 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
   - EAS 메시지: Android builds from the Free plan this month used, reset on Mon Jun 01 2026.
   - 빌드 목록에는 새 실패 빌드가 생성되지 않았고, 최신 성공 AAB는 여전히 `1.0.3 / versionCode 10`이다.
   - EAS가 실패 직전 remote `versionCode`를 `10 -> 11`로 증가시켰다고 출력했으므로, 다음 성공 빌드에서 실제 versionCode를 반드시 확인해야 한다.
+- 2026-05-28 아이콘/알림 수정 후 `1.0.5` production AAB 생성을 다시 시도했지만, 같은 EAS 무료 플랜 Android 월간 빌드 한도 소진으로 실패했다.
+  - EAS가 실패 직전 remote `versionCode`를 `11 -> 12`로 증가시켰다고 출력했다.
+  - 새 AAB URL은 생성되지 않았다.
+  - 최신 성공 AAB는 여전히 `1.0.3 / versionCode 10`이다.
+
+현재 실기기 확인용 dev build:
+
+- 파일: `D:\github\APP\memorize_app2\.expo\local-builds\memoria-dev-1.0.5-reminders-debug.apk`
+- App versionName: `1.0.5`
+- 빌드 방식: `expo prebuild --platform android --no-install` 후 로컬 Gradle `:app:assembleDebug`
+- 파일 크기: 약 146.6 MB
+- dev build이므로 설치 후 JS 확인에는 Metro 서버가 필요하다.
 
 ## 3. 기술 스택
 
@@ -59,6 +71,7 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 - `expo-document-picker`
 - `expo-file-system`
 - `expo-linear-gradient`
+- `expo-notifications`
 - `expo-secure-store`
 - `expo-web-browser`
 - `react-native-safe-area-context`
@@ -108,7 +121,7 @@ npx eas-cli build:list --platform android --limit 1 --json
 ### `package.json`
 
 - `name`: `memorize_app2`
-- `version`: `1.0.4`
+- `version`: `1.0.5`
 - `main`: `node_modules/expo/AppEntry.js`
 - `private`: `true`
 
@@ -116,7 +129,7 @@ npx eas-cli build:list --platform android --limit 1 --json
 
 - Expo app name: `MEMORIA`
 - slug: `memoria`
-- version: `1.0.4`
+- version: `1.0.5`
 - scheme: `memoria`
 - owner: `zinnn`
 - EAS project id: `6caf9ed8-f402-4743-8222-5e05fcedb0f2`
@@ -129,7 +142,10 @@ npx eas-cli build:list --platform android --limit 1 --json
   - backgroundColor: `#F7F5FF`
 - Android adaptive icon:
   - foreground: `./assets/adaptive-icon.png`
-  - backgroundColor: `#F7F5FF`
+  - backgroundColor: `#B8AEFF`
+- Expo notifications plugin:
+  - plugin: `expo-notifications`
+  - notification color: `#8E7BFF`
 
 ### `eas.json`
 
@@ -218,7 +234,7 @@ OAuth redirect:
 - 캐릭터 주변 점선 원은 앱에서 dashed border로 렌더링한다.
 - 캐릭터/점선/버튼 배치는 `react-native-safe-area-context`와 `createIntroLayoutMetrics`로 화면 크기와 safe area를 고려한다.
 - `MEMORIA` 텍스트는 이미지 안 글자가 아니라 네이티브 `Text`로 렌더링해 글자 깨짐을 줄인다.
-- 시작 화면 우측 상단에는 아주 작게 `v1.0.4` 같은 앱 버전을 표시한다.
+- 시작 화면 우측 상단에는 아주 작게 `v1.0.5` 같은 앱 버전을 표시한다.
 - 하단 Google/게스트 버튼은 Android 내비게이션 바와 겹치지 않도록 safe area를 고려한다.
 
 `App.js` 상단 자산 연결:
@@ -249,6 +265,9 @@ const LANGUAGE_KEY = "@memoria/language";
 const STUDY_STATS_KEY = "@memoria/study-stats";
 const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen-v5";
 const SUPPORT_REQUESTS_KEY = "@memoria/support-requests";
+const STUDY_REMINDERS_ENABLED_KEY = "@memoria/study-reminders-enabled";
+const STUDY_REMINDER_IDS_KEY = "@memoria/study-reminder-ids";
+const STUDY_REMINDER_LAST_OPENED_KEY = "@memoria/study-reminder-last-opened";
 const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 ```
 
@@ -294,6 +313,7 @@ const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
    - 계정 / 데이터 삭제
    - 라이트/다크 모드
    - 언어: 한국어 / English / 日本語
+   - 학습 알림 ON/OFF
    - 문의하기
    - 튜토리얼 다시보기
    - 앱 버전
@@ -579,6 +599,22 @@ npx eas-cli build --platform android --profile production --non-interactive --no
   - EAS가 versionCode를 `10 -> 11`로 증가시킨 뒤 무료 플랜 Android 빌드 한도 소진으로 실패했다.
   - 새 AAB URL은 생성되지 않았다.
   - 다음 시도는 EAS 플랜 업그레이드 또는 2026-06-01 한도 리셋 이후 가능하다.
+- 2026-05-28 앱 아이콘과 학습 알림 추가
+  - `app-icon.png`, `assets/adaptive-icon.png`의 옅은 보라색 배경을 더 진한 보라 계열로 보정해 런처에서 캐릭터와 카드가 더 잘 분리되게 했다.
+  - `expo-notifications`를 추가하고, Android notification channel과 로컬 예약 알림 스케줄러를 구현했다.
+  - 앱 정보 탭에 학습 알림 ON/OFF 스위치를 추가했다.
+  - 알림을 켜면 권한을 요청하고, 마지막 앱 실행 시점을 기준으로 1, 2, 3, 5, 8, 14, 21, 30일 뒤 오후 8시에 알림을 예약한다.
+  - 앱을 다시 열면 미접속 기간이 리셋되어 예약 알림도 다시 계산된다.
+  - 알림을 끄면 저장된 예약 알림 ID와 `memoria-study-reminder-` prefix의 예약 알림을 취소한다.
+  - 앱 버전을 `1.0.5`로 올렸다.
+  - `metro.config.js`를 Expo 기본 Metro config 확장 형태로 추가해 `expo-doctor`의 Metro config 검사를 통과시켰다.
+  - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo install --check`, `npx expo-doctor`, `npx expo export --platform android --output-dir .expo-export --clear` 통과.
+- production AAB `1.0.5` 생성 시도
+  - 기능 커밋: `06dc2557dd91e6c8c20fe0499ee66a3f244df6bd`
+  - EAS가 versionCode를 `11 -> 12`로 증가시킨 뒤 무료 플랜 Android 빌드 한도 소진으로 실패했다.
+  - 새 AAB URL은 생성되지 않았다.
+  - 대신 로컬 dev build APK를 생성했다: `D:\github\APP\memorize_app2\.expo\local-builds\memoria-dev-1.0.5-reminders-debug.apk`
+  - 다음 AAB 시도는 EAS 플랜 업그레이드 또는 2026-06-01 한도 리셋 이후 가능하다.
 
 ## 21. 다음 작업자가 꼭 기억할 것
 
@@ -605,4 +641,4 @@ npx eas-cli build --platform android --profile production --non-interactive --no
 - 태블릿/긴 화면/짧은 화면에서 시작 화면과 튜토리얼 인트로 균형 확인
 - Android 런처 아이콘 adaptive mask 확인
 - `src/i18n.js`의 영어/일본어 정책 문구를 사람이 자연스럽게 읽히는지 마지막으로 확인
-- `1.0.4` 관리자 문의 노출 수정 AAB는 아직 생성되지 않았다. EAS 빌드 한도 리셋 또는 플랜 업그레이드 후 다시 production build를 실행하고, 실제 versionCode와 AAB URL을 확인해야 한다.
+- `1.0.4` 관리자 문의 노출 수정과 `1.0.5` 아이콘/학습 알림 수정 AAB는 아직 생성되지 않았다. EAS 빌드 한도 리셋 또는 플랜 업그레이드 후 다시 production build를 실행하고, 실제 versionCode와 AAB URL을 확인해야 한다.
