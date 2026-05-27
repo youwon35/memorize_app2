@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  AppState,
   BackHandler,
   Easing,
   Image,
@@ -13,6 +14,7 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   useWindowDimensions,
@@ -26,6 +28,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { makeRedirectUri } from "expo-auth-session";
 import { File } from "expo-file-system";
 import { EncodingType, readAsStringAsync } from "expo-file-system/legacy";
+import * as Notifications from "expo-notifications";
 import * as WebBrowser from "expo-web-browser";
 
 import { isSupabaseConfigured, supabase } from "./src/lib/supabase";
@@ -70,6 +73,14 @@ const MEMORIA_CHARACTER_IMAGE = require("./assets/ghost_character.png");
 const MEMORIA_BACKGROUND_IMAGE = require("./assets/background_decor.png");
 
 WebBrowser.maybeCompleteAuthSession();
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
 const APP_VERSION = require("./app.json").expo.version;
 const STORAGE_KEY = "@memoria/cards";
 const FOLDERS_STORAGE_KEY = "@memoria/folders";
@@ -81,6 +92,9 @@ const LANGUAGE_KEY = "@memoria/language";
 const STUDY_STATS_KEY = "@memoria/study-stats";
 const TUTORIAL_SEEN_KEY = "@memoria/tutorial-seen-v5";
 const SUPPORT_REQUESTS_KEY = "@memoria/support-requests";
+const STUDY_REMINDERS_ENABLED_KEY = "@memoria/study-reminders-enabled";
+const STUDY_REMINDER_IDS_KEY = "@memoria/study-reminder-ids";
+const STUDY_REMINDER_LAST_OPENED_KEY = "@memoria/study-reminder-last-opened";
 const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
 const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
@@ -100,6 +114,11 @@ const MAX_SESSION_HISTORY = 60;
 const SUPPORT_CATEGORY_OPTIONS = ["bug", "feature", "other"];
 const SUPPORT_STATUS_OPTIONS = ["received", "reviewing", "resolved"];
 const ADMIN_SUPPORT_PREVIEW_LIMIT = 12;
+const STUDY_REMINDER_CHANNEL_ID = "memoria-study-reminders";
+const STUDY_REMINDER_NOTIFICATION_PREFIX = "memoria-study-reminder-";
+const STUDY_REMINDER_DAYS = [1, 2, 3, 5, 8, 14, 21, 30];
+const STUDY_REMINDER_HOUR = 20;
+const STUDY_REMINDER_MINUTE = 0;
 const MANAGE_SORT_OPTIONS = [
   { key: "recent", labelKey: "manage.sortRegistered" },
   { key: "missed", labelKey: "manage.sortMissedShort" },
@@ -602,6 +621,21 @@ const formatMetricValue = (value) => {
     : numericValue.toFixed(1);
 };
 const formatMetricPercent = (value) => `${formatMetricValue(value)}%`;
+const getStudyReminderDate = (daysFromNow, baseDate = new Date()) => {
+  const scheduledDate = new Date(baseDate.getTime() + daysFromNow * 24 * 60 * 60 * 1000);
+
+  scheduledDate.setHours(STUDY_REMINDER_HOUR, STUDY_REMINDER_MINUTE, 0, 0);
+  return scheduledDate;
+};
+const parseStoredReminderIds = (value) => {
+  try {
+    const parsed = JSON.parse(value ?? "[]");
+
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+};
 const createLocalSupportRequest = ({ replyEmail, message, category, session }) => ({
   id: `support-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   category: normalizeSupportCategory(category),
@@ -720,6 +754,9 @@ function AppContent() {
   const [supportRequests, setSupportRequests] = useState([]);
   const [supportSending, setSupportSending] = useState(false);
   const [supportNotice, setSupportNotice] = useState("");
+  const [studyRemindersEnabled, setStudyRemindersEnabled] = useState(false);
+  const [studyReminderBusy, setStudyReminderBusy] = useState(false);
+  const [studyReminderNotice, setStudyReminderNotice] = useState("");
   const [adminSupportRequests, setAdminSupportRequests] = useState([]);
   const [adminMetrics, setAdminMetrics] = useState(null);
   const [adminOnlyUnresolved, setAdminOnlyUnresolved] = useState(false);
@@ -1333,6 +1370,7 @@ function AppContent() {
         const storedStudyStats = await AsyncStorage.getItem(STUDY_STATS_KEY);
         const storedTutorialSeen = await AsyncStorage.getItem(TUTORIAL_SEEN_KEY);
         const storedSupportRequests = await AsyncStorage.getItem(SUPPORT_REQUESTS_KEY);
+        const storedStudyRemindersEnabled = await AsyncStorage.getItem(STUDY_REMINDERS_ENABLED_KEY);
         const storedFolders = await AsyncStorage.getItem(FOLDERS_STORAGE_KEY);
 
         if (isSupportedLanguage(storedLanguage)) {
@@ -1367,6 +1405,10 @@ function AppContent() {
           } catch {
             setSupportRequests([]);
           }
+        }
+
+        if (active) {
+          setStudyRemindersEnabled(storedStudyRemindersEnabled === "1");
         }
 
         if (storedFolders && active) {
@@ -1458,6 +1500,35 @@ function AppContent() {
 
     void AsyncStorage.setItem(SUPPORT_REQUESTS_KEY, JSON.stringify(supportRequests));
   }, [storageReady, supportRequests]);
+
+  useEffect(() => {
+    if (!storageReady || !studyRemindersEnabled) {
+      return;
+    }
+
+    void scheduleStudyReminderNotifications().then((scheduled) => {
+      if (!scheduled) {
+        setStudyRemindersEnabled(false);
+        void AsyncStorage.setItem(STUDY_REMINDERS_ENABLED_KEY, "0");
+      }
+    });
+  }, [language, storageReady, studyRemindersEnabled]);
+
+  useEffect(() => {
+    if (!storageReady) {
+      return undefined;
+    }
+
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "active" || !studyRemindersEnabled) {
+        return;
+      }
+
+      void scheduleStudyReminderNotifications();
+    });
+
+    return () => subscription.remove();
+  }, [language, storageReady, studyRemindersEnabled]);
 
   useEffect(() => {
     if (!storageReady) {
@@ -2023,6 +2094,126 @@ function AppContent() {
 
   const addSupportRequest = (nextRequest) => {
     setSupportRequests((currentRequests) => mergeSupportRequests([nextRequest], currentRequests));
+  };
+
+  const cancelStudyReminderNotifications = async () => {
+    const storedIds = parseStoredReminderIds(await AsyncStorage.getItem(STUDY_REMINDER_IDS_KEY));
+    const scheduledRequests = await Notifications.getAllScheduledNotificationsAsync();
+    const knownIds = new Set(storedIds);
+
+    scheduledRequests.forEach((request) => {
+      if (request.identifier?.startsWith(STUDY_REMINDER_NOTIFICATION_PREFIX)) {
+        knownIds.add(request.identifier);
+      }
+    });
+
+    await Promise.all(
+      [...knownIds].map((identifier) =>
+        Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {})
+      )
+    );
+    await AsyncStorage.removeItem(STUDY_REMINDER_IDS_KEY);
+  };
+
+  const ensureStudyReminderChannel = async () => {
+    if (Platform.OS !== "android") {
+      return;
+    }
+
+    await Notifications.setNotificationChannelAsync(STUDY_REMINDER_CHANNEL_ID, {
+      name: t("about.reminderTitle"),
+      description: t("about.reminderBody"),
+      importance: Notifications.AndroidImportance.DEFAULT,
+    });
+  };
+
+  const scheduleStudyReminderNotifications = async ({ requestPermission = false } = {}) => {
+    if (Platform.OS === "web") {
+      return false;
+    }
+
+    let permissions = await Notifications.getPermissionsAsync();
+    let granted = permissions.granted || permissions.status === "granted";
+
+    if (!granted && requestPermission) {
+      permissions = await Notifications.requestPermissionsAsync();
+      granted = permissions.granted || permissions.status === "granted";
+    }
+
+    if (!granted) {
+      await cancelStudyReminderNotifications();
+      return false;
+    }
+
+    await ensureStudyReminderChannel();
+    await cancelStudyReminderNotifications();
+
+    const now = new Date();
+    const scheduledIds = [];
+
+    for (const [index, dayCount] of STUDY_REMINDER_DAYS.entries()) {
+      const identifier = `${STUDY_REMINDER_NOTIFICATION_PREFIX}${dayCount}-${now.getTime()}`;
+      const bodyKey =
+        index < 3
+          ? "about.reminderNotificationBodyDaily"
+          : "about.reminderNotificationBodyLater";
+      const scheduledId = await Notifications.scheduleNotificationAsync({
+        identifier,
+        content: {
+          title: t("about.reminderNotificationTitle"),
+          body: t(bodyKey),
+          data: {
+            source: "study-reminder",
+            daysFromLastOpen: dayCount,
+          },
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: getStudyReminderDate(dayCount, now),
+          channelId: STUDY_REMINDER_CHANNEL_ID,
+        },
+      });
+
+      scheduledIds.push(scheduledId);
+    }
+
+    await Promise.all([
+      AsyncStorage.setItem(STUDY_REMINDER_IDS_KEY, JSON.stringify(scheduledIds)),
+      AsyncStorage.setItem(STUDY_REMINDER_LAST_OPENED_KEY, now.toISOString()),
+    ]);
+    return true;
+  };
+
+  const updateStudyReminderPreference = async (nextEnabled) => {
+    setStudyReminderBusy(true);
+    setStudyReminderNotice("");
+
+    try {
+      if (!nextEnabled) {
+        await cancelStudyReminderNotifications();
+        await AsyncStorage.setItem(STUDY_REMINDERS_ENABLED_KEY, "0");
+        setStudyRemindersEnabled(false);
+        setStudyReminderNotice(t("about.reminderDisabledNotice"));
+        return;
+      }
+
+      const scheduled = await scheduleStudyReminderNotifications({ requestPermission: true });
+
+      if (!scheduled) {
+        await AsyncStorage.setItem(STUDY_REMINDERS_ENABLED_KEY, "0");
+        setStudyRemindersEnabled(false);
+        Alert.alert(t("about.reminderPermissionTitle"), t("about.reminderPermissionBody"));
+        return;
+      }
+
+      await AsyncStorage.setItem(STUDY_REMINDERS_ENABLED_KEY, "1");
+      setStudyRemindersEnabled(true);
+      setStudyReminderNotice(t("about.reminderEnabledNotice"));
+    } catch {
+      setStudyReminderNotice(t("about.reminderFailedNotice"));
+    } finally {
+      setStudyReminderBusy(false);
+    }
   };
 
   const getFolderLabel = (folderId) => {
@@ -6174,6 +6365,29 @@ function AppContent() {
           </View>
         </View>
 
+        <View style={styles.settingsCard}>
+          <View style={styles.settingsToggleRow}>
+            <View style={styles.settingsToggleCopy}>
+              <Text style={styles.settingsTitle}>{t("about.reminderTitle")}</Text>
+              <Text style={styles.settingsBody}>{t("about.reminderBody")}</Text>
+              <Text style={styles.settingsToggleStatus}>
+                {studyRemindersEnabled
+                  ? t("about.reminderEnabled")
+                  : t("about.reminderDisabled")}
+              </Text>
+            </View>
+            <Switch
+              disabled={studyReminderBusy}
+              value={studyRemindersEnabled}
+              onValueChange={(nextValue) => void updateStudyReminderPreference(nextValue)}
+              trackColor={{ false: theme.mutedBg, true: theme.accentSoftStrong }}
+              thumbColor={studyRemindersEnabled ? theme.accent : theme.surface}
+              ios_backgroundColor={theme.mutedBg}
+            />
+          </View>
+          {studyReminderNotice ? <Text style={styles.supportNotice}>{studyReminderNotice}</Text> : null}
+        </View>
+
         <View style={styles.settingsCard} {...tutorialTargetProps("about-support-panel")}>
           <View style={styles.aboutSupportTutorialTarget}>
             <View style={styles.settingsHeader}>
@@ -9767,6 +9981,28 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 12,
+  },
+  settingsToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+  },
+  settingsToggleCopy: {
+    flex: 1,
+    gap: 6,
+  },
+  settingsToggleStatus: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    overflow: "hidden",
+    backgroundColor: theme.accentSoft,
+    color: theme.accent,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "900",
   },
   settingsTitle: {
     flexShrink: 1,

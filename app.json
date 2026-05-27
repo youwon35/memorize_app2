@@ -2,7 +2,7 @@
   "expo": {
     "name": "MEMORIA",
     "slug": "memoria",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "orientation": "portrait",
     "scheme": "memoria",
     "userInterfaceStyle": "light",
@@ -25,13 +25,19 @@
           "experimentalLauncherActivity": false
         }
       ],
+      [
+        "expo-notifications",
+        {
+          "color": "#8E7BFF"
+        }
+      ],
       "expo-secure-store"
     ],
     "android": {
       "package": "com.youwon35.memoria",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#F7F5FF"
+        "backgroundColor": "#B8AEFF"
       }
     },
     "ios": {
