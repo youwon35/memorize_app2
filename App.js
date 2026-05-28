@@ -48,12 +48,15 @@ import {
   createLocalPair,
   createPersistableStudyStats,
   createSignature,
+  getPairStudySummary,
+  isPairHidden,
   migrateStudyStatsEntry,
   mapPairRecord,
   mergeStudyStats,
   mergePairsBySignature,
   parseImportedPairs,
   recordStudyAttempt,
+  setPairHidden,
   shuffleItems,
   sortPairs,
   updatePairValues,
@@ -702,6 +705,50 @@ const calculateMissRate = (cardStats = {}) => {
 
   return (cardStats?.incorrect ?? 0) / attempts;
 };
+const getAccuracyTone = (accuracy) => {
+  if (accuracy === null || accuracy === undefined) {
+    return "empty";
+  }
+
+  if (accuracy >= 80) {
+    return "good";
+  }
+
+  if (accuracy >= 50) {
+    return "mid";
+  }
+
+  return "bad";
+};
+const getAccuracyColor = (theme, tone) => {
+  if (tone === "good") {
+    return theme.success;
+  }
+
+  if (tone === "mid") {
+    return "#F4B740";
+  }
+
+  if (tone === "bad") {
+    return theme.danger;
+  }
+
+  return theme.textPlaceholder;
+};
+const addLocalDays = (date, offset) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset);
+const calculateStudyStreak = (sessionCountsByDate, today = new Date()) => {
+  const todayKey = getLocalDayKey(today);
+  let cursor = sessionCountsByDate.get(todayKey) ? today : addLocalDays(today, -1);
+  let streak = 0;
+
+  while (sessionCountsByDate.get(getLocalDayKey(cursor))) {
+    streak += 1;
+    cursor = addLocalDays(cursor, -1);
+  }
+
+  return streak;
+};
 const normalizeUserRole = (value) => (value === "admin" ? "admin" : "user");
 const mapAdminDashboardMetrics = (record = {}) => ({
   totalUsers: Number(record.total_users ?? 0),
@@ -938,8 +985,13 @@ function AppContent() {
     [folders, t]
   );
   const quizFolderPairs = useMemo(
-    () => pairs.filter((pair) => quizFolderSubtreeIds.has(normalizeFolderId(pair.folderId))),
-    [pairs, quizFolderSubtreeIds]
+    () =>
+      pairs.filter(
+        (pair) =>
+          quizFolderSubtreeIds.has(normalizeFolderId(pair.folderId)) &&
+          !isPairHidden(studyStats, pair)
+      ),
+    [pairs, quizFolderSubtreeIds, studyStats]
   );
   const manageFolderPairs = useMemo(
     () => pairs.filter((pair) => manageFolderSubtreeIds.has(normalizeFolderId(pair.folderId))),
@@ -1318,6 +1370,10 @@ function AppContent() {
 
     return counts;
   }, [studyStats.sessions, todayKey]);
+  const currentStudyStreak = useMemo(
+    () => calculateStudyStreak(historySessionCountsByDate),
+    [historySessionCountsByDate]
+  );
   const selectedHistorySessions = useMemo(
     () =>
       studyStats.sessions
@@ -3501,7 +3557,7 @@ function AppContent() {
         const right = currentPair?.right ?? card.right;
         const direction = card.direction === "B_TO_A" ? "B_TO_A" : "A_TO_B";
 
-        if (!left || !right) {
+        if (!left || !right || (currentPair && isPairHidden(studyStatsRef.current, currentPair))) {
           return;
         }
 
@@ -3745,6 +3801,13 @@ function AppContent() {
 
     await savePairs(pairs.filter((item) => item.id !== pair.id));
     setSelectedManagePairIds((currentIds) => currentIds.filter((id) => id !== pair.id));
+  };
+
+  const togglePairHidden = (pair) => {
+    const currentlyHidden = isPairHidden(studyStatsRef.current, pair);
+
+    closeManageSwipe(pair.id);
+    void updateStudyStats(setPairHidden(studyStatsRef.current, pair, !currentlyHidden));
   };
 
   const deleteSelectedManagePairs = async () => {
@@ -5694,6 +5757,14 @@ function AppContent() {
         deltaKey: "history.cardDelta",
         trendTone: "bad",
       },
+      {
+        key: "streak",
+        value: currentStudyStreak,
+        label: t("history.streak"),
+        delta: currentStudyStreak,
+        deltaKey: "history.streakDelta",
+        trendTone: "good",
+      },
     ];
     const renderMetricCard = (metric) => {
       const deltaSymbol = metric.delta === 0 ? "•" : metric.delta > 0 ? "▲" : "▼";
@@ -5938,14 +6009,14 @@ function AppContent() {
       manageSwipeRefs.current[openManageSwipeId]?.scrollTo({ x: 0, animated: true });
     }
 
-    manageSwipeRefs.current[pairId]?.scrollTo({ x: shouldOpen ? 152 : 0, animated: true });
+    manageSwipeRefs.current[pairId]?.scrollTo({ x: shouldOpen ? 228 : 0, animated: true });
     setOpenManageSwipeId(shouldOpen ? pairId : null);
   };
 
   const syncManageSwipeState = (pairId, event) => {
     const offsetX = event.nativeEvent.contentOffset.x;
     setOpenManageSwipeId((currentId) => {
-      if (offsetX > 64) {
+      if (offsetX > 96) {
         return pairId;
       }
 
@@ -5956,6 +6027,15 @@ function AppContent() {
   const renderManagePairCard = (pair, index) => {
     const targetProps = index === 0 ? tutorialTargetProps("manage-first-card") : {};
     const selected = selectedManagePairSet.has(pair.id);
+    const pairSummary = getPairStudySummary(studyStats, pair);
+    const accuracyTone = getAccuracyTone(pairSummary.accuracy);
+    const accuracyColor = getAccuracyColor(theme, accuracyTone);
+    const accuracyPercent = pairSummary.accuracy ?? 0;
+    const accuracyLabel =
+      pairSummary.accuracy === null
+        ? t("manage.accuracyUnstudied")
+        : t("manage.accuracyPercent", { percent: pairSummary.accuracy });
+    const hidden = pairSummary.hidden;
     const beginEdit = () => {
       closeManageSwipe(pair.id);
       setEditingId(pair.id);
@@ -6058,7 +6138,7 @@ function AppContent() {
           horizontal
           bounces={false}
           showsHorizontalScrollIndicator={false}
-          snapToOffsets={[0, 152]}
+          snapToOffsets={[0, 228]}
           decelerationRate="fast"
           overScrollMode="never"
           scrollEnabled={!manageSelectionMode}
@@ -6118,6 +6198,36 @@ function AppContent() {
                 </Pressable>
               ) : null}
             </Pressable>
+            <View style={styles.manageCardStatusRow}>
+              <View style={styles.manageAccuracyMeter}>
+                <View style={styles.manageAccuracyTrack}>
+                  <View
+                    style={[
+                      styles.manageAccuracyFill,
+                      {
+                        width: `${accuracyPercent}%`,
+                        backgroundColor: accuracyColor,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={[styles.manageAccuracyText, { color: accuracyColor }]}>
+                  {accuracyLabel}
+                </Text>
+              </View>
+              <Text style={styles.manageAttemptText}>
+                {t("manage.attemptSummary", {
+                  attempts: pairSummary.attempts,
+                  incorrect: pairSummary.incorrect,
+                })}
+              </Text>
+              {hidden ? (
+                <View style={styles.manageHiddenBadge}>
+                  <MaterialCommunityIcons name="eye-off-outline" size={12} color={theme.textSecondary} />
+                  <Text style={styles.manageHiddenBadgeText}>{t("manage.hiddenBadge")}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
           <View style={styles.manageSwipeActions}>
             <Pressable
@@ -6126,6 +6236,15 @@ function AppContent() {
             >
               <MaterialCommunityIcons name="pencil-outline" size={20} color={theme.accentText} />
               <Text style={styles.manageSwipeActionText}>{t("manage.edit")}</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => togglePairHidden(pair)}
+              style={({ pressed }) => [styles.manageSwipeAction, styles.manageSwipeHideAction, pressed && styles.pressed]}
+            >
+              <MaterialCommunityIcons name={hidden ? "eye-outline" : "eye-off-outline"} size={20} color={theme.accentText} />
+              <Text style={styles.manageSwipeActionText}>
+                {hidden ? t("manage.unhide") : t("manage.hide")}
+              </Text>
             </Pressable>
             <Pressable
               onPress={confirmDelete}
@@ -9956,7 +10075,7 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.surfaceStrong,
   },
   manageSwipeActions: {
-    width: 152,
+    width: 228,
     flexDirection: "row",
   },
   manageSwipeAction: {
@@ -9968,6 +10087,9 @@ const createStyles = (theme) => StyleSheet.create({
   },
   manageSwipeEditAction: {
     backgroundColor: theme.textSecondary,
+  },
+  manageSwipeHideAction: {
+    backgroundColor: theme.accent,
   },
   manageSwipeDeleteAction: {
     backgroundColor: theme.danger,
@@ -10102,6 +10224,60 @@ const createStyles = (theme) => StyleSheet.create({
     lineHeight: 20,
     fontWeight: "700",
     color: theme.textPrimary,
+  },
+  manageCardStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 7,
+    paddingTop: 6,
+    paddingLeft: 2,
+    paddingRight: 38,
+  },
+  manageAccuracyMeter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    minWidth: 124,
+  },
+  manageAccuracyTrack: {
+    width: 54,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceMuted,
+    overflow: "hidden",
+  },
+  manageAccuracyFill: {
+    height: "100%",
+    borderRadius: 999,
+  },
+  manageAccuracyText: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "900",
+  },
+  manageAttemptText: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "700",
+    color: theme.textSecondary,
+  },
+  manageHiddenBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  manageHiddenBadgeText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: "800",
+    color: theme.textSecondary,
   },
   manageSideButton: {
     flex: 0,

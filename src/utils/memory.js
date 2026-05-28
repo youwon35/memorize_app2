@@ -1,8 +1,29 @@
+const KOREAN_PARTICLE_PATTERN =
+  /(으로부터|로부터|에게서|한테서|께서|에서|에게|한테|까지|처럼|보다|으로|하고|이랑|랑|이나|나|라도|라도|은|는|이|가|을|를|와|과|도|만|의|야|아|여|로|에)$/;
+
 const normalizeText = (value = "") =>
   value
+    .normalize("NFKC")
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
+
+const normalizeAnswerText = (value = "") =>
+  normalizeText(value)
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[.,!?;:'"“”‘’()[\]{}<>/\\|~`@#$%^&*_+=-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const compactAnswerText = (value = "") =>
+  normalizeAnswerText(value).replace(/\s+/g, "");
+
+const stripTrailingKoreanParticles = (value = "") =>
+  normalizeAnswerText(value)
+    .split(" ")
+    .map((token) => token.replace(KOREAN_PARTICLE_PATTERN, ""))
+    .join(" ")
+    .trim();
 
 const createId = (prefix) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -37,8 +58,26 @@ export const updatePairValues = (pair, left, right) => ({
 export const createSignature = (left, right) =>
   `${normalizeText(left)}::${normalizeText(right)}`;
 
-export const compareAnswers = (input, expected) =>
-  normalizeText(input) === normalizeText(expected);
+export const compareAnswers = (input, expected) => {
+  const normalizedInput = compactAnswerText(input);
+  const normalizedExpected = compactAnswerText(expected);
+
+  if (!normalizedInput || !normalizedExpected) {
+    return false;
+  }
+
+  if (normalizedInput === normalizedExpected) {
+    return true;
+  }
+
+  const strippedInput = compactAnswerText(stripTrailingKoreanParticles(input));
+
+  if (strippedInput === normalizedExpected) {
+    return true;
+  }
+
+  return canAcceptMinorTypo(normalizedInput, normalizedExpected);
+};
 
 export const sortPairs = (pairs) =>
   [...pairs].sort(
@@ -66,6 +105,7 @@ export const mergePairsBySignature = (...collections) => {
 export const createEmptyStudyStats = () => ({
   cards: {},
   sessions: [],
+  hiddenCards: {},
 });
 
 export const createPersistableStudyStats = (studyStats, pairs = []) => {
@@ -81,6 +121,7 @@ export const createPersistableStudyStats = (studyStats, pairs = []) => {
     sessions: syncedStats.sessions
       .map((session) => createPersistableStudySession(session))
       .filter(Boolean),
+    hiddenCards: createPersistableHiddenCards(syncedStats.hiddenCards, pairs),
   };
 };
 
@@ -125,6 +166,7 @@ export const mergeStudyStats = (localStats, remoteStats, pairs = [], maxSessions
       sessions: [...mergedSessions.values()]
         .sort((left, right) => new Date(right.completedAt) - new Date(left.completedAt))
         .slice(0, maxSessions),
+      hiddenCards: mergeHiddenCards(safeLocalStats.hiddenCards, safeRemoteStats.hiddenCards),
     },
     pairs
   );
@@ -142,6 +184,7 @@ export const syncStudyStatsWithPairs = (studyStats, pairs) => {
   return {
     ...safeStats,
     cards: nextCards,
+    hiddenCards: createPersistableHiddenCards(safeStats.hiddenCards, pairs),
   };
 };
 
@@ -165,9 +208,62 @@ export const migrateStudyStatsEntry = (studyStats, previousPair, nextPair) => {
     nextCards[nextSignature] = nextStats;
   }
 
+  const nextHiddenCards = { ...safeStats.hiddenCards };
+  const previousHiddenState = nextHiddenCards[previousSignature];
+
+  if (previousHiddenState) {
+    nextHiddenCards[nextSignature] = mergeHiddenCardState(previousHiddenState, nextHiddenCards[nextSignature]);
+    delete nextHiddenCards[previousSignature];
+  }
+
   return {
     ...safeStats,
     cards: nextCards,
+    hiddenCards: nextHiddenCards,
+  };
+};
+
+export const isPairHidden = (studyStats, pair) => {
+  const signature = pair?.signature ?? createSignature(pair?.left ?? "", pair?.right ?? "");
+
+  return Boolean(ensureStudyStats(studyStats).hiddenCards[signature]?.hidden);
+};
+
+export const setPairHidden = (studyStats, pair, hidden) => {
+  const safeStats = ensureStudyStats(studyStats);
+  const signature = pair?.signature ?? createSignature(pair?.left ?? "", pair?.right ?? "");
+
+  if (!signature || signature === "::") {
+    return safeStats;
+  }
+
+  return {
+    ...safeStats,
+    hiddenCards: {
+      ...safeStats.hiddenCards,
+      [signature]: {
+        hidden: Boolean(hidden),
+        updatedAt: new Date().toISOString(),
+      },
+    },
+  };
+};
+
+export const getPairStudySummary = (studyStats, pair) => {
+  const safeStats = ensureStudyStats(studyStats);
+  const signature = pair?.signature ?? createSignature(pair?.left ?? "", pair?.right ?? "");
+  const cardStats = ensureCardStats(safeStats.cards[signature], pair);
+  const attempts = cardStats.attempts ?? 0;
+  const correct = cardStats.correct ?? 0;
+  const incorrect = cardStats.incorrect ?? 0;
+  const accuracy = attempts ? Math.round((correct / attempts) * 100) : null;
+
+  return {
+    attempts,
+    correct,
+    incorrect,
+    accuracy,
+    hidden: Boolean(safeStats.hiddenCards[signature]?.hidden),
   };
 };
 
@@ -223,7 +319,8 @@ export const appendStudySession = (studyStats, session, maxSessions = 60) => {
 };
 
 export const buildPracticeDeck = (pairs, limit, mode = "both", studyStats = null) => {
-  const candidates = sortPairs(pairs).flatMap((pair) => {
+  const safeStats = ensureStudyStats(studyStats);
+  const candidates = sortPairs(pairs).filter((pair) => !isPairHidden(safeStats, pair)).flatMap((pair) => {
     const base = {
       pairId: pair.id,
       left: pair.left,
@@ -273,20 +370,35 @@ export const buildPracticeDeck = (pairs, limit, mode = "both", studyStats = null
       },
     ];
   });
-  const prioritizedDeck = studyStats
-    ? weightedSample(
-        candidates.map((card) => ({
-          ...card,
-          weight: getCardPriority(card, studyStats),
-        }))
-      ).map(({ weight, ...card }) => card)
-    : shuffle(candidates);
-
   if (!Number.isFinite(limit)) {
-    return prioritizedDeck;
+    return spreadSameSignatureCards(shuffle(candidates));
   }
 
-  return prioritizedDeck.slice(0, Math.max(1, Math.min(limit, prioritizedDeck.length)));
+  const finalLimit = Math.max(1, Math.min(limit, candidates.length));
+
+  if (!studyStats) {
+    return spreadSameSignatureCards(shuffle(candidates).slice(0, finalLimit));
+  }
+
+  const selectedByWeakness = candidates
+    .map((card) => ({
+      ...card,
+      weakness: getCardWeaknessScore(card, safeStats),
+      tieBreaker: Math.random(),
+    }))
+    .sort((left, right) => {
+      const weaknessGap = right.weakness - left.weakness;
+
+      if (Math.abs(weaknessGap) > 0.0001) {
+        return weaknessGap;
+      }
+
+      return left.tieBreaker - right.tieBreaker;
+    })
+    .slice(0, finalLimit)
+    .map(({ weakness, tieBreaker, ...card }) => card);
+
+  return spreadSameSignatureCards(shuffle(selectedByWeakness));
 };
 
 export const shuffleItems = (items) => shuffle(items);
@@ -351,6 +463,82 @@ function shuffle(items) {
   return cloned;
 }
 
+function canAcceptMinorTypo(input, expected) {
+  const shortestLength = Math.min(input.length, expected.length);
+  const longestLength = Math.max(input.length, expected.length);
+
+  if (shortestLength < 4 || longestLength > shortestLength + 1) {
+    return false;
+  }
+
+  return editDistanceAtMostOne(input, expected);
+}
+
+function editDistanceAtMostOne(left, right) {
+  if (left === right) {
+    return true;
+  }
+
+  if (Math.abs(left.length - right.length) > 1) {
+    return false;
+  }
+
+  let leftIndex = 0;
+  let rightIndex = 0;
+  let edits = 0;
+
+  while (leftIndex < left.length && rightIndex < right.length) {
+    if (left[leftIndex] === right[rightIndex]) {
+      leftIndex += 1;
+      rightIndex += 1;
+      continue;
+    }
+
+    edits += 1;
+
+    if (edits > 1) {
+      return false;
+    }
+
+    if (left.length > right.length) {
+      leftIndex += 1;
+    } else if (right.length > left.length) {
+      rightIndex += 1;
+    } else {
+      leftIndex += 1;
+      rightIndex += 1;
+    }
+  }
+
+  return edits + (left.length - leftIndex) + (right.length - rightIndex) <= 1;
+}
+
+function spreadSameSignatureCards(cards) {
+  const arranged = [...cards];
+
+  for (let index = 1; index < arranged.length; index += 1) {
+    if (arranged[index].signature !== arranged[index - 1].signature) {
+      continue;
+    }
+
+    const swapIndex = arranged.findIndex(
+      (card, candidateIndex) =>
+        candidateIndex > index &&
+        card.signature !== arranged[index - 1].signature &&
+        card.signature !== arranged[index + 1]?.signature
+    );
+
+    if (swapIndex > index) {
+      const current = arranged[index];
+
+      arranged[index] = arranged[swapIndex];
+      arranged[swapIndex] = current;
+    }
+  }
+
+  return arranged;
+}
+
 function ensureStudyStats(studyStats) {
   if (!studyStats || typeof studyStats !== "object") {
     return createEmptyStudyStats();
@@ -359,6 +547,10 @@ function ensureStudyStats(studyStats) {
   return {
     cards: studyStats.cards && typeof studyStats.cards === "object" ? studyStats.cards : {},
     sessions: Array.isArray(studyStats.sessions) ? studyStats.sessions : [],
+    hiddenCards:
+      studyStats.hiddenCards && typeof studyStats.hiddenCards === "object"
+        ? studyStats.hiddenCards
+        : {},
   };
 }
 
@@ -494,6 +686,31 @@ function mergeDirectionStats(previousStats, nextStats) {
   };
 }
 
+function createPersistableHiddenCards(hiddenCards = {}, pairs = []) {
+  const pairSignatures = new Set(pairs.map((pair) => createSignature(pair.left, pair.right)));
+  const entries = Object.entries(hiddenCards)
+    .map(([signature, state]) => {
+      if (!state || typeof state !== "object") {
+        return null;
+      }
+
+      if (pairSignatures.size && !pairSignatures.has(signature)) {
+        return null;
+      }
+
+      return [
+        signature,
+        {
+          hidden: Boolean(state.hidden),
+          updatedAt: typeof state.updatedAt === "string" ? state.updatedAt : new Date().toISOString(),
+        },
+      ];
+    })
+    .filter(Boolean);
+
+  return Object.fromEntries(entries);
+}
+
 function mergeCloudCardStats(localStats, remoteStats) {
   const safeLocal = ensureCardStats(localStats);
   const safeRemote = ensureCardStats(remoteStats);
@@ -529,6 +746,42 @@ function mergeCloudCardStats(localStats, remoteStats) {
     lastIncorrectAt: laterTimestamp(safeLocal.lastIncorrectAt, safeRemote.lastIncorrectAt),
     lastResult: selectedCard.lastResult,
     directions,
+  };
+}
+
+function mergeHiddenCards(localHiddenCards = {}, remoteHiddenCards = {}) {
+  const merged = {};
+  const signatures = new Set([
+    ...Object.keys(localHiddenCards ?? {}),
+    ...Object.keys(remoteHiddenCards ?? {}),
+  ]);
+
+  signatures.forEach((signature) => {
+    merged[signature] = mergeHiddenCardState(localHiddenCards?.[signature], remoteHiddenCards?.[signature]);
+  });
+
+  return merged;
+}
+
+function mergeHiddenCardState(localState, remoteState) {
+  if (!localState) {
+    return normalizeHiddenCardState(remoteState);
+  }
+
+  if (!remoteState) {
+    return normalizeHiddenCardState(localState);
+  }
+
+  const localUpdatedAt = new Date(localState.updatedAt ?? 0).getTime();
+  const remoteUpdatedAt = new Date(remoteState.updatedAt ?? 0).getTime();
+
+  return normalizeHiddenCardState(localUpdatedAt >= remoteUpdatedAt ? localState : remoteState);
+}
+
+function normalizeHiddenCardState(state) {
+  return {
+    hidden: Boolean(state?.hidden),
+    updatedAt: typeof state?.updatedAt === "string" ? state.updatedAt : new Date().toISOString(),
   };
 }
 
@@ -631,6 +884,26 @@ function getCardPriority(card, studyStats) {
   const masteryPenalty = attempts >= 3 ? accuracy * 2.6 : accuracy * 0.8;
 
   return Math.max(0.35, 1 + newnessBoost + mistakeBoost + staleBoost - masteryPenalty);
+}
+
+function getCardWeaknessScore(card, studyStats) {
+  const safeStats = ensureStudyStats(studyStats);
+  const cardStats = ensureCardStats(safeStats.cards[card.signature], card);
+  const directionStats = ensureDirectionStats(cardStats.directions[card.direction]);
+  const attempts = directionStats.attempts;
+  const errorRate = attempts ? directionStats.incorrect / attempts : 0;
+  const studiedDaysAgo = directionStats.lastStudiedAt ? hoursBetween(directionStats.lastStudiedAt) / 24 : 14;
+  const newCardScore = attempts === 0 ? 20 : 0;
+  const recentMissScore = directionStats.lastResult === "incorrect" ? 18 : 0;
+  const staleScore = Math.min(studiedDaysAgo, 14) * 0.5;
+
+  return (
+    errorRate * 100 +
+    (directionStats.incorrect ?? 0) * 12 +
+    recentMissScore +
+    staleScore +
+    newCardScore
+  );
 }
 
 function hoursBetween(timestamp) {

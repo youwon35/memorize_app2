@@ -12,8 +12,8 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 
 - 작업 폴더: `D:\github\APP\memorize_app2`
 - 기본 작업 브랜치: `develop`
-- 현재 최신 기능 변경: Google direct auth redirect를 Android client ID 기반 reverse-DNS scheme으로 전환
-- 현재 `develop`, `origin/develop`은 이 문서 갱신 전 기준 `4650076` 기반이며, 이번 수정 커밋이 바로 다음 커밋으로 추가될 예정이다.
+- 현재 최신 기능 변경: 보관함 정답률 표시, 카드 숨김, 연속 학습 streak, 유사 정답 허용, 오답률 우선 출제 개선
+- 현재 `develop`, `origin/develop`은 이 문서 갱신 전 기준 `ad87b42` 기반이며, 이번 수정 커밋이 바로 다음 커밋으로 추가될 예정이다.
 - 현재 `main`, `origin/main`은 이전 릴리스 커밋 `03f7898`에 머물러 있다.
 - 현재 추적되지 않은 파일: `want.png`
   - 사용자가 둔 참고 파일로 보인다.
@@ -701,6 +701,15 @@ npx eas-cli build --platform android --profile production --non-interactive --no
   - Supabase 공식 문서 기준, Google Provider에 여러 client ID를 쓸 때는 Web client ID가 먼저 오고 Android/iOS client ID를 쉼표로 이어 넣어야 한다.
   - JS 변경이므로 새 APK는 만들지 않았다. `1.0.8` dev build에서 Metro reload로 확인하면 된다.
   - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo export --platform android --output-dir .expo-export --clear` 통과.
+- 2026-05-29 보관함 학습 상태/숨김/streak/출제 개선
+  - 보관함 카드 행 아래에 정답률 숫자와 얇은 색상 바를 추가했다. 80% 이상은 초록, 50~79%는 노랑, 그 미만은 빨강 계열로 보인다.
+  - 보관함 카드 스와이프 액션에 `숨김/해제`를 추가했다. 숨긴 카드는 보관함에는 남지만 일반 암기와 오답 다시풀기 후보에서 제외된다.
+  - 숨김 상태는 새 DB 컬럼 없이 `memory_user_state.study_stats.hiddenCards` JSON 안에 저장/동기화된다.
+  - 기록 탭 오늘의 학습 지표에 `연속 학습` streak를 추가했다. 오늘 학습이 없으면 어제까지 이어진 streak를 보여주고, 오늘 학습하면 오늘 기준으로 이어진다.
+  - 정답 비교를 보강해 대소문자, 공백, 일부 문장부호 차이, 사용자가 정답 뒤에 붙인 한국어 조사 차이, 긴 단어의 1글자 오타를 정답으로 허용한다.
+  - 일반 암기 출제는 후보 전체를 먼저 오답률/오답 횟수/최근 오답/미학습/오래 안 본 정도로 약점 점수화한 뒤, 요청 문제 수만큼 고르고 마지막 순서는 다시 랜덤으로 섞는다.
+  - 같은 카드의 앞->뒤, 뒤->앞 방향이 가능한 한 바로 붙지 않도록 최종 deck 순서를 한 번 더 펼친다.
+  - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo export --platform android --output-dir .expo-export --clear`, 간단한 Node memory helper 확인 통과.
 
 ## 21. 다음 작업자가 꼭 기억할 것
 
