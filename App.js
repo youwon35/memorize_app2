@@ -145,8 +145,9 @@ const STUDY_REMINDER_DAYS = [1, 2, 3, 5, 8, 14, 21, 30];
 const STUDY_REMINDER_HOUR = 20;
 const STUDY_REMINDER_MINUTE = 0;
 const MANAGE_SORT_OPTIONS = [
-  { key: "recent", labelKey: "manage.sortRegistered" },
-  { key: "missed", labelKey: "manage.sortMissedShort" },
+  { key: "registered", labelKey: "manage.sortRegistered" },
+  { key: "incorrectCount", labelKey: "manage.sortIncorrectCount" },
+  { key: "incorrectRate", labelKey: "manage.sortIncorrectRate" },
 ];
 const THEME_OPTIONS = [
   { key: "light", labelKey: "theme.light", icon: "white-balance-sunny" },
@@ -700,11 +701,6 @@ const getNextTutorialStepAfterInteraction = (currentKey, { completedTab } = {}) 
 };
 const appendUniqueId = (items, nextId) => (items.includes(nextId) ? items : [...items, nextId]);
 const isValidEmail = (value) => /\S+@\S+\.\S+/.test(value.trim());
-const calculateMissRate = (cardStats = {}) => {
-  const attempts = Math.max(1, cardStats?.attempts ?? 0);
-
-  return (cardStats?.incorrect ?? 0) / attempts;
-};
 const getAccuracyTone = (accuracy) => {
   if (accuracy === null || accuracy === undefined) {
     return "empty";
@@ -848,10 +844,9 @@ function AppContent() {
   const [saveInputMode, setSaveInputMode] = useState("single");
   const [saveActionMenuOpen, setSaveActionMenuOpen] = useState(false);
   const [saveComposerVisible, setSaveComposerVisible] = useState(false);
-  const [manageSort, setManageSort] = useState("recent");
+  const [manageSort, setManageSort] = useState("registered");
   const [manageSortMenuOpen, setManageSortMenuOpen] = useState(false);
   const [manageSelectionMode, setManageSelectionMode] = useState(false);
-  const [manageBulkMoveOpen, setManageBulkMoveOpen] = useState(false);
   const [manageSearch, setManageSearch] = useState("");
   const [historyDateKey, setHistoryDateKey] = useState(() => getLocalDayKey(new Date()));
   const [historyCalendarOpen, setHistoryCalendarOpen] = useState(false);
@@ -910,7 +905,6 @@ function AppContent() {
   const [supportNotice, setSupportNotice] = useState("");
   const [studyRemindersEnabled, setStudyRemindersEnabled] = useState(false);
   const [studyReminderBusy, setStudyReminderBusy] = useState(false);
-  const [studyReminderNotice, setStudyReminderNotice] = useState("");
   const [adminSupportRequests, setAdminSupportRequests] = useState([]);
   const [adminMetrics, setAdminMetrics] = useState(null);
   const [adminOnlyUnresolved, setAdminOnlyUnresolved] = useState(false);
@@ -1388,38 +1382,69 @@ function AppContent() {
   );
   const normalizedManageSearch = manageSearch.trim().toLocaleLowerCase(language);
   const sortedManagePairs = useMemo(() => {
-    if (manageSort === "missed") {
+    const getPairSortSummary = (pair) => getPairStudySummary(studyStats, pair);
+    const compareByRegisteredTime = (leftPair, rightPair) =>
+      new Date(rightPair.createdAt || rightPair.updatedAt || 0) -
+      new Date(leftPair.createdAt || leftPair.updatedAt || 0);
+
+    if (manageSort === "incorrectCount") {
       return [...manageFolderPairs].sort((leftPair, rightPair) => {
-        const leftStats = studyStats.cards[createSignature(leftPair.left, leftPair.right)] ?? {};
-        const rightStats = studyStats.cards[createSignature(rightPair.left, rightPair.right)] ?? {};
-        const missRateGap = calculateMissRate(rightStats) - calculateMissRate(leftStats);
-
-        if (Math.abs(missRateGap) > 0.0001) {
-          return missRateGap;
-        }
-
-        const incorrectGap = (rightStats.incorrect ?? 0) - (leftStats.incorrect ?? 0);
+        const leftSummary = getPairSortSummary(leftPair);
+        const rightSummary = getPairSortSummary(rightPair);
+        const incorrectGap = rightSummary.incorrect - leftSummary.incorrect;
 
         if (incorrectGap !== 0) {
           return incorrectGap;
         }
 
-        const attemptsGap = (rightStats.attempts ?? 0) - (leftStats.attempts ?? 0);
+        const leftMissRate = leftSummary.attempts ? leftSummary.incorrect / leftSummary.attempts : -1;
+        const rightMissRate = rightSummary.attempts ? rightSummary.incorrect / rightSummary.attempts : -1;
+        const missRateGap = rightMissRate - leftMissRate;
+
+        if (Math.abs(missRateGap) > 0.0001) {
+          return missRateGap;
+        }
+
+        const attemptsGap = rightSummary.attempts - leftSummary.attempts;
 
         if (attemptsGap !== 0) {
           return attemptsGap;
         }
 
-        return new Date(rightPair.updatedAt || rightPair.createdAt || 0) - new Date(leftPair.updatedAt || leftPair.createdAt || 0);
+        return compareByRegisteredTime(leftPair, rightPair);
       });
     }
 
-    return [...manageFolderPairs].sort(
-      (leftPair, rightPair) =>
-        new Date(rightPair.createdAt || rightPair.updatedAt || 0) -
-        new Date(leftPair.createdAt || leftPair.updatedAt || 0)
-    );
-  }, [manageFolderPairs, manageSort, studyStats.cards]);
+    if (manageSort === "incorrectRate") {
+      return [...manageFolderPairs].sort((leftPair, rightPair) => {
+        const leftSummary = getPairSortSummary(leftPair);
+        const rightSummary = getPairSortSummary(rightPair);
+        const leftMissRate = leftSummary.attempts ? leftSummary.incorrect / leftSummary.attempts : -1;
+        const rightMissRate = rightSummary.attempts ? rightSummary.incorrect / rightSummary.attempts : -1;
+        const missRateGap = rightMissRate - leftMissRate;
+
+        if (Math.abs(missRateGap) > 0.0001) {
+          return missRateGap;
+        }
+
+        const incorrectGap = rightSummary.incorrect - leftSummary.incorrect;
+
+        if (incorrectGap !== 0) {
+          return incorrectGap;
+        }
+
+        const attemptsGap = rightSummary.attempts - leftSummary.attempts;
+
+        if (attemptsGap !== 0) {
+          return attemptsGap;
+        }
+
+        return compareByRegisteredTime(leftPair, rightPair);
+      });
+    }
+
+    return [...manageFolderPairs].sort(compareByRegisteredTime);
+  }, [manageFolderPairs, manageSort, studyStats]);
   const visibleManagePairs = useMemo(() => {
     if (!normalizedManageSearch) {
       return sortedManagePairs;
@@ -1835,7 +1860,7 @@ function AppContent() {
   }, [session?.user?.email, session?.user?.id]);
 
   useEffect(() => {
-    if (!storageReady || !session?.user?.id || !supabase) {
+    if (launchVisible || !storageReady || !session?.user?.id || !supabase) {
       return;
     }
 
@@ -1873,10 +1898,10 @@ function AppContent() {
     return () => {
       active = false;
     };
-  }, [storageReady, session?.user?.id]);
+  }, [launchVisible, storageReady, session?.user?.id]);
 
   useEffect(() => {
-    if (!storageReady || !session?.user?.id || !supabase) {
+    if (launchVisible || !storageReady || !session?.user?.id || !supabase) {
       return;
     }
 
@@ -2100,10 +2125,10 @@ function AppContent() {
     return () => {
       active = false;
     };
-  }, [storageReady, session?.user?.id]);
+  }, [launchVisible, storageReady, session?.user?.id]);
 
   useEffect(() => {
-    if (!storageReady || !session?.user?.id || !supabase) {
+    if (launchVisible || !storageReady || !session?.user?.id || !supabase) {
       return;
     }
 
@@ -2138,10 +2163,10 @@ function AppContent() {
     return () => {
       active = false;
     };
-  }, [storageReady, session?.user?.id]);
+  }, [launchVisible, storageReady, session?.user?.id]);
 
   useEffect(() => {
-    if (!storageReady || !session?.user?.id || !supabase || !isAdmin) {
+    if (launchVisible || !storageReady || !session?.user?.id || !supabase || !isAdmin) {
       setAdminMetrics(null);
       setAdminSupportRequests([]);
       setAdminLoading(false);
@@ -2150,7 +2175,7 @@ function AppContent() {
     }
 
     void refreshAdminDashboard({ openOnly: adminOnlyUnresolved });
-  }, [adminOnlyUnresolved, isAdmin, storageReady, session?.user?.id, t]);
+  }, [adminOnlyUnresolved, isAdmin, launchVisible, storageReady, session?.user?.id, t]);
 
   useEffect(() => {
     Animated.spring(launchScale, {
@@ -2363,14 +2388,12 @@ function AppContent() {
 
   const updateStudyReminderPreference = async (nextEnabled) => {
     setStudyReminderBusy(true);
-    setStudyReminderNotice("");
 
     try {
       if (!nextEnabled) {
         await cancelStudyReminderNotifications();
         await AsyncStorage.setItem(STUDY_REMINDERS_ENABLED_KEY, "0");
         setStudyRemindersEnabled(false);
-        setStudyReminderNotice(t("about.reminderDisabledNotice"));
         return;
       }
 
@@ -2385,9 +2408,8 @@ function AppContent() {
 
       await AsyncStorage.setItem(STUDY_REMINDERS_ENABLED_KEY, "1");
       setStudyRemindersEnabled(true);
-      setStudyReminderNotice(t("about.reminderEnabledNotice"));
     } catch {
-      setStudyReminderNotice(t("about.reminderFailedNotice"));
+      Alert.alert(t("about.reminderTitle"), t("about.reminderFailedNotice"));
     } finally {
       setStudyReminderBusy(false);
     }
@@ -2500,7 +2522,6 @@ function AppContent() {
     setEditingRight("");
     setEditingFolderId(ROOT_FOLDER_ID);
     setManageSelectionMode(false);
-    setManageBulkMoveOpen(false);
   };
 
   const openFolderCards = (folderId) => {
@@ -2700,98 +2721,6 @@ function AppContent() {
       visibleManagePairs.forEach((pair) => nextIds.add(pair.id));
       return [...nextIds];
     });
-  };
-
-  const moveSelectedPairsToFolder = async (targetFolderId) => {
-    const normalizedTargetFolderId = normalizeFolderId(targetFolderId);
-
-    if (!selectedManagePairIds.length) {
-      Alert.alert(t("folders.bulkMoveNoneTitle"), t("folders.bulkMoveNoneBody"));
-      return;
-    }
-
-    const selectedIds = new Set(selectedManagePairIds);
-    const targetSignatures = new Set(
-      pairsRef.current
-        .filter(
-          (pair) =>
-            !selectedIds.has(pair.id) &&
-            normalizeFolderId(pair.folderId) === normalizedTargetFolderId
-        )
-        .map((pair) => createSignature(pair.left, pair.right))
-    );
-    const now = new Date().toISOString();
-    const movedIds = [];
-    let skippedCount = 0;
-
-    const nextPairs = pairsRef.current.map((pair) => {
-      if (!selectedIds.has(pair.id)) {
-        return pair;
-      }
-
-      if (normalizeFolderId(pair.folderId) === normalizedTargetFolderId) {
-        skippedCount += 1;
-        return pair;
-      }
-
-      const signature = createSignature(pair.left, pair.right);
-
-      if (targetSignatures.has(signature)) {
-        skippedCount += 1;
-        return pair;
-      }
-
-      targetSignatures.add(signature);
-      movedIds.push(pair.id);
-      return {
-        ...pair,
-        folderId: normalizedTargetFolderId,
-        updatedAt: now,
-      };
-    });
-
-    if (!movedIds.length) {
-      Alert.alert(t("folders.bulkMoveNoneTitle"), t("folders.bulkMoveSkippedBody"));
-      return;
-    }
-
-    if (session?.user?.id && supabase && cloudFoldersReadyRef.current) {
-      try {
-        const movedCloudPairIds = pairsRef.current
-          .filter((pair) => pair.source === "cloud" && movedIds.includes(pair.id))
-          .map((pair) => pair.id);
-
-        if (movedCloudPairIds.length) {
-          const response = await supabase
-            .from("memory_pairs")
-            .update({ folder_id: normalizedTargetFolderId })
-            .in("id", movedCloudPairIds)
-            .eq("user_id", session.user.id);
-
-          if (response.error) {
-            throw response.error;
-          }
-        }
-      } catch (error) {
-        if (!isCloudFolderSchemaError(error)) {
-          Alert.alert(t("folders.bulkMoveFailTitle"), t("common.retryLater"));
-          return;
-        }
-
-        cloudFoldersReadyRef.current = false;
-        setTranslatedNote("notes.cloudLocalOnly");
-      }
-    }
-
-    await savePairs(nextPairs);
-    setSelectedManagePairIds([]);
-    setManageSelectionMode(false);
-    setManageBulkMoveOpen(false);
-    setManageFolderId(normalizedTargetFolderId);
-    Alert.alert(
-      t("folders.bulkMoveDoneTitle"),
-      t("folders.bulkMoveDoneBody", { count: movedIds.length, skipped: skippedCount })
-    );
   };
 
   const closeTutorial = (nextTab = null, { showCompletionAlert = false } = {}) => {
@@ -3839,7 +3768,6 @@ function AppContent() {
     await savePairs(pairsRef.current.filter((pair) => !selectedIds.has(pair.id)));
     setSelectedManagePairIds([]);
     setManageSelectionMode(false);
-    setManageBulkMoveOpen(false);
     setOpenManageSwipeId(null);
 
     if (editingId && selectedIds.has(editingId)) {
@@ -3869,13 +3797,11 @@ function AppContent() {
 
     setManageSortMenuOpen(false);
     setManageSelectionMode(true);
-    setManageBulkMoveOpen(false);
   };
 
   const exitManageSelectionMode = () => {
     setSelectedManagePairIds([]);
     setManageSelectionMode(false);
-    setManageBulkMoveOpen(false);
   };
 
   const confirmDeleteSelectedManagePairs = () => {
@@ -4023,8 +3949,42 @@ function AppContent() {
     }
   };
 
-  const continueFromLaunchAsGuest = () => {
-    dismissLaunchScreen();
+  const continueFromLaunchAsGuest = async () => {
+    if (authBusy) {
+      return;
+    }
+
+    setAuthBusy(true);
+
+    try {
+      if (supabase && sessionRef.current?.user) {
+        const { error } = await supabase.auth.signOut({ scope: "local" });
+
+        if (error) {
+          console.warn("Guest start sign-out returned an error", getAuthErrorDetails(error));
+        }
+      }
+    } catch (error) {
+      console.warn("Guest start sign-out failed", getAuthErrorDetails(error));
+    } finally {
+      setSession(null);
+      sessionRef.current = null;
+      setUserRole("user");
+      setSyncing(false);
+      setSupportRequests([]);
+      setSupportNotice("");
+      setAdminMetrics(null);
+      setAdminSupportRequests([]);
+      setAdminOnlyUnresolved(false);
+      setAdminLoading(false);
+      setAdminUpdatingId(null);
+      setAdminNotice("");
+      appOpenTrackedUserRef.current = null;
+      void AsyncStorage.removeItem(SUPPORT_REQUESTS_KEY);
+      setTranslatedNote("notes.guestMode");
+      dismissLaunchScreen();
+      setAuthBusy(false);
+    }
   };
 
   const continueFromLaunchWithGoogle = async () => {
@@ -6360,24 +6320,6 @@ function AppContent() {
                     </Pressable>
                     <Pressable
                       disabled={!selectedManagePairIds.length}
-                      onPress={() => setManageBulkMoveOpen((currentValue) => !currentValue)}
-                      style={({ pressed }) => [
-                        styles.manageBulkButton,
-                        !selectedManagePairIds.length && styles.manageBulkButtonDisabled,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.manageBulkButtonText,
-                          !selectedManagePairIds.length && styles.manageBulkButtonTextDisabled,
-                        ]}
-                      >
-                        {t("manage.moveSelected")}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      disabled={!selectedManagePairIds.length}
                       onPress={confirmDeleteSelectedManagePairs}
                       style={({ pressed }) => [
                         styles.manageBulkButton,
@@ -6404,29 +6346,6 @@ function AppContent() {
                     </Pressable>
                   </View>
                 </View>
-                {manageBulkMoveOpen ? (
-                  <View style={styles.bulkMovePanel}>
-                    <View style={styles.bulkMoveHeader}>
-                      <View style={styles.bulkMoveHeaderCopy}>
-                        <Text style={styles.bulkMoveTitle}>{t("folders.bulkMoveTitle")}</Text>
-                        <Text style={styles.bulkMoveBody}>{t("manage.moveSelectedHint")}</Text>
-                      </View>
-                    </View>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderPickerRow}>
-                      {selectableFolders.map((folder) => (
-                        <Pressable
-                          key={`move-selected-${folder.id}`}
-                          onPress={() => void moveSelectedPairsToFolder(folder.id)}
-                          style={({ pressed }) => [styles.folderPickerChip, pressed && styles.pressed]}
-                        >
-                          <Text style={styles.folderPickerText}>
-                            {folder.id === ROOT_FOLDER_ID ? folder.name : getFolderLabel(folder.id)}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </ScrollView>
-                  </View>
-                ) : null}
                 <View style={styles.manageListDivider} />
               </>
             ) : null}
@@ -6663,11 +6582,6 @@ function AppContent() {
             <View style={styles.settingsToggleCopy}>
               <Text style={styles.settingsTitle}>{t("about.reminderTitle")}</Text>
               <Text style={styles.settingsBody}>{t("about.reminderBody")}</Text>
-              <Text style={styles.settingsToggleStatus}>
-                {studyRemindersEnabled
-                  ? t("about.reminderEnabled")
-                  : t("about.reminderDisabled")}
-              </Text>
             </View>
             <Switch
               disabled={studyReminderBusy}
@@ -6678,7 +6592,6 @@ function AppContent() {
               ios_backgroundColor={theme.mutedBg}
             />
           </View>
-          {studyReminderNotice ? <Text style={styles.supportNotice}>{studyReminderNotice}</Text> : null}
         </View>
 
         <View style={styles.settingsCard} {...tutorialTargetProps("about-support-panel")}>
@@ -7092,7 +7005,7 @@ function AppContent() {
           isConfigured={isSupabaseConfigured}
           hasSession={Boolean(session?.user)}
           onGooglePress={() => void continueFromLaunchWithGoogle()}
-          onGuestPress={continueFromLaunchAsGuest}
+          onGuestPress={() => void continueFromLaunchAsGuest()}
         />
       ) : null}
       {tutorialVisible && tutorialStep === "intro" ? (
@@ -7726,6 +7639,7 @@ function LaunchScreen({
       ? t("launch.googleContinue")
       : t("launch.googleStart");
   const googleDisabled = authBusy || !authReady || !isConfigured;
+  const guestDisabled = authBusy || !authReady;
 
   return (
     <Animated.View style={[styles.launchScreen, { opacity }]}>
@@ -7805,11 +7719,11 @@ function LaunchScreen({
           </Pressable>
 
           <Pressable
-            disabled={!authReady}
+            disabled={guestDisabled}
             onPress={onGuestPress}
             style={({ pressed }) => [
               styles.launchGuestButton,
-              !authReady && styles.launchGuestButtonDisabled,
+              guestDisabled && styles.launchGuestButtonDisabled,
               pressed && styles.pressed,
             ]}
           >

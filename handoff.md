@@ -12,8 +12,8 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 
 - 작업 폴더: `D:\github\APP\memorize_app2`
 - 기본 작업 브랜치: `develop`
-- 현재 최신 기능 변경: 보관함 정답률 표시, 카드 숨김, 연속 학습 streak, 유사 정답 허용, 오답률 우선 출제 개선
-- 현재 `develop`, `origin/develop`은 이 문서 갱신 전 기준 `ad87b42` 기반이며, 이번 수정 커밋이 바로 다음 커밋으로 추가될 예정이다.
+- 현재 최신 기능 변경: 게스트 시작 시 이전 로그인 세션 분리, 학습 알림 스위치 문구 정리, 보관함 정렬 옵션 세분화, 다중선택 이동 버튼 제거
+- 현재 `develop`, `origin/develop`은 이 문서 갱신 전 기준 `b0454ed` 기반이며, 이번 수정 커밋이 바로 다음 커밋으로 추가될 예정이다.
 - 현재 `main`, `origin/main`은 이전 릴리스 커밋 `03f7898`에 머물러 있다.
 - 현재 추적되지 않은 파일: `want.png`
   - 사용자가 둔 참고 파일로 보인다.
@@ -710,6 +710,15 @@ npx eas-cli build --platform android --profile production --non-interactive --no
   - 일반 암기 출제는 후보 전체를 먼저 오답률/오답 횟수/최근 오답/미학습/오래 안 본 정도로 약점 점수화한 뒤, 요청 문제 수만큼 고르고 마지막 순서는 다시 랜덤으로 섞는다.
   - 같은 카드의 앞->뒤, 뒤->앞 방향이 가능한 한 바로 붙지 않도록 최종 deck 순서를 한 번 더 펼친다.
   - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo export --platform android --output-dir .expo-export --clear`, 간단한 Node memory helper 확인 통과.
+- 2026-05-29 게스트 시작/보관함 정렬/알림 UI 정리
+  - 시작 화면에서 이미 Google/Supabase 세션이 남아 있어도 `게스트로 시작하기`를 누르면 로컬 Supabase 세션을 끊고 앱 안의 `session`, 관리자 역할, 관리자 문의/지표 상태를 즉시 초기화하도록 바꿨다.
+  - 사용자가 시작 화면에서 Google 계속하기를 선택하기 전에는 원격 카드/폴더/학습 상태 동기화, 문의 동기화, 관리자 대시보드 로딩, 앱 실행 지표 전송이 시작되지 않도록 `launchVisible` guard를 추가했다. 따라서 게스트 선택 시 이전 관리자 계정으로 앱이 열린 것처럼 보이는 문제가 줄어든다.
+  - 게스트 시작 안내 문구 `notes.guestMode`를 추가해 Google 로그인 전까지 이 기기에만 저장된다는 점을 표시한다.
+  - 앱 정보 탭의 학습 알림 카드에서 스위치 아래 `켜짐/꺼짐`, `학습 알림을 켰습니다...`, `학습 알림을 껐습니다.` 같은 상태/성공 문구를 제거했다. 저장 실패만 알림 팝업으로 보여준다.
+  - 보관함 정렬 옵션을 `등록시간 순`, `오답횟수 순`, `오답률순` 3개로 분리했다. 오답횟수 정렬은 총 오답 개수를 우선하고, 오답률 정렬은 시도 대비 오답 비율을 우선한다.
+  - 보관함 다중선택 바에서 `이동` 버튼과 이동 대상 폴더 패널을 제거했고, 안내 문구도 “선택한 카드를 한 번에 삭제”하는 흐름에 맞췄다.
+  - 새 APK/AAB는 만들지 않았다. JS/UI 변경이므로 기존 `1.0.8` dev build에서 Metro reload로 확인하면 된다.
+  - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo export --platform android --output-dir .expo-export --clear` 통과.
 
 ## 21. 다음 작업자가 꼭 기억할 것
 
