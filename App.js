@@ -819,7 +819,7 @@ function AppContent() {
       scopes: ["openid", "profile", "email"],
       selectAccount: true,
     },
-    { scheme: APP_SCHEME, path: "auth/callback" }
+    { native: `${APP_SCHEME}:/oauthredirect` }
   );
   const note = noteState.raw ? noteState.raw : t(noteState.key, noteState.params);
   const authTitle = session?.user?.email
@@ -3778,6 +3778,7 @@ function AppContent() {
 
         if (result.type === "success") {
           const idToken = result.params?.id_token;
+          const accessToken = result.params?.access_token ?? result.authentication?.accessToken;
 
           if (!idToken) {
             throw new Error(t("about.authFailBody"));
@@ -3786,6 +3787,7 @@ function AppContent() {
           const { error } = await supabase.auth.signInWithIdToken({
             provider: "google",
             token: idToken,
+            access_token: accessToken,
           });
 
           if (error) {

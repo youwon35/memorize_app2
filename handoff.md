@@ -46,6 +46,8 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
   - 최신 성공 AAB는 여전히 `1.0.3 / versionCode 10`이다.
 - 2026-05-28 튜토리얼/문제 수 버튼/Google direct auth 준비 수정 후 앱 버전을 `1.0.6`으로 올렸다.
   - AAB는 아직 새로 만들지 않았다.
+- 2026-05-28 Google direct auth의 Android redirect를 기존 dev build가 받을 수 있는 `memoria:/oauthredirect`로 수정했다.
+  - 새 APK를 만들지 않고 JS/Metro reload로 확인 가능한 변경이다.
 
 현재 실기기 확인용 dev build:
 
@@ -636,6 +638,13 @@ npx eas-cli build --platform android --profile production --non-interactive --no
   - 앱 버전을 `1.0.6`으로 올렸다.
   - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo install --check`, `npx expo export --platform android --output-dir .expo-export --clear`, `npx expo-doctor` 통과.
   - 로컬 dev build APK: `D:\github\APP\memorize_app2\.expo\local-builds\memoria-dev-1.0.6-tutorial-quiz-auth-debug.apk`
+- 2026-05-28 Google direct auth redirect 수정
+  - 기존 direct auth가 Supabase fallback용 redirect인 `memoria://auth/callback`을 Google AuthSession에도 넘겨 Google에서 `invalid_request`가 날 수 있었다.
+  - Android OAuth direct auth의 redirect를 현재 APK manifest에 등록된 `memoria` scheme 기반 `memoria:/oauthredirect`로 바꿨다.
+  - Supabase fallback OAuth는 기존처럼 `memoria://auth/callback`을 유지한다.
+  - Google에서 계속 `invalid_request`가 나면 Android OAuth client 상세에서 custom URI scheme 허용 옵션이 켜져 있는지 확인해야 한다.
+  - 새 APK는 만들지 않았다. 기존 1.0.6 dev build에서 Metro를 재시작/새로고침하면 반영된다.
+  - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo install --check`, `npx expo export --platform android --output-dir .expo-export --clear` 통과.
 
 ## 21. 다음 작업자가 꼭 기억할 것
 
