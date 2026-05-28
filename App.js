@@ -26,6 +26,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 import { makeRedirectUri } from "expo-auth-session";
+import * as Google from "expo-auth-session/providers/google";
 import { File } from "expo-file-system";
 import { EncodingType, readAsStringAsync } from "expo-file-system/legacy";
 import * as Notifications from "expo-notifications";
@@ -98,6 +99,15 @@ const STUDY_REMINDER_LAST_OPENED_KEY = "@memoria/study-reminder-last-opened";
 const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
 const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
+const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
+const GOOGLE_ANDROID_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
+const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
+const FALLBACK_GOOGLE_CLIENT_ID = "memoria-disabled-google-client-id";
+const DIRECT_GOOGLE_AUTH_CONFIGURED = Platform.select({
+  android: Boolean(GOOGLE_ANDROID_CLIENT_ID),
+  ios: Boolean(GOOGLE_IOS_CLIENT_ID),
+  default: Boolean(GOOGLE_WEB_CLIENT_ID),
+});
 const DEFAULT_QUIZ_COUNT = 10;
 const SAVE_INPUT_MAX_LENGTH = 300;
 const DATE_FILTER_LOCALES = {
@@ -801,6 +811,16 @@ function AppContent() {
   const styles = useMemo(() => createStyles(theme), [theme]);
   const current = deck[quizIndex] ?? null;
   const redirectUri = makeRedirectUri({ scheme: APP_SCHEME, path: "auth/callback" });
+  const [googleIdTokenRequest, , promptGoogleIdTokenAsync] = Google.useIdTokenAuthRequest(
+    {
+      webClientId: GOOGLE_WEB_CLIENT_ID || FALLBACK_GOOGLE_CLIENT_ID,
+      androidClientId: GOOGLE_ANDROID_CLIENT_ID || FALLBACK_GOOGLE_CLIENT_ID,
+      iosClientId: GOOGLE_IOS_CLIENT_ID || FALLBACK_GOOGLE_CLIENT_ID,
+      scopes: ["openid", "profile", "email"],
+      selectAccount: true,
+    },
+    { scheme: APP_SCHEME, path: "auth/callback" }
+  );
   const note = noteState.raw ? noteState.raw : t(noteState.key, noteState.params);
   const authTitle = session?.user?.email
     ? session.user.email
@@ -809,6 +829,9 @@ function AppContent() {
       : t("about.authLocalTitle");
   const authCaption = syncing ? t("notes.syncing") : note;
   const isAdmin = Boolean(session?.user?.id) && userRole === "admin";
+  const canUseDirectGoogleAuth = Boolean(
+    supabase && DIRECT_GOOGLE_AUTH_CONFIGURED && googleIdTokenRequest
+  );
   const hasActiveQuizRound = tab === "quiz" && deck.length > 0 && !roundComplete;
   const quizFolderSubtreeIds = useMemo(() => getFolderSubtreeIds(folders, quizFolderId), [folders, quizFolderId]);
   const manageFolderSubtreeIds = useMemo(() => getFolderSubtreeIds(folders, manageFolderId), [folders, manageFolderId]);
@@ -3750,6 +3773,35 @@ function AppContent() {
     setAuthBusy(true);
 
     try {
+      if (canUseDirectGoogleAuth) {
+        const result = await promptGoogleIdTokenAsync();
+
+        if (result.type === "success") {
+          const idToken = result.params?.id_token;
+
+          if (!idToken) {
+            throw new Error(t("about.authFailBody"));
+          }
+
+          const { error } = await supabase.auth.signInWithIdToken({
+            provider: "google",
+            token: idToken,
+          });
+
+          if (error) {
+            throw error;
+          }
+
+          return true;
+        }
+
+        if (result.type !== "cancel") {
+          setTranslatedNote("notes.loginIncomplete");
+        }
+
+        return false;
+      }
+
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -5146,8 +5198,7 @@ function AppContent() {
         </View>
         <View style={styles.quizPresetRow}>
           {QUIZ_COUNT_PRESETS.map((count) => {
-            const presetValue = Math.min(count, maxQuizCount);
-            const active = resolvedQuizCount === presetValue;
+            const active = resolvedQuizCount === count;
 
             return (
               <Pressable
@@ -5165,23 +5216,30 @@ function AppContent() {
               </Pressable>
             );
           })}
-          <Pressable
-            onPress={() => setQuizCountSafely(maxQuizCount)}
-            style={({ pressed }) => [
-              styles.quizPresetChip,
-              resolvedQuizCount === maxQuizCount && styles.quizPresetChipActive,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text
-              style={[
-                styles.quizPresetText,
-                resolvedQuizCount === maxQuizCount && styles.quizPresetTextActive,
-              ]}
-            >
-              {t("quiz.countAll")}
-            </Text>
-          </Pressable>
+          {(() => {
+            const activePresetCount = QUIZ_COUNT_PRESETS.includes(resolvedQuizCount);
+            const active = maxQuizCount > 0 && resolvedQuizCount === maxQuizCount && !activePresetCount;
+
+            return (
+              <Pressable
+                onPress={() => setQuizCountSafely(maxQuizCount)}
+                style={({ pressed }) => [
+                  styles.quizPresetChip,
+                  active && styles.quizPresetChipActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.quizPresetText,
+                    active && styles.quizPresetTextActive,
+                  ]}
+                >
+                  {t("quiz.countAll")}
+                </Text>
+              </Pressable>
+            );
+          })()}
         </View>
       </View>
 
@@ -6915,6 +6973,7 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth, layoutM
           >
             M E M O R I A
           </Text>
+          <Text style={styles.tutorialBrandSubtitle}>{t("tutorial.brandWelcome")}</Text>
         </View>
 
         <View style={styles.tutorialWelcomeActions}>
@@ -11456,6 +11515,14 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 0,
     color: theme.textPrimary,
+  },
+  tutorialBrandSubtitle: {
+    marginTop: -2,
+    fontSize: 17,
+    lineHeight: 24,
+    fontWeight: "800",
+    color: theme.textSecondary,
+    textAlign: "center",
   },
   tutorialWelcomeActions: {
     width: "100%",

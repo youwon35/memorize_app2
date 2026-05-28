@@ -12,8 +12,8 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 
 - 작업 폴더: `D:\github\APP\memorize_app2`
 - 기본 작업 브랜치: `develop`
-- 현재 최신 기능 커밋: `06dc255 feat: add study reminders and refine app icon`
-- 현재 `develop`, `origin/develop`은 `06dc255` 기반이며, 이 문서 갱신 커밋이 바로 다음 커밋으로 추가될 예정이다.
+- 현재 최신 기능 변경: `1.0.6` 튜토리얼 인트로, 문제 수 버튼 활성 판정, Google direct auth 준비
+- 현재 `develop`, `origin/develop`은 이 문서 갱신 전 기준 `7317e33` 기반이며, 이번 수정 커밋이 바로 다음 커밋으로 추가될 예정이다.
 - 현재 `main`, `origin/main`은 이전 릴리스 커밋 `03f7898`에 머물러 있다.
 - 현재 추적되지 않은 파일: `want.png`
   - 사용자가 둔 참고 파일로 보인다.
@@ -44,11 +44,13 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
   - EAS가 실패 직전 remote `versionCode`를 `11 -> 12`로 증가시켰다고 출력했다.
   - 새 AAB URL은 생성되지 않았다.
   - 최신 성공 AAB는 여전히 `1.0.3 / versionCode 10`이다.
+- 2026-05-28 튜토리얼/문제 수 버튼/Google direct auth 준비 수정 후 앱 버전을 `1.0.6`으로 올렸다.
+  - AAB는 아직 새로 만들지 않았다.
 
 현재 실기기 확인용 dev build:
 
-- 파일: `D:\github\APP\memorize_app2\.expo\local-builds\memoria-dev-1.0.5-reminders-debug.apk`
-- App versionName: `1.0.5`
+- 파일: `D:\github\APP\memorize_app2\.expo\local-builds\memoria-dev-1.0.6-tutorial-quiz-auth-debug.apk`
+- App versionName: `1.0.6`
 - 빌드 방식: `expo prebuild --platform android --no-install` 후 로컬 Gradle `:app:assembleDebug`
 - 파일 크기: 약 146.6 MB
 - dev build이므로 설치 후 JS 확인에는 Metro 서버가 필요하다.
@@ -121,7 +123,7 @@ npx eas-cli build:list --platform android --limit 1 --json
 ### `package.json`
 
 - `name`: `memorize_app2`
-- `version`: `1.0.5`
+- `version`: `1.0.6`
 - `main`: `node_modules/expo/AppEntry.js`
 - `private`: `true`
 
@@ -129,7 +131,7 @@ npx eas-cli build:list --platform android --limit 1 --json
 
 - Expo app name: `MEMORIA`
 - slug: `memoria`
-- version: `1.0.5`
+- version: `1.0.6`
 - scheme: `memoria`
 - owner: `zinnn`
 - EAS project id: `6caf9ed8-f402-4743-8222-5e05fcedb0f2`
@@ -174,6 +176,15 @@ OAuth redirect:
 - 앱 scheme: `memoria`
 - redirect URI 흐름: `memoria://auth/callback`
 - Supabase Dashboard의 Auth URL Configuration 또는 Google provider 설정에 `memoria://auth/callback`이 허용 redirect URL로 들어가 있어야 production 앱에서 로그인 완료까지 성공한다.
+
+Google 로그인 도메인 표시 이슈:
+
+- 현재 기본 로그인은 Supabase OAuth URL을 통해 Google 계정 선택 화면으로 들어가므로 Google 화면에 `jjazbqqvfhouhcildkzk.supabase.co(으)로 이동`이 표시될 수 있다.
+- 앱 코드만으로 Supabase hosted OAuth의 이 도메인 표기를 숨길 수는 없다.
+- 2026-05-28에 Google ID token을 직접 받아 `supabase.auth.signInWithIdToken`으로 로그인하는 우회 경로를 추가했다.
+- Android에서 이 direct 경로를 실제 사용하려면 Google Cloud의 Android OAuth client ID를 `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`로 넣어 새 dev/production build를 만들어야 한다.
+- iOS/web까지 direct 경로를 쓰려면 각각 `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`, `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`도 준비한다.
+- 위 값이 없으면 기존 Supabase OAuth 로그인으로 fallback된다.
 
 보안 메모:
 
@@ -234,7 +245,7 @@ OAuth redirect:
 - 캐릭터 주변 점선 원은 앱에서 dashed border로 렌더링한다.
 - 캐릭터/점선/버튼 배치는 `react-native-safe-area-context`와 `createIntroLayoutMetrics`로 화면 크기와 safe area를 고려한다.
 - `MEMORIA` 텍스트는 이미지 안 글자가 아니라 네이티브 `Text`로 렌더링해 글자 깨짐을 줄인다.
-- 시작 화면 우측 상단에는 아주 작게 `v1.0.5` 같은 앱 버전을 표시한다.
+- 시작 화면 우측 상단에는 아주 작게 `v1.0.6` 같은 앱 버전을 표시한다.
 - 하단 Google/게스트 버튼은 Android 내비게이션 바와 겹치지 않도록 safe area를 고려한다.
 
 `App.js` 상단 자산 연결:
@@ -615,6 +626,16 @@ npx eas-cli build --platform android --profile production --non-interactive --no
   - 새 AAB URL은 생성되지 않았다.
   - 대신 로컬 dev build APK를 생성했다: `D:\github\APP\memorize_app2\.expo\local-builds\memoria-dev-1.0.5-reminders-debug.apk`
   - 다음 AAB 시도는 EAS 플랜 업그레이드 또는 2026-06-01 한도 리셋 이후 가능하다.
+- 2026-05-28 튜토리얼 인트로/문제 수 버튼/Google 로그인 준비 개선
+  - 튜토리얼 인트로의 `M E M O R I A` 아래에 `오신것을 환영해요!` 문구를 추가했다.
+  - 튜토리얼 인트로 시작 버튼 문구를 `시작하기`에서 `튜토리얼 시작하기`로 바꿨다.
+  - 문제 수 preset 버튼의 활성 판정을 exact match 기반으로 바꿨다. 가능한 문제가 6개일 때 `10`이나 `20`을 눌러 6문제로 clamp되어도 10/20 버튼이 같이 보라색이 되지 않는다.
+  - `전체` 버튼은 현재 문제 수가 가능한 전체 수와 같고, 5/10/20 preset과 겹치지 않을 때만 활성화된다.
+  - Google ID token direct 로그인 경로를 준비했다. `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`가 있으면 Supabase OAuth URL 대신 Google provider에서 받은 ID token으로 Supabase 세션을 만든다.
+  - 현재 `.env`에는 Google client ID가 없으므로 기본 동작은 기존 Supabase OAuth fallback이다.
+  - 앱 버전을 `1.0.6`으로 올렸다.
+  - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo install --check`, `npx expo export --platform android --output-dir .expo-export --clear`, `npx expo-doctor` 통과.
+  - 로컬 dev build APK: `D:\github\APP\memorize_app2\.expo\local-builds\memoria-dev-1.0.6-tutorial-quiz-auth-debug.apk`
 
 ## 21. 다음 작업자가 꼭 기억할 것
 
@@ -641,4 +662,4 @@ npx eas-cli build --platform android --profile production --non-interactive --no
 - 태블릿/긴 화면/짧은 화면에서 시작 화면과 튜토리얼 인트로 균형 확인
 - Android 런처 아이콘 adaptive mask 확인
 - `src/i18n.js`의 영어/일본어 정책 문구를 사람이 자연스럽게 읽히는지 마지막으로 확인
-- `1.0.4` 관리자 문의 노출 수정과 `1.0.5` 아이콘/학습 알림 수정 AAB는 아직 생성되지 않았다. EAS 빌드 한도 리셋 또는 플랜 업그레이드 후 다시 production build를 실행하고, 실제 versionCode와 AAB URL을 확인해야 한다.
+- `1.0.4` 관리자 문의 노출 수정, `1.0.5` 아이콘/학습 알림 수정, `1.0.6` 튜토리얼/문제 수 버튼/Google direct auth 준비 수정 AAB는 아직 생성되지 않았다. EAS 빌드 한도 리셋 또는 플랜 업그레이드 후 다시 production build를 실행하고, 실제 versionCode와 AAB URL을 확인해야 한다.
