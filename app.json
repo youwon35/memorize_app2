@@ -2,11 +2,12 @@
   "expo": {
     "name": "MEMORIA",
     "slug": "memoria",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "orientation": "portrait",
     "scheme": [
       "memoria",
-      "com.youwon35.memoria"
+      "com.youwon35.memoria",
+      "com.googleusercontent.apps.852267252395-oaqdf00qj7j0fkgi08pgh01vggggvjoj"
     ],
     "userInterfaceStyle": "light",
     "icon": "./app-icon.png",
