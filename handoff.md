@@ -12,8 +12,8 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 
 - 작업 폴더: `D:\github\APP\memorize_app2`
 - 기본 작업 브랜치: `develop`
-- 현재 최신 기능 변경: `1.0.6` 튜토리얼 인트로, 문제 수 버튼 활성 판정, Google direct auth 준비
-- 현재 `develop`, `origin/develop`은 이 문서 갱신 전 기준 `7317e33` 기반이며, 이번 수정 커밋이 바로 다음 커밋으로 추가될 예정이다.
+- 현재 최신 기능 변경: `1.0.7` Google direct auth Android redirect scheme 보정 및 새 dev build 생성
+- 현재 `develop`, `origin/develop`은 이 문서 갱신 전 기준 `8649c0d` 기반이며, 이번 수정 커밋이 바로 다음 커밋으로 추가될 예정이다.
 - 현재 `main`, `origin/main`은 이전 릴리스 커밋 `03f7898`에 머물러 있다.
 - 현재 추적되지 않은 파일: `want.png`
   - 사용자가 둔 참고 파일로 보인다.
@@ -48,14 +48,22 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
   - AAB는 아직 새로 만들지 않았다.
 - 2026-05-28 Google direct auth의 Android redirect를 기존 dev build가 받을 수 있는 `memoria:/oauthredirect`로 수정했다.
   - 새 APK를 만들지 않고 JS/Metro reload로 확인 가능한 변경이다.
+- 2026-05-28 Google에서 `memoria:/oauthredirect`를 계속 `invalid_request`로 거절해 Android OAuth redirect를 패키지명 기반 `com.youwon35.memoria:/oauthredirect`로 바꿨다.
+  - `app.json` scheme에 기존 `memoria`와 새 `com.youwon35.memoria`를 둘 다 등록했다.
+  - 네이티브 manifest 변경이므로 새 dev build APK를 생성했다.
 
 현재 실기기 확인용 dev build:
 
-- 파일: `D:\github\APP\memorize_app2\.expo\local-builds\memoria-dev-1.0.6-tutorial-quiz-auth-debug.apk`
-- App versionName: `1.0.6`
+- 파일: `D:\github\APP\memorize_app2\.expo\local-builds\memoria-dev-1.0.7-google-scheme-debug.apk`
+- App versionName: `1.0.7`
 - 빌드 방식: `expo prebuild --platform android --no-install` 후 로컬 Gradle `:app:assembleDebug`
 - 파일 크기: 약 146.6 MB
 - dev build이므로 설치 후 JS 확인에는 Metro 서버가 필요하다.
+- APK manifest scheme 확인:
+  - `memoria`
+  - `com.youwon35.memoria`
+  - `exp+memoria`
+- APK 서명 SHA-1: `5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25`
 
 ## 3. 기술 스택
 
@@ -125,7 +133,7 @@ npx eas-cli build:list --platform android --limit 1 --json
 ### `package.json`
 
 - `name`: `memorize_app2`
-- `version`: `1.0.6`
+- `version`: `1.0.7`
 - `main`: `node_modules/expo/AppEntry.js`
 - `private`: `true`
 
@@ -133,8 +141,10 @@ npx eas-cli build:list --platform android --limit 1 --json
 
 - Expo app name: `MEMORIA`
 - slug: `memoria`
-- version: `1.0.6`
-- scheme: `memoria`
+- version: `1.0.7`
+- scheme:
+  - `memoria`
+  - `com.youwon35.memoria`
 - owner: `zinnn`
 - EAS project id: `6caf9ed8-f402-4743-8222-5e05fcedb0f2`
 - Android package: `com.youwon35.memoria`
@@ -178,6 +188,8 @@ OAuth redirect:
 - 앱 scheme: `memoria`
 - redirect URI 흐름: `memoria://auth/callback`
 - Supabase Dashboard의 Auth URL Configuration 또는 Google provider 설정에 `memoria://auth/callback`이 허용 redirect URL로 들어가 있어야 production 앱에서 로그인 완료까지 성공한다.
+- Google ID token direct auth의 Android redirect URI는 `com.youwon35.memoria:/oauthredirect`다.
+- Google Cloud Android OAuth client는 package `com.youwon35.memoria`, SHA-1 `5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25`, custom URI scheme 사용 허용 상태여야 한다.
 
 Google 로그인 도메인 표시 이슈:
 
@@ -185,6 +197,7 @@ Google 로그인 도메인 표시 이슈:
 - 앱 코드만으로 Supabase hosted OAuth의 이 도메인 표기를 숨길 수는 없다.
 - 2026-05-28에 Google ID token을 직접 받아 `supabase.auth.signInWithIdToken`으로 로그인하는 우회 경로를 추가했다.
 - Android에서 이 direct 경로를 실제 사용하려면 Google Cloud의 Android OAuth client ID를 `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`로 넣어 새 dev/production build를 만들어야 한다.
+- 현재 로컬 `.env`에는 `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`가 들어가 있으며, `1.0.7` dev build는 `com.youwon35.memoria:/oauthredirect`를 받을 수 있다.
 - iOS/web까지 direct 경로를 쓰려면 각각 `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`, `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`도 준비한다.
 - 위 값이 없으면 기존 Supabase OAuth 로그인으로 fallback된다.
 
@@ -645,6 +658,15 @@ npx eas-cli build --platform android --profile production --non-interactive --no
   - Google에서 계속 `invalid_request`가 나면 Android OAuth client 상세에서 custom URI scheme 허용 옵션이 켜져 있는지 확인해야 한다.
   - 새 APK는 만들지 않았다. 기존 1.0.6 dev build에서 Metro를 재시작/새로고침하면 반영된다.
   - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo install --check`, `npx expo export --platform android --output-dir .expo-export --clear` 통과.
+- 2026-05-28 Google direct auth Android scheme 재수정 및 1.0.7 dev build 생성
+  - 사용자가 Google Cloud Android OAuth client에 package `com.youwon35.memoria`, SHA-1 `5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25`, custom URI scheme 허용을 설정했지만 Google이 `memoria:/oauthredirect`를 계속 `invalid_request`로 거절했다.
+  - Android OAuth direct auth redirect를 패키지명 기반 `com.youwon35.memoria:/oauthredirect`로 바꿨다.
+  - `app.json`의 `scheme`을 배열로 바꿔 기존 Supabase fallback용 `memoria`와 Google direct auth용 `com.youwon35.memoria`를 동시에 등록했다.
+  - 앱 버전을 `1.0.7`로 올렸다.
+  - 새 로컬 dev build APK를 생성했다: `D:\github\APP\memorize_app2\.expo\local-builds\memoria-dev-1.0.7-google-scheme-debug.apk`
+  - `aapt`로 APK manifest를 확인했고 `memoria`, `com.youwon35.memoria`, `exp+memoria` scheme이 등록되어 있다.
+  - `apksigner --print-certs`로 확인한 APK SHA-1은 `5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25`라서 사용자가 Google Cloud에 넣은 값과 일치한다.
+  - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo install --check`, `npx expo-doctor`, `npx expo export --platform android --output-dir .expo-export --clear`, `expo prebuild`, `android\gradlew.bat -p android :app:assembleDebug` 통과.
 
 ## 21. 다음 작업자가 꼭 기억할 것
 
@@ -671,4 +693,4 @@ npx eas-cli build --platform android --profile production --non-interactive --no
 - 태블릿/긴 화면/짧은 화면에서 시작 화면과 튜토리얼 인트로 균형 확인
 - Android 런처 아이콘 adaptive mask 확인
 - `src/i18n.js`의 영어/일본어 정책 문구를 사람이 자연스럽게 읽히는지 마지막으로 확인
-- `1.0.4` 관리자 문의 노출 수정, `1.0.5` 아이콘/학습 알림 수정, `1.0.6` 튜토리얼/문제 수 버튼/Google direct auth 준비 수정 AAB는 아직 생성되지 않았다. EAS 빌드 한도 리셋 또는 플랜 업그레이드 후 다시 production build를 실행하고, 실제 versionCode와 AAB URL을 확인해야 한다.
+- `1.0.4` 관리자 문의 노출 수정, `1.0.5` 아이콘/학습 알림 수정, `1.0.6` 튜토리얼/문제 수 버튼/Google direct auth 준비, `1.0.7` Google direct auth Android redirect scheme 수정 AAB는 아직 생성되지 않았다. EAS 빌드 한도 리셋 또는 플랜 업그레이드 후 다시 production build를 실행하고, 실제 versionCode와 AAB URL을 확인해야 한다.

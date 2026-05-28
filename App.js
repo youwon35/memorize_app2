@@ -82,7 +82,8 @@ Notifications.setNotificationHandler({
     shouldSetBadge: false,
   }),
 });
-const APP_VERSION = require("./app.json").expo.version;
+const APP_CONFIG = require("./app.json").expo;
+const APP_VERSION = APP_CONFIG.version;
 const STORAGE_KEY = "@memoria/cards";
 const FOLDERS_STORAGE_KEY = "@memoria/folders";
 const ROOT_FOLDER_ID = "root";
@@ -99,6 +100,8 @@ const STUDY_REMINDER_LAST_OPENED_KEY = "@memoria/study-reminder-last-opened";
 const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
 const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
+const GOOGLE_ANDROID_REDIRECT_SCHEME = APP_CONFIG.android?.package || "com.youwon35.memoria";
+const GOOGLE_ANDROID_REDIRECT_URI = `${GOOGLE_ANDROID_REDIRECT_SCHEME}:/oauthredirect`;
 const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
 const GOOGLE_ANDROID_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
 const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
@@ -819,7 +822,7 @@ function AppContent() {
       scopes: ["openid", "profile", "email"],
       selectAccount: true,
     },
-    { native: `${APP_SCHEME}:/oauthredirect` }
+    { native: GOOGLE_ANDROID_REDIRECT_URI }
   );
   const note = noteState.raw ? noteState.raw : t(noteState.key, noteState.params);
   const authTitle = session?.user?.email

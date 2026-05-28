@@ -2,9 +2,12 @@
   "expo": {
     "name": "MEMORIA",
     "slug": "memoria",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "orientation": "portrait",
-    "scheme": "memoria",
+    "scheme": [
+      "memoria",
+      "com.youwon35.memoria"
+    ],
     "userInterfaceStyle": "light",
     "icon": "./app-icon.png",
     "splash": {
