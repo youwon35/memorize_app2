@@ -692,6 +692,15 @@ npx eas-cli build --platform android --profile production --non-interactive --no
   - `aapt`로 APK manifest를 확인했고 `memoria`, `com.youwon35.memoria`, `exp+memoria`, `com.googleusercontent.apps.852267252395-oaqdf00qj7j0fkgi08pgh01vggggvjoj` scheme이 등록되어 있다.
   - `apksigner --print-certs`로 확인한 APK SHA-1은 `5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25`라서 Google Cloud Android client에 등록된 값과 일치한다.
   - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo install --check`, `npx expo export --platform android --output-dir .expo-export --clear`, `expo prebuild`, `android\gradlew.bat -p android :app:assembleDebug` 통과.
+- 2026-05-29 Google direct auth 실패 상세 표시 보강
+  - 사용자가 `1.0.8` dev build에서 Google 동의 후 앱의 `Google 로그인 실패` 팝업까지 돌아오는 것을 확인했다.
+  - 이는 Android redirect 딥링크는 앱이 받고 있으며, 실패 지점이 Google token exchange 또는 Supabase `signInWithIdToken` 검증 단계로 이동했다는 뜻이다.
+  - 기존 앱은 실제 에러를 `설정을 확인해 주세요.`로만 숨겨 원인 파악이 어려웠다.
+  - dev build에서는 auth 실패 팝업에 Google/Supabase 에러 상세와 설정 힌트를 함께 표시하도록 보강했다.
+  - 특히 에러 상세에 `audience`, `aud`, `client id`, `invalid token`, `jwt`가 보이면 Supabase Google Provider의 Client IDs에 Web client ID를 먼저 넣고 쉼표 뒤에 Android client ID를 추가하라는 힌트를 보여준다.
+  - Supabase 공식 문서 기준, Google Provider에 여러 client ID를 쓸 때는 Web client ID가 먼저 오고 Android/iOS client ID를 쉼표로 이어 넣어야 한다.
+  - JS 변경이므로 새 APK는 만들지 않았다. `1.0.8` dev build에서 Metro reload로 확인하면 된다.
+  - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo export --platform android --output-dir .expo-export --clear` 통과.
 
 ## 21. 다음 작업자가 꼭 기억할 것
 

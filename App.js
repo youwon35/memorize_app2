@@ -157,6 +157,91 @@ const LEGAL_DOC_OPTIONS = [
 const QUIZ_COUNT_PRESETS = [5, 10, 20];
 const RETRY_DAY_PRESETS = [1, 3, 7, 14, 30];
 
+const AUTH_ERROR_DETAIL_FIELDS = [
+  "message",
+  "name",
+  "error",
+  "error_description",
+  "description",
+  "code",
+  "status",
+  "statusCode",
+  "hint",
+];
+
+const compactAuthErrorDetail = (value) => {
+  if (!value) {
+    return "";
+  }
+
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  return "";
+};
+
+const getAuthErrorDetails = (error) => {
+  const details = [];
+
+  if (typeof error === "string") {
+    details.push(error);
+  } else if (error instanceof Error) {
+    details.push(error.message);
+  }
+
+  if (error && typeof error === "object") {
+    AUTH_ERROR_DETAIL_FIELDS.forEach((field) => {
+      const detail = compactAuthErrorDetail(error[field]);
+      if (detail) {
+        details.push(`${field}: ${detail}`);
+      }
+    });
+
+    if (error.params && typeof error.params === "object") {
+      AUTH_ERROR_DETAIL_FIELDS.forEach((field) => {
+        const detail = compactAuthErrorDetail(error.params[field]);
+        if (detail) {
+          details.push(`params.${field}: ${detail}`);
+        }
+      });
+    }
+  }
+
+  return [...new Set(details)].join("\n").slice(0, 700);
+};
+
+const getAuthSetupHint = (details) => {
+  if (!details) {
+    return "";
+  }
+
+  if (/audience|aud\b|client\s*id|invalid.*token|jwt/i.test(details)) {
+    return "Supabase Google Provider의 Client IDs에 Web client ID를 먼저 넣고, 쉼표 뒤에 Android client ID도 추가해 주세요.";
+  }
+
+  if (/id_token/i.test(details)) {
+    return "Google 응답에서 id_token을 받지 못했습니다. Google OAuth client와 redirect URI 설정을 확인해 주세요.";
+  }
+
+  return "";
+};
+
+const buildAuthFailureBody = (baseMessage, error) => {
+  if (!__DEV__) {
+    return baseMessage;
+  }
+
+  const details = getAuthErrorDetails(error);
+  const setupHint = getAuthSetupHint(details);
+  const sections = [baseMessage, setupHint, details && `개발 정보:\n${details}`].filter(Boolean);
+  return sections.join("\n\n");
+};
+
 const createFolderId = () =>
   `folder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -3809,7 +3894,7 @@ function AppContent() {
           }
 
           if (!idToken) {
-            throw new Error(t("about.authFailBody"));
+            throw new Error("Google response did not include an id_token after the code exchange.");
           }
 
           const { error } = await supabase.auth.signInWithIdToken({
@@ -3866,8 +3951,9 @@ function AppContent() {
       }
 
       return false;
-    } catch {
-      Alert.alert(t("about.authFailTitle"), t("about.authFailBody"));
+    } catch (error) {
+      console.warn("Google sign-in failed", getAuthErrorDetails(error));
+      Alert.alert(t("about.authFailTitle"), buildAuthFailureBody(t("about.authFailBody"), error));
       return false;
     } finally {
       setAuthBusy(false);
