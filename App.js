@@ -25,7 +25,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
-import { makeRedirectUri } from "expo-auth-session";
+import { AccessTokenRequest, makeRedirectUri } from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
 import { File } from "expo-file-system";
 import { EncodingType, readAsStringAsync } from "expo-file-system/legacy";
@@ -106,6 +106,7 @@ const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
 const GOOGLE_ANDROID_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
 const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
 const FALLBACK_GOOGLE_CLIENT_ID = "memoria-disabled-google-client-id";
+const GOOGLE_AUTH_SCOPES = ["openid", "profile", "email"];
 const DIRECT_GOOGLE_AUTH_CONFIGURED = Platform.select({
   android: Boolean(GOOGLE_ANDROID_CLIENT_ID),
   ios: Boolean(GOOGLE_IOS_CLIENT_ID),
@@ -819,8 +820,9 @@ function AppContent() {
       webClientId: GOOGLE_WEB_CLIENT_ID || FALLBACK_GOOGLE_CLIENT_ID,
       androidClientId: GOOGLE_ANDROID_CLIENT_ID || FALLBACK_GOOGLE_CLIENT_ID,
       iosClientId: GOOGLE_IOS_CLIENT_ID || FALLBACK_GOOGLE_CLIENT_ID,
-      scopes: ["openid", "profile", "email"],
+      scopes: GOOGLE_AUTH_SCOPES,
       selectAccount: true,
+      shouldAutoExchangeCode: false,
     },
     { native: GOOGLE_ANDROID_REDIRECT_URI }
   );
@@ -3780,8 +3782,23 @@ function AppContent() {
         const result = await promptGoogleIdTokenAsync();
 
         if (result.type === "success") {
-          const idToken = result.params?.id_token;
-          const accessToken = result.params?.access_token ?? result.authentication?.accessToken;
+          let idToken = result.params?.id_token;
+          let accessToken = result.params?.access_token ?? result.authentication?.accessToken;
+
+          if (!idToken && result.params?.code) {
+            const tokenResponse = await new AccessTokenRequest({
+              clientId: googleIdTokenRequest?.clientId || GOOGLE_ANDROID_CLIENT_ID || FALLBACK_GOOGLE_CLIENT_ID,
+              redirectUri: googleIdTokenRequest?.redirectUri || GOOGLE_ANDROID_REDIRECT_URI,
+              scopes: googleIdTokenRequest?.scopes || GOOGLE_AUTH_SCOPES,
+              code: result.params.code,
+              extraParams: {
+                code_verifier: googleIdTokenRequest?.codeVerifier || "",
+              },
+            }).performAsync(Google.discovery);
+
+            idToken = tokenResponse.idToken;
+            accessToken = tokenResponse.accessToken;
+          }
 
           if (!idToken) {
             throw new Error(t("about.authFailBody"));

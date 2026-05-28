@@ -1,6 +1,6 @@
 # MEMORIA / 메모리아 Handoff
 
-Last updated: 2026-05-28 KST
+Last updated: 2026-05-29 KST
 
 이 문서는 다음 채팅 또는 다른 작업자가 `D:\github\APP\memorize_app2` 프로젝트를 바로 이어받기 위한 최신 상태 요약이다. 이전 `handoff.md`는 이 내용으로 새로 덮어썼다.
 
@@ -12,8 +12,8 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 
 - 작업 폴더: `D:\github\APP\memorize_app2`
 - 기본 작업 브랜치: `develop`
-- 현재 최신 기능 변경: `1.0.7` Google direct auth Android redirect scheme 보정 및 새 dev build 생성
-- 현재 `develop`, `origin/develop`은 이 문서 갱신 전 기준 `8649c0d` 기반이며, 이번 수정 커밋이 바로 다음 커밋으로 추가될 예정이다.
+- 현재 최신 기능 변경: Google direct auth code -> id_token 수동 교환 보강
+- 현재 `develop`, `origin/develop`은 이 문서 갱신 전 기준 `63e23ad` 기반이며, 이번 수정 커밋이 바로 다음 커밋으로 추가될 예정이다.
 - 현재 `main`, `origin/main`은 이전 릴리스 커밋 `03f7898`에 머물러 있다.
 - 현재 추적되지 않은 파일: `want.png`
   - 사용자가 둔 참고 파일로 보인다.
@@ -667,6 +667,14 @@ npx eas-cli build --platform android --profile production --non-interactive --no
   - `aapt`로 APK manifest를 확인했고 `memoria`, `com.youwon35.memoria`, `exp+memoria` scheme이 등록되어 있다.
   - `apksigner --print-certs`로 확인한 APK SHA-1은 `5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25`라서 사용자가 Google Cloud에 넣은 값과 일치한다.
   - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo install --check`, `npx expo-doctor`, `npx expo export --platform android --output-dir .expo-export --clear`, `expo prebuild`, `android\gradlew.bat -p android :app:assembleDebug` 통과.
+- 2026-05-29 Google direct auth code 교환 보강
+  - 사용자가 Google 동의 화면에서 `계속`을 누른 뒤 Google 로딩 화면까지 진행되는 것을 확인했다.
+  - Android Google AuthSession은 native app에서 기본적으로 `response_type=code`를 사용하므로, `promptGoogleIdTokenAsync()`가 즉시 `id_token`을 주지 않고 먼저 `code`를 돌려줄 수 있다.
+  - 기존 코드는 `promptGoogleIdTokenAsync()` 반환값에서 바로 `id_token`을 찾았기 때문에, Google redirect가 성공해도 Supabase `signInWithIdToken`까지 안정적으로 이어지지 않을 수 있었다.
+  - `AccessTokenRequest`를 사용해 Google이 돌려준 authorization code를 직접 `id_token`/`access_token`으로 교환한 뒤 Supabase `signInWithIdToken`에 넘기도록 보강했다.
+  - Expo Google hook의 자동 code exchange와 중복되지 않도록 `shouldAutoExchangeCode: false`를 설정했다.
+  - native scheme 변경이 아니므로 새 APK는 만들지 않았다. 기존 `1.0.7` dev build에서 Metro를 재시작하면 반영된다.
+  - 검증: `npx tsc --noEmit`, `git diff --check`, `npx expo install --check`, `npx expo export --platform android --output-dir .expo-export --clear` 통과.
 
 ## 21. 다음 작업자가 꼭 기억할 것
 
