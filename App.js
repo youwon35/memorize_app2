@@ -955,7 +955,6 @@ function AppContent() {
       androidClientId: GOOGLE_ANDROID_CLIENT_ID || FALLBACK_GOOGLE_CLIENT_ID,
       iosClientId: GOOGLE_IOS_CLIENT_ID || FALLBACK_GOOGLE_CLIENT_ID,
       scopes: GOOGLE_AUTH_SCOPES,
-      selectAccount: true,
       shouldAutoExchangeCode: false,
     },
     { native: GOOGLE_ANDROID_REDIRECT_URI }
@@ -2294,6 +2293,60 @@ function AppContent() {
     return AsyncStorage.setItem(STUDY_STATS_KEY, JSON.stringify(syncedStudyStats));
   };
 
+  const resetLocalAccountCache = async ({ clearSupport = false } = {}) => {
+    const emptyStudyStats = createEmptyStudyStats();
+
+    clearTimeout(cloudUserStateSyncTimerRef.current);
+    cloudUserStateReadyRef.current = false;
+    cloudFoldersReadyRef.current = false;
+    pairsRef.current = [];
+    foldersRef.current = [];
+    studyStatsRef.current = emptyStudyStats;
+    dailyStudyGoalRef.current = DEFAULT_DAILY_STUDY_GOAL;
+    setPairs([]);
+    setFolders([]);
+    setStudyStats(emptyStudyStats);
+    setDailyStudyGoal(DEFAULT_DAILY_STUDY_GOAL);
+    setDailyGoalInput(`${DEFAULT_DAILY_STUDY_GOAL}`);
+    setSaveFolderId(ROOT_FOLDER_ID);
+    setQuizFolderId(ROOT_FOLDER_ID);
+    setManageFolderId(ROOT_FOLDER_ID);
+    setSelectedManagePairIds([]);
+    setManageSelectionMode(false);
+    setManageSortMenuOpen(false);
+    setFolderActionMenuKey(null);
+    setCreatingFolderKey(null);
+    setRenamingFolderId(null);
+    setEditingId(null);
+    setEditingLeft("");
+    setEditingRight("");
+    setEditingFolderId(ROOT_FOLDER_ID);
+    setOpenManageSwipeId(null);
+    setDeck([]);
+    setQuizIndex(0);
+    setAnswer("");
+    setFeedback("");
+    setResult(null);
+    setRoundComplete(false);
+    setRoundIncorrectIds([]);
+    roundMetaRef.current = null;
+    roundSnapshotRef.current = null;
+
+    if (clearSupport) {
+      setSupportRequests([]);
+      setSupportNotice("");
+    }
+
+    await AsyncStorage.multiRemove([
+      STORAGE_KEY,
+      ...LEGACY_STORAGE_KEYS,
+      FOLDERS_STORAGE_KEY,
+      STUDY_STATS_KEY,
+      DAILY_STUDY_GOAL_KEY,
+      ...(clearSupport ? [SUPPORT_REQUESTS_KEY] : []),
+    ]);
+  };
+
   const addSupportRequest = (nextRequest) => {
     setSupportRequests((currentRequests) => mergeSupportRequests([nextRequest], currentRequests));
   };
@@ -3302,39 +3355,7 @@ function AppContent() {
         }
       }
 
-      const emptyStudyStats = createEmptyStudyStats();
-
-      clearTimeout(cloudUserStateSyncTimerRef.current);
-      cloudUserStateReadyRef.current = false;
-      pairsRef.current = [];
-      foldersRef.current = [];
-      studyStatsRef.current = emptyStudyStats;
-      dailyStudyGoalRef.current = DEFAULT_DAILY_STUDY_GOAL;
-      await Promise.all([
-        savePairs([]),
-        saveFolders([]),
-        updateStudyStats(emptyStudyStats),
-        AsyncStorage.setItem(DAILY_STUDY_GOAL_KEY, `${DEFAULT_DAILY_STUDY_GOAL}`),
-      ]);
-
-      setDailyStudyGoal(DEFAULT_DAILY_STUDY_GOAL);
-      setDailyGoalInput(`${DEFAULT_DAILY_STUDY_GOAL}`);
-      setSaveFolderId(ROOT_FOLDER_ID);
-      setQuizFolderId(ROOT_FOLDER_ID);
-      setManageFolderId(ROOT_FOLDER_ID);
-      setSelectedManagePairIds([]);
-      setSupportRequests([]);
-      setFolderActionMenuKey(null);
-      setCreatingFolderKey(null);
-      setOpenManageSwipeId(null);
-      setDeck([]);
-      setQuizIndex(0);
-      setAnswer("");
-      setFeedback("");
-      setResult(null);
-      setRoundComplete(false);
-      setRoundIncorrectIds([]);
-      cloudFoldersReadyRef.current = false;
+      await resetLocalAccountCache({ clearSupport: true });
       setDataDeletionModalVisible(false);
 
       if (supabase) {
@@ -3841,6 +3862,20 @@ function AppContent() {
       if (error) {
         throw error;
       }
+
+      sessionRef.current = null;
+      setSession(null);
+      setUserRole("user");
+      setSyncing(false);
+      setAdminMetrics(null);
+      setAdminSupportRequests([]);
+      setAdminOnlyUnresolved(false);
+      setAdminLoading(false);
+      setAdminUpdatingId(null);
+      setAdminNotice("");
+      appOpenTrackedUserRef.current = null;
+      await resetLocalAccountCache({ clearSupport: true });
+      setTranslatedNote(isSupabaseConfigured ? "notes.googleSyncAvailable" : "notes.localMode");
     } catch {
       Alert.alert(t("about.signOutFailTitle"), t("common.retryLater"));
     } finally {
@@ -3911,7 +3946,7 @@ function AppContent() {
         options: {
           redirectTo: redirectUri,
           skipBrowserRedirect: true,
-          queryParams: { access_type: "offline", prompt: "consent" },
+          queryParams: { access_type: "offline" },
         },
       });
 
@@ -3955,9 +3990,10 @@ function AppContent() {
     }
 
     setAuthBusy(true);
+    const hadSession = Boolean(sessionRef.current?.user);
 
     try {
-      if (supabase && sessionRef.current?.user) {
+      if (supabase && hadSession) {
         const { error } = await supabase.auth.signOut({ scope: "local" });
 
         if (error) {
@@ -3971,8 +4007,6 @@ function AppContent() {
       sessionRef.current = null;
       setUserRole("user");
       setSyncing(false);
-      setSupportRequests([]);
-      setSupportNotice("");
       setAdminMetrics(null);
       setAdminSupportRequests([]);
       setAdminOnlyUnresolved(false);
@@ -3980,7 +4014,9 @@ function AppContent() {
       setAdminUpdatingId(null);
       setAdminNotice("");
       appOpenTrackedUserRef.current = null;
-      void AsyncStorage.removeItem(SUPPORT_REQUESTS_KEY);
+      if (hadSession) {
+        await resetLocalAccountCache({ clearSupport: true });
+      }
       setTranslatedNote("notes.guestMode");
       dismissLaunchScreen();
       setAuthBusy(false);
