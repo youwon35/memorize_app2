@@ -291,6 +291,17 @@ Supabase 테이블:
 
 이후 1.0.4/1.0.5 production AAB 시도는 EAS 무료 플랜 Android 월간 빌드 한도 소진으로 실패했다. 한도 리셋일은 2026-06-01로 안내되었다.
 
+2026-06-02 KST production AAB 재시도:
+
+- Build ID: `39e4cbdb-8e29-4e19-86cc-b2bfc984a14a`
+- 상태: `CANCELED`
+- App versionName: `1.0.8`
+- Android versionCode: `13`
+- Commit: `e8516b9c519d4684363f18fe7a15c15a44a21085`
+- Logs: `https://expo.dev/accounts/zinnn/projects/memoria/builds/39e4cbdb-8e29-4e19-86cc-b2bfc984a14a`
+- AAB artifact는 생성되지 않았다.
+- 이 빌드는 약 2026-06-02 02:37 KST에 canceled 상태가 되었고, `versionCode 13`은 이미 소모된 빌드 번호로 취급해야 한다. 다음 AAB 재시도 시 remote versionCode가 14 이상으로 증가할 가능성이 높다.
+
 중요:
 
 - Google Play가 중복으로 막는 것은 `versionName`이 아니라 Android 정수 `versionCode`.
