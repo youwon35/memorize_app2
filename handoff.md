@@ -283,11 +283,15 @@ Supabase 테이블:
 
 최신 성공 production AAB:
 
-- App versionName: `1.0.3`
-- Android versionCode: `10`
-- EAS build ID: `6539f525-e33c-44f0-858d-a8cea15fb13a`
-- AAB: `https://expo.dev/artifacts/eas/duZy4o5t6LMbyXqq5iiqTm.aab`
-- Logs: `https://expo.dev/accounts/zinnn/projects/memoria/builds/6539f525-e33c-44f0-858d-a8cea15fb13a`
+- App versionName: `1.0.8`
+- Android versionCode: `14`
+- EAS build ID: `dc733ae7-3190-4d48-9a97-5a756765a13d`
+- AAB: `https://expo.dev/artifacts/eas/tdTdkYwBSeXH6LbauYTMzX.aab`
+- Local copy: `D:\github\APP\memorize_app2\.expo\local-builds\memoria-production-1.0.8-v14.aab`
+- Logs: `https://expo.dev/accounts/zinnn/projects/memoria/builds/dc733ae7-3190-4d48-9a97-5a756765a13d`
+- Commit: `e00f1b48e1300ea1457ff45042be427fd31d985c`
+- 완료 시각: 2026-06-02 15:39 KST경
+- 파일 크기: 약 61.4 MB
 
 이후 1.0.4/1.0.5 production AAB 시도는 EAS 무료 플랜 Android 월간 빌드 한도 소진으로 실패했다. 한도 리셋일은 2026-06-01로 안내되었다.
 
@@ -306,7 +310,7 @@ Supabase 테이블:
 
 - Google Play가 중복으로 막는 것은 `versionName`이 아니라 Android 정수 `versionCode`.
 - EAS remote autoIncrement가 실패 직전에도 versionCode를 올렸다는 메시지를 냈다.
-- 다음 production AAB를 만들 때 실제 versionCode를 반드시 확인해야 한다.
+- 다음 production AAB를 만들 때 실제 versionCode를 반드시 확인해야 한다. 현재 최신 성공 AAB는 `versionCode 14`다.
 
 ## 13. 검증 명령
 
