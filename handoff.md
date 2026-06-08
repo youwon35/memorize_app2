@@ -1,6 +1,6 @@
 # MEMORIA / 메모리아 Handoff
 
-Last updated: 2026-05-30 KST
+Last updated: 2026-06-09 KST
 
 이 문서는 다음 채팅방에서 `D:\github\APP\memorize_app2` 프로젝트를 바로 이어받기 위한 최신 인수인계 문서다. 이전 `handoff.md` 내용은 이 요약본으로 덮어썼다.
 
@@ -282,6 +282,20 @@ Supabase 테이블:
 ## 12. production AAB 상태
 
 최신 성공 production AAB:
+
+- App versionName: `1.0.8`
+- Android versionCode: `15`
+- EAS build ID: `d0d0f9e8-4e40-461d-9e37-4b13300c5e9e`
+- AAB: `https://expo.dev/artifacts/eas/rMyw4dxEPr9trCY7bX6EtQ.aab`
+- Local copy: `D:\github\APP\memorize_app2\.expo\local-builds\memoria-production-1.0.8-v15.aab`
+- Logs: `https://expo.dev/accounts/zinnn/projects/memoria/builds/d0d0f9e8-4e40-461d-9e37-4b13300c5e9e`
+- Commit: `06c53d01a5d347f801d9876271ae273c6485b38c`
+- 완료 시각: 2026-06-09 02:05 KST경
+- 파일 크기: 61,367,256 bytes (약 61.4 MB)
+
+이 AAB는 기존 `versionCode 14`를 내부 테스트에서 이미 사용한 뒤 Play Console 새 업로드용으로 만든 `versionCode 15` 빌드다. 빌드 큐가 오래 밀렸지만 최종적으로 `FINISHED`가 되었고, 위 로컬 경로에 다운로드까지 완료했다.
+
+이전 성공 production AAB:
 
 - App versionName: `1.0.8`
 - Android versionCode: `14`
