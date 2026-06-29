@@ -28,9 +28,16 @@ import * as DocumentPicker from "expo-document-picker";
 import { AccessTokenRequest, makeRedirectUri } from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
 import { File } from "expo-file-system";
-import { EncodingType, readAsStringAsync } from "expo-file-system/legacy";
+import {
+  EncodingType,
+  StorageAccessFramework,
+  documentDirectory,
+  readAsStringAsync,
+  writeAsStringAsync,
+} from "expo-file-system/legacy";
 import * as Notifications from "expo-notifications";
 import * as WebBrowser from "expo-web-browser";
+import * as XLSX from "xlsx";
 
 import { isSupabaseConfigured, supabase } from "./src/lib/supabase";
 import {
@@ -49,13 +56,16 @@ import {
   createPersistableStudyStats,
   createSignature,
   getPairStudySummary,
+  getFolderStyle,
   isPairHidden,
   migrateStudyStatsEntry,
   mapPairRecord,
   mergeStudyStats,
   mergePairsBySignature,
+  removeFolderStyles,
   parseImportedPairs,
   recordStudyAttempt,
+  setFolderStyle,
   setPairHidden,
   shuffleItems,
   sortPairs,
@@ -148,6 +158,23 @@ const MANAGE_SORT_OPTIONS = [
   { key: "registered", labelKey: "manage.sortRegistered" },
   { key: "incorrectCount", labelKey: "manage.sortIncorrectCount" },
   { key: "incorrectRate", labelKey: "manage.sortIncorrectRate" },
+];
+const DEFAULT_FOLDER_STYLE = { icon: "folder", color: "purple" };
+const FOLDER_COLOR_OPTIONS = [
+  { key: "purple", color: "#8066F6", soft: "#EFEAFF", labelKey: "folders.colorPurple" },
+  { key: "teal", color: "#1AAE9F", soft: "#E2F8F4", labelKey: "folders.colorTeal" },
+  { key: "blue", color: "#3F7FEF", soft: "#EAF1FF", labelKey: "folders.colorBlue" },
+  { key: "pink", color: "#E45F95", soft: "#FFEAF3", labelKey: "folders.colorPink" },
+  { key: "green", color: "#2F9F63", soft: "#E8F8EF", labelKey: "folders.colorGreen" },
+  { key: "amber", color: "#D98A1A", soft: "#FFF3DE", labelKey: "folders.colorAmber" },
+];
+const FOLDER_ICON_OPTIONS = [
+  { key: "folder", icon: "folder", labelKey: "folders.iconFolder" },
+  { key: "book", icon: "book-open-variant", labelKey: "folders.iconBook" },
+  { key: "school", icon: "school-outline", labelKey: "folders.iconSchool" },
+  { key: "star", icon: "star-outline", labelKey: "folders.iconStar" },
+  { key: "language", icon: "translate", labelKey: "folders.iconLanguage" },
+  { key: "brain", icon: "brain", labelKey: "folders.iconBrain" },
 ];
 const THEME_OPTIONS = [
   { key: "light", labelKey: "theme.light", icon: "white-balance-sunny" },
@@ -831,6 +858,70 @@ const mergeSupportRequests = (...collections) => {
   );
 };
 
+const getFolderStyleConfig = (studyStats, folderId) => {
+  const savedStyle = getFolderStyle(studyStats, folderId) ?? DEFAULT_FOLDER_STYLE;
+  const colorOption =
+    FOLDER_COLOR_OPTIONS.find((option) => option.key === savedStyle.color) ?? FOLDER_COLOR_OPTIONS[0];
+  const iconOption =
+    FOLDER_ICON_OPTIONS.find((option) => option.key === savedStyle.icon) ?? FOLDER_ICON_OPTIONS[0];
+
+  return {
+    colorKey: colorOption.key,
+    iconKey: iconOption.key,
+    color: colorOption.color,
+    backgroundColor: colorOption.soft,
+    icon: iconOption.icon,
+  };
+};
+
+const createDuplicateCardGroups = (pairs) => {
+  const groups = new Map();
+
+  pairs.forEach((pair) => {
+    const signature = createSignature(pair.left, pair.right);
+
+    if (!signature || signature === "::") {
+      return;
+    }
+
+    const currentGroup = groups.get(signature) ?? {
+      signature,
+      left: pair.left,
+      right: pair.right,
+      items: [],
+    };
+
+    currentGroup.items.push(pair);
+    groups.set(signature, currentGroup);
+  });
+
+  return [...groups.values()]
+    .filter((group) => group.items.length > 1)
+    .sort((left, right) => right.items.length - left.items.length || left.left.localeCompare(right.left));
+};
+
+const createAnswerInitialHint = (value = "") => {
+  const words = String(value)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!words.length) {
+    return "";
+  }
+
+  return words
+    .slice(0, 3)
+    .map((word) => Array.from(word)[0])
+    .join(" ");
+};
+
+const createExportTimestamp = () =>
+  new Date()
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "")
+    .replace(/[-:T]/g, "");
+
 function AppContent() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const safeAreaInsets = useSafeAreaInsets();
@@ -848,6 +939,7 @@ function AppContent() {
   const [manageSortMenuOpen, setManageSortMenuOpen] = useState(false);
   const [manageSelectionMode, setManageSelectionMode] = useState(false);
   const [manageSearch, setManageSearch] = useState("");
+  const [exportingCards, setExportingCards] = useState(false);
   const [historyDateKey, setHistoryDateKey] = useState(() => getLocalDayKey(new Date()));
   const [historyCalendarOpen, setHistoryCalendarOpen] = useState(false);
   const [historyCalendarMonth, setHistoryCalendarMonth] = useState(() => getStartOfLocalMonth(new Date()));
@@ -862,6 +954,8 @@ function AppContent() {
   const [selectedManagePairIds, setSelectedManagePairIds] = useState([]);
   const [folderActionMenuKey, setFolderActionMenuKey] = useState(null);
   const [creatingFolderKey, setCreatingFolderKey] = useState(null);
+  const [folderStyleModal, setFolderStyleModal] = useState(null);
+  const [folderStyleDraft, setFolderStyleDraft] = useState(DEFAULT_FOLDER_STYLE);
   const [studyStats, setStudyStats] = useState(createEmptyStudyStats());
   const [draft, setDraft] = useState({ left: "", right: "" });
   const [storageReady, setStorageReady] = useState(false);
@@ -888,6 +982,7 @@ function AppContent() {
   const [quizCountInput, setQuizCountInput] = useState(`${DEFAULT_QUIZ_COUNT}`);
   const [quizMode, setQuizMode] = useState("both");
   const [answer, setAnswer] = useState("");
+  const [hintVisible, setHintVisible] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [result, setResult] = useState(null);
   const [retryWindowVisible, setRetryWindowVisible] = useState(false);
@@ -990,9 +1085,35 @@ function AppContent() {
     () => pairs.filter((pair) => manageFolderSubtreeIds.has(normalizeFolderId(pair.folderId))),
     [pairs, manageFolderSubtreeIds]
   );
+  const duplicateCardGroups = useMemo(() => createDuplicateCardGroups(pairs), [pairs]);
+  const scopedDuplicateCardGroups = useMemo(
+    () =>
+      duplicateCardGroups
+        .map((group) => ({
+          ...group,
+          scopedItems: group.items.filter((pair) =>
+            manageFolderSubtreeIds.has(normalizeFolderId(pair.folderId))
+          ),
+        }))
+        .filter((group) => group.scopedItems.length > 0),
+    [duplicateCardGroups, manageFolderSubtreeIds]
+  );
+  const duplicatePairIds = useMemo(() => {
+    const ids = new Set();
+
+    duplicateCardGroups.forEach((group) => {
+      group.items.forEach((pair) => ids.add(pair.id));
+    });
+
+    return ids;
+  }, [duplicateCardGroups]);
   const selectedManagePairSet = useMemo(
     () => new Set(selectedManagePairIds),
     [selectedManagePairIds]
+  );
+  const currentAnswerHint = useMemo(
+    () => (current ? createAnswerInitialHint(current.answer) : ""),
+    [current]
   );
   const hasSavedCards = quizFolderPairs.length > 0;
   const maxQuizCount = quizFolderPairs.length ? quizFolderPairs.length * (quizMode === "both" ? 2 : 1) : 0;
@@ -2215,6 +2336,7 @@ function AppContent() {
     setDeck([]);
     setQuizIndex(0);
     setAnswer("");
+    setHintVisible(false);
     setFeedback("");
     setResult(null);
     setRoundComplete(false);
@@ -2273,6 +2395,7 @@ function AppContent() {
   const savePairs = async (nextPairs) => {
     const sorted = sortPairs(nextPairs.map(normalizePairFolder));
 
+    pairsRef.current = sorted;
     setPairs(sorted);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
   };
@@ -2325,6 +2448,7 @@ function AppContent() {
     setDeck([]);
     setQuizIndex(0);
     setAnswer("");
+    setHintVisible(false);
     setFeedback("");
     setResult(null);
     setRoundComplete(false);
@@ -2478,6 +2602,122 @@ function AppContent() {
     return [t("folders.root"), ...path.map((folder) => folder.name)].join(" / ");
   };
 
+  const openFolderStyleEditor = (folder) => {
+    const currentStyle = getFolderStyleConfig(studyStatsRef.current, folder.id);
+
+    setFolderStyleModal(folder);
+    setFolderStyleDraft({ icon: currentStyle.iconKey, color: currentStyle.colorKey });
+    setFolderActionMenuKey(null);
+  };
+
+  const closeFolderStyleEditor = () => {
+    setFolderStyleModal(null);
+    setFolderStyleDraft(DEFAULT_FOLDER_STYLE);
+  };
+
+  const saveFolderStyleDraft = () => {
+    if (!folderStyleModal?.id) {
+      return;
+    }
+
+    void updateStudyStats(setFolderStyle(studyStatsRef.current, folderStyleModal.id, folderStyleDraft));
+    closeFolderStyleEditor();
+  };
+
+  const createCardExportRows = () =>
+    pairsRef.current.map((pair, index) => {
+      const summary = getPairStudySummary(studyStatsRef.current, pair);
+
+      return {
+        No: index + 1,
+        Folder: getFolderLabel(pair.folderId),
+        Front: pair.left,
+        Back: pair.right,
+        Attempts: summary.attempts,
+        Correct: summary.correct,
+        Incorrect: summary.incorrect,
+        AccuracyPercent: summary.accuracy ?? "",
+        Hidden: summary.hidden ? "Y" : "N",
+        CreatedAt: pair.createdAt ?? "",
+        UpdatedAt: pair.updatedAt ?? "",
+      };
+    });
+
+  const saveExportFile = async ({ fileName, mimeType, contents, encoding }) => {
+    if (Platform.OS === "android" && StorageAccessFramework?.requestDirectoryPermissionsAsync) {
+      const permission = await StorageAccessFramework.requestDirectoryPermissionsAsync();
+
+      if (!permission.granted) {
+        return false;
+      }
+
+      const fileUri = await StorageAccessFramework.createFileAsync(
+        permission.directoryUri,
+        fileName,
+        mimeType
+      );
+
+      await StorageAccessFramework.writeAsStringAsync(fileUri, contents, { encoding });
+      return true;
+    }
+
+    if (!documentDirectory) {
+      throw new Error("Document directory is unavailable.");
+    }
+
+    await writeAsStringAsync(`${documentDirectory}${fileName}`, contents, { encoding });
+    return true;
+  };
+
+  const exportCards = async (format) => {
+    if (exportingCards) {
+      return;
+    }
+
+    if (!pairsRef.current.length) {
+      Alert.alert(t("manage.exportNoCardsTitle"), t("manage.exportNoCardsBody"));
+      return;
+    }
+
+    setExportingCards(true);
+
+    try {
+      const rows = createCardExportRows();
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const timestamp = createExportTimestamp();
+      const isExcel = format === "xlsx";
+      const fileName = `memoria-cards-${timestamp}.${isExcel ? "xlsx" : "csv"}`;
+      const saved = isExcel
+        ? await saveExportFile({
+            fileName,
+            mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            contents: XLSX.write(
+              (() => {
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "cards");
+                return workbook;
+              })(),
+              { bookType: "xlsx", type: "base64" }
+            ),
+            encoding: EncodingType.Base64,
+          })
+        : await saveExportFile({
+            fileName,
+            mimeType: "text/csv",
+            contents: `\uFEFF${XLSX.utils.sheet_to_csv(worksheet)}`,
+            encoding: EncodingType.UTF8,
+          });
+
+      if (saved) {
+        Alert.alert(t("manage.exportDoneTitle"), t("manage.exportDoneBody", { fileName }));
+      }
+    } catch {
+      Alert.alert(t("manage.exportFailTitle"), t("common.retryLater"));
+    } finally {
+      setExportingCards(false);
+    }
+  };
+
   const createFolderInCurrentLocation = async (parentId) => {
     const name = folderNameDraft.trim();
     const normalizedParentId = normalizeFolderId(parentId);
@@ -2554,6 +2794,7 @@ function AppContent() {
     setDeck([]);
     setQuizIndex(0);
     setAnswer("");
+    setHintVisible(false);
     setFeedback("");
     setResult(null);
     setRoundComplete(false);
@@ -2582,7 +2823,7 @@ function AppContent() {
 
     setManageFolderId(nextFolderId);
     setManageSearch("");
-    setManageSort("recent");
+    setManageSort("registered");
     setManageSortMenuOpen(false);
     setSelectedManagePairIds([]);
     setEditingId(null);
@@ -2731,6 +2972,7 @@ function AppContent() {
 
       await savePairs(nextPairs);
       await saveFolders(nextFolders);
+      await updateStudyStats(removeFolderStyles(studyStatsRef.current, idsToDelete));
       setSaveFolderId((currentFolderId) =>
         subtreeIds.has(normalizeFolderId(currentFolderId)) ? parentFolderId : currentFolderId
       );
@@ -3137,6 +3379,7 @@ function AppContent() {
     setDeck(nextDeck);
     setQuizIndex(0);
     setAnswer("");
+    setHintVisible(false);
     setFeedback("");
     setResult(null);
     setRoundComplete(false);
@@ -3197,6 +3440,7 @@ function AppContent() {
     setDeck([]);
     setQuizIndex(0);
     setAnswer("");
+    setHintVisible(false);
     setFeedback("");
     setResult(null);
     setRoundComplete(false);
@@ -3578,6 +3822,7 @@ function AppContent() {
     setDeck([]);
     setQuizIndex(0);
     setAnswer("");
+    setHintVisible(false);
     setFeedback("");
     setResult(null);
     setRoundComplete(false);
@@ -3606,6 +3851,7 @@ function AppContent() {
 
     clearTimeout(timerRef.current);
     setAnswer("");
+    setHintVisible(false);
     setFeedback("");
     setResult(null);
 
@@ -4154,6 +4400,7 @@ function AppContent() {
       const folderPairCount = pairs.filter(
         (pair) => normalizeFolderId(pair.folderId) === folder.id
       ).length;
+      const folderStyle = getFolderStyleConfig(studyStats, folder.id);
       const childMenuKey = `${folderViewKey}:folder:${folder.id}`;
       const childMenuOpen = folderActionMenuKey === childMenuKey;
 
@@ -4175,8 +4422,8 @@ function AppContent() {
             onPress={() => onSelectFolder(folder.id)}
             style={({ pressed }) => [styles.folderChildMain, pressed && styles.pressed]}
           >
-            <View style={styles.folderChildIcon}>
-              <MaterialCommunityIcons name="folder" size={40} color={theme.accent} />
+            <View style={[styles.folderChildIcon, { backgroundColor: folderStyle.backgroundColor }]}>
+              <MaterialCommunityIcons name={folderStyle.icon} size={34} color={folderStyle.color} />
             </View>
             <Text style={styles.folderChildName} numberOfLines={2} ellipsizeMode="tail">
               {folder.name}
@@ -4209,6 +4456,12 @@ function AppContent() {
                     icon: "pencil-outline",
                     label: t("folders.rename"),
                     onPress: () => beginFolderRename(folder),
+                  })}
+                  {renderFolderAction({
+                    key: "style",
+                    icon: "palette-outline",
+                    label: t("folders.customize"),
+                    onPress: () => openFolderStyleEditor(folder),
                   })}
                   {renderFolderAction({
                     key: "delete",
@@ -5668,6 +5921,32 @@ function AppContent() {
             </>
           ) : (
             <>
+              <View style={styles.quizHintRow}>
+                <Pressable
+                  disabled={!currentAnswerHint || hintVisible}
+                  onPress={() => setHintVisible(true)}
+                  style={({ pressed }) => [
+                    styles.quizHintButton,
+                    hintVisible && styles.quizHintButtonActive,
+                    (!currentAnswerHint || hintVisible) && styles.quizHintButtonDisabled,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name="lightbulb-on-outline"
+                    size={16}
+                    color={hintVisible ? theme.accent : theme.textSecondary}
+                  />
+                  <Text style={[styles.quizHintButtonText, hintVisible && styles.quizHintButtonTextActive]}>
+                    {t("quiz.initialHint")}
+                  </Text>
+                </Pressable>
+                {hintVisible && currentAnswerHint ? (
+                  <Text style={styles.quizHintValue}>
+                    {t("quiz.initialHintValue", { hint: currentAnswerHint })}
+                  </Text>
+                ) : null}
+              </View>
               <TextInput
                 value={answer}
                 onChangeText={(value) => {
@@ -6020,6 +6299,69 @@ function AppContent() {
     });
   };
 
+  const showDuplicateCardDetails = () => {
+    const details = scopedDuplicateCardGroups
+      .slice(0, 8)
+      .map((group) => {
+        const folderNames = [...new Set(group.items.map((pair) => getFolderLabel(pair.folderId)))].join(", ");
+
+        return `${group.left} ↔ ${group.right}\n${t("manage.duplicateGroupDetail", {
+          count: group.items.length,
+          folders: folderNames,
+        })}`;
+      })
+      .join("\n\n");
+
+    Alert.alert(t("manage.duplicateScanTitle"), details || t("manage.duplicateNoneBody"));
+  };
+
+  const renderDuplicateCardNotice = () => {
+    if (!scopedDuplicateCardGroups.length) {
+      return null;
+    }
+
+    const duplicatePairCount = new Set(
+      scopedDuplicateCardGroups.flatMap((group) => group.scopedItems.map((pair) => pair.id))
+    ).size;
+
+    return (
+      <View style={styles.duplicateNotice}>
+        <View style={styles.duplicateNoticeHeader}>
+          <View style={styles.duplicateNoticeIcon}>
+            <MaterialCommunityIcons name="content-duplicate" size={18} color={theme.accent} />
+          </View>
+          <View style={styles.flex}>
+            <Text style={styles.duplicateNoticeTitle}>{t("manage.duplicateScanTitle")}</Text>
+            <Text style={styles.duplicateNoticeBody}>
+              {t("manage.duplicateScanBody", {
+                groupCount: scopedDuplicateCardGroups.length,
+                cardCount: duplicatePairCount,
+              })}
+            </Text>
+          </View>
+          <Pressable
+            onPress={showDuplicateCardDetails}
+            style={({ pressed }) => [styles.duplicateNoticeAction, pressed && styles.pressed]}
+          >
+            <Text style={styles.duplicateNoticeActionText}>{t("manage.duplicateDetails")}</Text>
+          </Pressable>
+        </View>
+        <View style={styles.duplicatePreviewList}>
+          {scopedDuplicateCardGroups.slice(0, 2).map((group) => (
+            <View key={group.signature} style={styles.duplicatePreviewItem}>
+              <Text style={styles.duplicatePreviewText} numberOfLines={1}>
+                {group.left} ↔ {group.right}
+              </Text>
+              <Text style={styles.duplicatePreviewMeta}>
+                {t("manage.duplicateGroupCount", { count: group.items.length })}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
   const renderManagePairCard = (pair, index) => {
     const targetProps = index === 0 ? tutorialTargetProps("manage-first-card") : {};
     const selected = selectedManagePairSet.has(pair.id);
@@ -6032,6 +6374,7 @@ function AppContent() {
         ? t("manage.accuracyUnstudied")
         : t("manage.accuracyPercent", { percent: pairSummary.accuracy });
     const hidden = pairSummary.hidden;
+    const duplicate = duplicatePairIds.has(pair.id);
     const beginEdit = () => {
       closeManageSwipe(pair.id);
       setEditingId(pair.id);
@@ -6223,6 +6566,12 @@ function AppContent() {
                   <Text style={styles.manageHiddenBadgeText}>{t("manage.hiddenBadge")}</Text>
                 </View>
               ) : null}
+              {duplicate ? (
+                <View style={styles.manageDuplicateBadge}>
+                  <MaterialCommunityIcons name="content-duplicate" size={12} color={theme.accent} />
+                  <Text style={styles.manageDuplicateBadgeText}>{t("manage.duplicateBadge")}</Text>
+                </View>
+              ) : null}
             </View>
           </View>
           <View style={styles.manageSwipeActions}>
@@ -6284,6 +6633,36 @@ function AppContent() {
               </View>
               <View style={styles.manageListHeaderActions}>
                 {!manageSelectionMode ? (
+                  <>
+                    <Pressable
+                      disabled={exportingCards}
+                      onPress={() => void exportCards("csv")}
+                      style={({ pressed }) => [
+                        styles.manageSelectionModeButton,
+                        exportingCards && styles.manageSortButtonDisabled,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <MaterialCommunityIcons name="file-delimited-outline" size={16} color={theme.accent} />
+                      <Text style={styles.manageSelectionModeButtonText}>
+                        {exportingCards ? t("manage.exporting") : t("manage.exportCsv")}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      disabled={exportingCards}
+                      onPress={() => void exportCards("xlsx")}
+                      style={({ pressed }) => [
+                        styles.manageSelectionModeButton,
+                        exportingCards && styles.manageSortButtonDisabled,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <MaterialCommunityIcons name="microsoft-excel" size={16} color={theme.accent} />
+                      <Text style={styles.manageSelectionModeButtonText}>{t("manage.exportExcel")}</Text>
+                    </Pressable>
+                  </>
+                ) : null}
+                {!manageSelectionMode ? (
                   <Pressable
                     onPress={enterManageSelectionMode}
                     style={({ pressed }) => [styles.manageSelectionModeButton, pressed && styles.pressed]}
@@ -6338,6 +6717,8 @@ function AppContent() {
               </View>
             </View>
             <View style={styles.manageListDivider} />
+            {renderDuplicateCardNotice()}
+            {scopedDuplicateCardGroups.length ? <View style={styles.manageListDivider} /> : null}
             {manageSelectionMode ? (
               <>
                 <View style={styles.manageBulkBar}>
@@ -6440,6 +6821,122 @@ function AppContent() {
       </View>
     </Modal>
   );
+
+  const renderFolderStyleModal = () => {
+    const colorOption =
+      FOLDER_COLOR_OPTIONS.find((option) => option.key === folderStyleDraft.color) ?? FOLDER_COLOR_OPTIONS[0];
+    const iconOption =
+      FOLDER_ICON_OPTIONS.find((option) => option.key === folderStyleDraft.icon) ?? FOLDER_ICON_OPTIONS[0];
+
+    return (
+      <Modal
+        visible={Boolean(folderStyleModal)}
+        transparent
+        animationType="fade"
+        onRequestClose={closeFolderStyleEditor}
+      >
+        <View style={styles.legalModalOverlay}>
+          <Pressable style={styles.legalModalBackdrop} onPress={closeFolderStyleEditor} />
+          <View style={[styles.folderStyleModalCard, contentMaxWidth ? { maxWidth: Math.min(contentMaxWidth, 520) } : null]}>
+            <View style={styles.legalModalHeader}>
+              <View style={styles.folderStyleTitleBlock}>
+                <Text style={styles.legalModalTitle}>{t("folders.customizeTitle")}</Text>
+                <Text style={styles.folderStyleSubtitle} numberOfLines={1}>
+                  {folderStyleModal?.name ?? ""}
+                </Text>
+              </View>
+              <Pressable
+                onPress={closeFolderStyleEditor}
+                style={({ pressed }) => [styles.legalModalCloseButton, pressed && styles.pressed]}
+              >
+                <MaterialCommunityIcons name="close" size={20} color={theme.textPrimary} />
+              </Pressable>
+            </View>
+
+            <View style={styles.folderStylePreview}>
+              <View style={[styles.folderStylePreviewIcon, { backgroundColor: colorOption.soft }]}>
+                <MaterialCommunityIcons name={iconOption.icon} size={42} color={colorOption.color} />
+              </View>
+              <Text style={styles.folderStylePreviewName}>{folderStyleModal?.name ?? ""}</Text>
+            </View>
+
+            <View style={styles.folderStyleSection}>
+              <Text style={styles.inputLabel}>{t("folders.colorLabel")}</Text>
+              <View style={styles.folderStyleColorGrid}>
+                {FOLDER_COLOR_OPTIONS.map((option) => {
+                  const active = folderStyleDraft.color === option.key;
+
+                  return (
+                    <Pressable
+                      key={option.key}
+                      accessibilityLabel={t(option.labelKey)}
+                      onPress={() => setFolderStyleDraft((draftStyle) => ({ ...draftStyle, color: option.key }))}
+                      style={({ pressed }) => [
+                        styles.folderStyleColorButton,
+                        active && styles.folderStyleOptionActive,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <View style={[styles.folderStyleColorSwatch, { backgroundColor: option.color }]} />
+                      <Text style={[styles.folderStyleOptionText, active && styles.folderStyleOptionTextActive]}>
+                        {t(option.labelKey)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.folderStyleSection}>
+              <Text style={styles.inputLabel}>{t("folders.iconLabel")}</Text>
+              <View style={styles.folderStyleIconGrid}>
+                {FOLDER_ICON_OPTIONS.map((option) => {
+                  const active = folderStyleDraft.icon === option.key;
+
+                  return (
+                    <Pressable
+                      key={option.key}
+                      accessibilityLabel={t(option.labelKey)}
+                      onPress={() => setFolderStyleDraft((draftStyle) => ({ ...draftStyle, icon: option.key }))}
+                      style={({ pressed }) => [
+                        styles.folderStyleIconButton,
+                        active && styles.folderStyleOptionActive,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <MaterialCommunityIcons
+                        name={option.icon}
+                        size={22}
+                        color={active ? theme.accent : theme.textSecondary}
+                      />
+                      <Text style={[styles.folderStyleOptionText, active && styles.folderStyleOptionTextActive]}>
+                        {t(option.labelKey)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.folderStyleActionRow}>
+              <Pressable
+                onPress={closeFolderStyleEditor}
+                style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.secondaryButtonText}>{t("common.cancel")}</Text>
+              </Pressable>
+              <Pressable
+                onPress={saveFolderStyleDraft}
+                style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.primaryButtonText}>{t("folders.customizeSave")}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
 
   const renderAppInfoCard = () => (
     <View style={styles.settingsCard}>
@@ -7026,6 +7523,7 @@ function AppContent() {
       {renderTutorialCompletionModal()}
       {renderDataDeletionModal()}
       {renderAppAlertModal()}
+      {renderFolderStyleModal()}
 
       {launchVisible ? (
         <LaunchScreen
@@ -8390,6 +8888,7 @@ const createStyles = (theme) => StyleSheet.create({
   folderChildIcon: {
     width: 56,
     height: 44,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -8565,6 +9064,102 @@ const createStyles = (theme) => StyleSheet.create({
   },
   folderPickerTextActive: {
     color: theme.accent,
+  },
+  folderStyleModalCard: {
+    width: "100%",
+    gap: 16,
+    padding: 18,
+    borderRadius: 24,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorder,
+  },
+  folderStyleTitleBlock: {
+    flex: 1,
+    gap: 3,
+  },
+  folderStyleSubtitle: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: theme.textSecondary,
+  },
+  folderStylePreview: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 4,
+  },
+  folderStylePreviewIcon: {
+    width: 76,
+    height: 62,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  folderStylePreviewName: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  folderStyleSection: {
+    gap: 8,
+  },
+  folderStyleColorGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  folderStyleColorButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    minHeight: 36,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  folderStyleColorSwatch: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+  },
+  folderStyleIconGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  folderStyleIconButton: {
+    minWidth: 92,
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  folderStyleOptionActive: {
+    backgroundColor: theme.accentSoft,
+    borderColor: theme.accent,
+  },
+  folderStyleOptionText: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "900",
+    color: theme.textSecondary,
+  },
+  folderStyleOptionTextActive: {
+    color: theme.accent,
+  },
+  folderStyleActionRow: {
+    flexDirection: "row",
+    gap: 10,
   },
   heroStrip: {
     paddingTop: 8,
@@ -9088,6 +9683,78 @@ const createStyles = (theme) => StyleSheet.create({
   manageListDivider: {
     height: 1,
     backgroundColor: theme.surfaceBorderSoft,
+  },
+  duplicateNotice: {
+    gap: 10,
+    paddingHorizontal: 4,
+    paddingVertical: 12,
+  },
+  duplicateNoticeHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  duplicateNoticeIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.accentSoft,
+  },
+  duplicateNoticeTitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
+  duplicateNoticeBody: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: theme.textSecondary,
+  },
+  duplicateNoticeAction: {
+    minHeight: 32,
+    justifyContent: "center",
+    paddingHorizontal: 9,
+    borderRadius: 999,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  duplicateNoticeActionText: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "900",
+    color: theme.accent,
+  },
+  duplicatePreviewList: {
+    gap: 6,
+  },
+  duplicatePreviewItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 34,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  duplicatePreviewText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "800",
+    color: theme.textPrimary,
+  },
+  duplicatePreviewMeta: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "800",
+    color: theme.textSecondary,
   },
   manageBulkBar: {
     flexDirection: "row",
@@ -9989,6 +10656,51 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "800",
     color: theme.textPrimary,
   },
+  quizHintRow: {
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  quizHintButton: {
+    minHeight: 36,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  quizHintButtonActive: {
+    backgroundColor: theme.accentSoft,
+    borderColor: theme.accent,
+  },
+  quizHintButtonDisabled: {
+    opacity: 0.78,
+  },
+  quizHintButtonText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "900",
+    color: theme.textSecondary,
+  },
+  quizHintButtonTextActive: {
+    color: theme.accent,
+  },
+  quizHintValue: {
+    flexShrink: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceCard,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "900",
+    color: theme.textPrimary,
+  },
   feedback: {
     fontSize: 15,
     fontWeight: "800",
@@ -10228,6 +10940,23 @@ const createStyles = (theme) => StyleSheet.create({
     lineHeight: 13,
     fontWeight: "800",
     color: theme.textSecondary,
+  },
+  manageDuplicateBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: theme.accentSoft,
+    borderWidth: 1,
+    borderColor: theme.surfaceBorderSoft,
+  },
+  manageDuplicateBadgeText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: "900",
+    color: theme.accent,
   },
   manageSideButton: {
     flex: 0,

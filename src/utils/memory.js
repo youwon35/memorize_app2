@@ -106,6 +106,7 @@ export const createEmptyStudyStats = () => ({
   cards: {},
   sessions: [],
   hiddenCards: {},
+  folderStyles: {},
 });
 
 export const createPersistableStudyStats = (studyStats, pairs = []) => {
@@ -122,6 +123,7 @@ export const createPersistableStudyStats = (studyStats, pairs = []) => {
       .map((session) => createPersistableStudySession(session))
       .filter(Boolean),
     hiddenCards: createPersistableHiddenCards(syncedStats.hiddenCards, pairs),
+    folderStyles: createPersistableFolderStyles(syncedStats.folderStyles),
   };
 };
 
@@ -167,6 +169,7 @@ export const mergeStudyStats = (localStats, remoteStats, pairs = [], maxSessions
         .sort((left, right) => new Date(right.completedAt) - new Date(left.completedAt))
         .slice(0, maxSessions),
       hiddenCards: mergeHiddenCards(safeLocalStats.hiddenCards, safeRemoteStats.hiddenCards),
+      folderStyles: mergeFolderStyles(safeLocalStats.folderStyles, safeRemoteStats.folderStyles),
     },
     pairs
   );
@@ -246,6 +249,55 @@ export const setPairHidden = (studyStats, pair, hidden) => {
         updatedAt: new Date().toISOString(),
       },
     },
+  };
+};
+
+export const getFolderStyle = (studyStats, folderId) => {
+  const normalizedFolderId = typeof folderId === "string" && folderId ? folderId : "root";
+
+  return ensureStudyStats(studyStats).folderStyles[normalizedFolderId] ?? null;
+};
+
+export const setFolderStyle = (studyStats, folderId, style = {}) => {
+  const safeStats = ensureStudyStats(studyStats);
+  const normalizedFolderId = typeof folderId === "string" && folderId ? folderId : "root";
+
+  if (normalizedFolderId === "root") {
+    return safeStats;
+  }
+
+  const previousStyle = safeStats.folderStyles[normalizedFolderId] ?? {};
+
+  return {
+    ...safeStats,
+    folderStyles: {
+      ...safeStats.folderStyles,
+      [normalizedFolderId]: {
+        icon: typeof style.icon === "string" && style.icon ? style.icon : previousStyle.icon ?? "folder",
+        color: typeof style.color === "string" && style.color ? style.color : previousStyle.color ?? "purple",
+        updatedAt: new Date().toISOString(),
+      },
+    },
+  };
+};
+
+export const removeFolderStyles = (studyStats, folderIds = []) => {
+  const safeStats = ensureStudyStats(studyStats);
+  const idSet = new Set(folderIds.filter((id) => typeof id === "string" && id));
+
+  if (!idSet.size) {
+    return safeStats;
+  }
+
+  const nextFolderStyles = { ...safeStats.folderStyles };
+
+  idSet.forEach((id) => {
+    delete nextFolderStyles[id];
+  });
+
+  return {
+    ...safeStats,
+    folderStyles: nextFolderStyles,
   };
 };
 
@@ -551,6 +603,10 @@ function ensureStudyStats(studyStats) {
       studyStats.hiddenCards && typeof studyStats.hiddenCards === "object"
         ? studyStats.hiddenCards
         : {},
+    folderStyles:
+      studyStats.folderStyles && typeof studyStats.folderStyles === "object"
+        ? studyStats.folderStyles
+        : {},
   };
 }
 
@@ -686,6 +742,34 @@ function mergeDirectionStats(previousStats, nextStats) {
   };
 }
 
+function createPersistableFolderStyles(folderStyles) {
+  if (!folderStyles || typeof folderStyles !== "object") {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(folderStyles)
+      .map(([folderId, style]) => {
+        if (!folderId || folderId === "root" || !style || typeof style !== "object") {
+          return null;
+        }
+
+        return [
+          folderId,
+          {
+            icon: typeof style.icon === "string" && style.icon ? style.icon : "folder",
+            color: typeof style.color === "string" && style.color ? style.color : "purple",
+            updatedAt:
+              typeof style.updatedAt === "string" && style.updatedAt
+                ? style.updatedAt
+                : new Date().toISOString(),
+          },
+        ];
+      })
+      .filter(Boolean)
+  );
+}
+
 function createPersistableHiddenCards(hiddenCards = {}, pairs = []) {
   const pairSignatures = new Set(pairs.map((pair) => createSignature(pair.left, pair.right)));
   const entries = Object.entries(hiddenCards)
@@ -761,6 +845,37 @@ function mergeHiddenCards(localHiddenCards = {}, remoteHiddenCards = {}) {
   });
 
   return merged;
+}
+
+function mergeFolderStyles(localFolderStyles = {}, remoteFolderStyles = {}) {
+  const merged = {};
+  const folderIds = new Set([
+    ...Object.keys(localFolderStyles ?? {}),
+    ...Object.keys(remoteFolderStyles ?? {}),
+  ]);
+
+  folderIds.forEach((folderId) => {
+    const localStyle = localFolderStyles?.[folderId];
+    const remoteStyle = remoteFolderStyles?.[folderId];
+
+    if (!localStyle) {
+      merged[folderId] = createPersistableFolderStyles({ [folderId]: remoteStyle })[folderId];
+      return;
+    }
+
+    if (!remoteStyle) {
+      merged[folderId] = createPersistableFolderStyles({ [folderId]: localStyle })[folderId];
+      return;
+    }
+
+    const localUpdatedAt = new Date(localStyle.updatedAt ?? 0).getTime();
+    const remoteUpdatedAt = new Date(remoteStyle.updatedAt ?? 0).getTime();
+    const selectedStyle = localUpdatedAt >= remoteUpdatedAt ? localStyle : remoteStyle;
+
+    merged[folderId] = createPersistableFolderStyles({ [folderId]: selectedStyle })[folderId];
+  });
+
+  return Object.fromEntries(Object.entries(merged).filter(([, value]) => value));
 }
 
 function mergeHiddenCardState(localState, remoteState) {
