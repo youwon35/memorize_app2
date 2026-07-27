@@ -15,7 +15,9 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 - 작업 폴더: `D:\github\APP\memorize_app2`
 - GitHub 저장소: `https://github.com/youwon35/memorize_app2`
 - 기본 작업 브랜치: `develop`
-- 현재 앱 표시 버전: `1.0.8`
+- 현재 출시 상태: 사용자가 Google Play 출시 완료를 확인함
+- 다음 유지보수 앱 표시 버전: `1.0.9`
+- `1.0.9`는 아직 production DB 마이그레이션과 새 AAB 배포 전인 로컬/`develop` 업데이트다.
 - 이 문서 작성 직전 최신 기능 커밋: `4ed8b75 feat: add card management tools`
 - 현재 추적되지 않은 파일: `want.png`
   - 사용자가 둔 참고 이미지로 보인다.
@@ -31,7 +33,7 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 
 ## 3. 기술 스택
 
-- Expo: `~54.0.34`
+- Expo: `~54.0.36`
 - React Native: `0.81.5`
 - React: `19.1.0`
 - TypeScript: `~5.9.2`
@@ -385,6 +387,8 @@ Play Console 입력 관련 참고:
 
 ## 14. production AAB 상태
 
+이 절의 빌드 정보는 로컬에 남은 과거 기록이다. 사용자는 이후 Google Play 출시가 완료됐다고 확인했지만, 현재 Play Console의 실제 출시 `versionCode`와 artifact는 이 작업에서 직접 조회하지 않았다. 새 AAB를 만들 때는 반드시 Play Console의 현재 최고 `versionCode`보다 큰 값인지 확인한다.
+
 최신 성공 production AAB:
 
 - App versionName: `1.0.8`
@@ -449,12 +453,80 @@ Play Console 입력 관련 참고:
 
 1. 새 채팅 시작 시 `git status --short --branch`로 현재 변경사항을 확인한다.
 2. `want.png`가 남아 있으면 계속 건드리지 않는다.
-3. 최신 `handoff.md` 기준으로 작업하되, 실제 코드를 다시 확인하고 움직인다.
-4. 카드 관리 4종 기능을 실기기 dev client에서 확인한다.
-   - 중복 카드 자동 감지
-   - 전체 CSV/Excel 내보내기
-   - 폴더 색상/아이콘
-   - 앞글자 힌트
-5. Play 테스트에 이 기능들이 필요하면 새 production AAB를 만든다.
-6. 새 AAB가 필요하면 `versionCode`가 16 이상인지 확인하고, artifact URL과 로컬 복사본 경로를 handoff/print/Notion에 남긴다.
-7. 출시 심사 전 Google 로그인, 카드 저장, 파일 가져오기, 보관함 숨김/정렬/중복/export, 로그아웃 캐시 초기화, 계정/데이터 삭제를 실기기에서 다시 점검한다.
+3. `1.0.9` 앱을 배포하기 전에 `supabase/migrations/20260727_harden_account_and_data.sql`을 production Supabase에 적용한다.
+4. 마이그레이션 적용 후 실제 계정으로 다음 흐름을 확인한다.
+   - 앱 계정 삭제 후 `auth.users`, 카드, 폴더, 학습 기록, 문의가 함께 삭제되는지
+   - 한 기기에서 삭제한 카드/폴더가 다른 기기 동기화 뒤 되살아나지 않는지
+   - 문의를 한 시간에 5건 넘게 보낼 수 없는지
+5. 실기기 dev client 또는 Expo Go에서 Google 로그인, 카드 저장, 가져오기, 학습, 보관함, 접근성 흐름을 확인한다.
+   - Expo Go는 JS/UI 확인용이다.
+   - `android.allowBackup: false` 같은 native 설정은 새 Android 빌드에서 확인해야 한다.
+6. 새 production AAB를 만들 때 Play Console의 현재 최고값보다 큰 `versionCode`를 사용한다. 과거 로컬 기록의 `16 이상`을 그대로 가정하지 않는다.
+7. artifact URL, 실제 `versionCode`, 로컬 복사본 경로, 실기기 점검 결과를 handoff/print/Notion에 남긴다.
+8. 사용자가 npm에 의존성 목록/버전 전송을 허용하면 `npm audit --omit=dev` 상세 결과를 확인하고 남은 취약점을 분류한다.
+
+## 18. 2026-07-27 출시 후 전체 감사 및 1.0.9 안정성 업데이트
+
+### 감사 결론
+
+- 앱은 출시 가능한 기능과 시각 완성도를 이미 갖췄다. 390×844 화면에서 시작 화면, 튜토리얼, 메인 탭, 카드 모달, 설정/정보 화면을 점검했으며 큰 레이아웃 붕괴나 치명적인 실행 오류는 보이지 않았다.
+- 전면 재디자인보다 출시 후 데이터 무결성, 실제 계정 삭제, 악성 가져오기 파일 방어, 접근성 보완을 우선했다.
+- 앱 버전은 `1.0.9`로 올렸지만 production Supabase와 Google Play에는 아직 반영하지 않았다.
+
+### 수정한 핵심 문제
+
+- 동기화:
+  - 서버에서 삭제된 클라우드 카드/폴더를 오래된 로컬 캐시가 다시 업로드해 되살리는 흐름을 차단했다.
+  - 로컬에서 새로 만들거나 수정한 데이터만 업로드하고, 원격에 사라진 cloud-origin 항목은 로컬 캐시에서도 제거한다.
+- 인증/계정:
+  - 예기치 않은 `SIGNED_OUT` 이벤트에서도 현재 계정의 로컬 카드, 폴더, 학습 기록, 문의/관리자 캐시를 지운다.
+  - 기존의 로컬 데이터만 지우던 계정 삭제를 `delete_current_user_account()` RPC 기반의 실제 Memoria 인증 계정 삭제로 교체했다.
+  - Google 계정 자체는 삭제되지 않는다는 문구를 앱과 정책 문서에서 분명히 했다.
+- Supabase:
+  - 새 production 마이그레이션 `supabase/migrations/20260727_harden_account_and_data.sql`을 추가했다.
+  - 카드 300자, 폴더 100자, 문의 길이/상태/분류 제약을 DB에도 추가했다.
+  - 사용자 프로필 이메일/역할 정책을 JWT 기준으로 제한했다.
+  - 문의는 로그인한 본인 이메일만 쓰고 한 시간 5건까지만 제출하도록 RLS와 함수로 제한했다.
+  - `security definer` 함수들의 `search_path`를 고정하고 실행 권한을 최소화했다.
+- 파일 가져오기:
+  - 공개 취약점이 알려진 오래된 npm `xlsx@0.18.5`를 SheetJS 공식 배포 `0.20.3`으로 교체했다.
+  - 파일 5 MB, 회당 카드 1,000개, 카드 한 면 300자 제한을 추가했다.
+  - XLSX 행 수와 DOCX 압축 해제 XML 크기를 제한해 과도한 메모리 사용을 줄였다.
+- 개인정보/백업:
+  - Android `allowBackup`을 `false`로 설정해 앱 데이터의 일반 Android 백업을 끄고 정책 문서에 반영했다.
+  - `.env.example`에 플랫폼별 Google OAuth client ID 예시를 추가했다.
+- 접근성/UX:
+  - 하단 탭, 학습 모드, 테마, 언어, 문의 분류에 버튼 역할과 선택 상태를 추가했다.
+  - 폴더 접힘 상태, 진행률, 결과/오류 안내를 스크린 리더가 읽을 수 있게 했다.
+  - 시작 화면, 튜토리얼, 모달 뒤의 화면이 동시에 접근성 탐색에 노출되지 않게 했다.
+  - 폴더/카드/문의 입력에 UI 최대 길이를 적용했다.
+- 기타 데이터 정확성:
+  - 중복 카드 안내가 현재 폴더 범위 밖 카드까지 세던 문제를 수정했다.
+  - 학습 알림 날짜 계산을 고정 24시간 덧셈 대신 달력 날짜 이동으로 바꿔 DST 지역에서도 오후 8시가 유지되게 했다.
+
+### 의존성 및 문서
+
+- Expo를 `~54.0.36`, `expo-file-system`을 `~19.0.23`으로 업데이트했다.
+- 기존 `web` 스크립트가 실제로 동작하도록 Expo web 의존성을 추가했다. 앱의 본체는 계속 React Native 모바일 앱이다.
+- 개인정보처리방침, 데이터 삭제 안내, README, Play 스토어 1.0.9 릴리스 노트, 앱 내 한국어/영어/일본어 정책 문구를 함께 맞췄다.
+
+### 완료한 검증
+
+- TypeScript 정적 검사 통과
+- 한국어/영어/일본어 번역 키 각 580개 일치, 누락 0
+- CSV/XLSX/DOCX 가져오기 회귀 검사 통과
+- `npx expo install --check` 통과
+- `npx expo-doctor` 18/18 통과
+- Android production export 성공: 905 modules, HBC bundle 약 4.81 MB
+- Expo public config에서 `1.0.9`, `android.allowBackup: false` 확인
+- 스타일 참조 누락 0, Git diff whitespace 검사 통과
+- 추적 파일과 전체 Git 이력에서 일반적인 비밀키 패턴을 검사했으며 발견 없음
+
+### 아직 production에서 해야 할 일
+
+- production Supabase에 신규 마이그레이션을 적용하지 않았다. 앱 1.0.9를 먼저 배포하면 계정 삭제 RPC가 의도적으로 실패하며 backend update 안내를 표시한다.
+- 연결된 Android 기기가 없어 실제 Expo Go/개발 빌드 조작 검증은 하지 못했다.
+- native `allowBackup` 변경과 실제 Google 로그인은 새 Android build에서 확인해야 한다.
+- npm 상세 감사는 의존성 이름/버전을 npm 서비스로 전송하는 승인이 없어 완료하지 않았다. 설치 요약에는 여전히 전이 의존성 경고가 남아 있으므로 승인 후 상세 분류가 필요하다.
+- production AAB는 아직 만들거나 업로드하지 않았다.
+- 시각 점검에 사용한 Expo 웹 서버가 종료되지 않아 장시간 명령으로 보였던 문제가 있었고, 해당 프로젝트 프로세스 트리와 생성된 임시 export/output을 모두 정리했다.

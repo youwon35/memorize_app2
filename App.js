@@ -135,6 +135,11 @@ const DIRECT_GOOGLE_AUTH_CONFIGURED = Platform.select({
 });
 const DEFAULT_QUIZ_COUNT = 10;
 const SAVE_INPUT_MAX_LENGTH = 300;
+const FOLDER_NAME_MAX_LENGTH = 100;
+const SUPPORT_EMAIL_MAX_LENGTH = 254;
+const SUPPORT_MESSAGE_MAX_LENGTH = 4000;
+const IMPORT_FILE_MAX_BYTES = 5 * 1024 * 1024;
+const IMPORT_CARD_MAX_COUNT = 1000;
 const DATE_FILTER_LOCALES = {
   ko: "ko-KR",
   en: "en-US",
@@ -799,8 +804,9 @@ const formatMetricValue = (value) => {
 };
 const formatMetricPercent = (value) => `${formatMetricValue(value)}%`;
 const getStudyReminderDate = (daysFromNow, baseDate = new Date()) => {
-  const scheduledDate = new Date(baseDate.getTime() + daysFromNow * 24 * 60 * 60 * 1000);
+  const scheduledDate = new Date(baseDate);
 
+  scheduledDate.setDate(scheduledDate.getDate() + daysFromNow);
   scheduledDate.setHours(STUDY_REMINDER_HOUR, STUDY_REMINDER_MINUTE, 0, 0);
   return scheduledDate;
 };
@@ -1017,6 +1023,20 @@ function AppContent() {
   const [saveFolderPanelCollapsed, setSaveFolderPanelCollapsed] = useState(false);
   const [quizFolderPanelCollapsed, setQuizFolderPanelCollapsed] = useState(true);
   const [manageFolderPanelCollapsed, setManageFolderPanelCollapsed] = useState(true);
+  const appContentAccessibilityHidden = Boolean(
+    launchVisible ||
+      (tutorialVisible && tutorialStep === "intro") ||
+      saveComposerVisible ||
+      retryWindowVisible ||
+      importPreview ||
+      dailyGoalModalVisible ||
+      stopQuizModalVisible ||
+      tutorialCompletionVisible ||
+      dataDeletionModalVisible ||
+      appAlertConfig ||
+      legalDocKey ||
+      folderStyleModal
+  );
 
   const timerRef = useRef(null);
   const pendingStopActionRef = useRef(null);
@@ -1095,7 +1115,7 @@ function AppContent() {
             manageFolderSubtreeIds.has(normalizeFolderId(pair.folderId))
           ),
         }))
-        .filter((group) => group.scopedItems.length > 0),
+        .filter((group) => group.scopedItems.length > 1),
     [duplicateCardGroups, manageFolderSubtreeIds]
   );
   const duplicatePairIds = useMemo(() => {
@@ -1899,7 +1919,9 @@ function AppContent() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      const signedOutFromAccount = event === "SIGNED_OUT" && Boolean(sessionRef.current?.user);
+
       setSession(nextSession ?? null);
       setAuthReady(true);
       setTranslatedNote(nextSession?.user ? "notes.authLinked" : "notes.googleSyncAvailable");
@@ -1915,6 +1937,12 @@ function AppContent() {
         setAdminUpdatingId(null);
         setAdminNotice("");
         void AsyncStorage.removeItem(SUPPORT_REQUESTS_KEY);
+
+        if (signedOutFromAccount) {
+          sessionRef.current = null;
+          appOpenTrackedUserRef.current = null;
+          void resetLocalAccountCache({ clearSupport: true });
+        }
       }
     });
 
@@ -2049,7 +2077,10 @@ function AppContent() {
 
           const remoteFolders = (folderResponse.data ?? []).map(mapFolderRecord);
           const remoteFolderIds = new Set(remoteFolders.map((folder) => folder.id));
-          const localOnlyFolders = foldersRef.current.filter(
+          const pendingLocalFolders = foldersRef.current.filter(
+            (folder) => folder.source !== "cloud"
+          );
+          const localOnlyFolders = pendingLocalFolders.filter(
             (folder) => !remoteFolderIds.has(folder.id)
           );
           let insertedFolders = [];
@@ -2074,7 +2105,7 @@ function AppContent() {
             insertedFolders = (uploadedFolders.data ?? []).map(mapFolderRecord);
           }
 
-          syncedFolders = mergeFoldersById(remoteFolders, insertedFolders, foldersRef.current);
+          syncedFolders = mergeFoldersById(remoteFolders, insertedFolders, pendingLocalFolders);
 
           if (active) {
             setFolders(syncedFolders);
@@ -2123,7 +2154,8 @@ function AppContent() {
             ? createFolderScopedSignature(pair.left, pair.right, pair.folderId)
             : createSignature(pair.left, pair.right);
         const signatures = new Set(remote.map(createSyncSignature));
-        const localOnly = pairsRef.current.filter(
+        const pendingLocalPairs = pairsRef.current.filter((pair) => pair.source !== "cloud");
+        const localOnly = pendingLocalPairs.filter(
           (pair) => !signatures.has(createSyncSignature(pair))
         );
         let inserted = [];
@@ -2158,7 +2190,7 @@ function AppContent() {
           }));
         }
 
-        const merged = mergePairsBySignature(remote, inserted, pairsRef.current);
+        const merged = mergePairsBySignature(remote, inserted, pendingLocalPairs);
         let syncedStudyStats = createPersistableStudyStats(studyStatsRef.current, merged);
         let syncedDailyGoal = dailyStudyGoalRef.current;
 
@@ -3251,16 +3283,27 @@ function AppContent() {
         return;
       }
 
+      const importedFile = new File(asset.uri);
+      const importedFileSize = Number(asset.size ?? importedFile.size ?? 0);
+
+      if (Number.isFinite(importedFileSize) && importedFileSize > IMPORT_FILE_MAX_BYTES) {
+        Alert.alert(
+          t("alerts.importFileTooLargeTitle"),
+          t("alerts.importFileTooLargeBody", {
+            maxSize: Math.round(IMPORT_FILE_MAX_BYTES / 1024 / 1024),
+          })
+        );
+        return;
+      }
+
       let entries = [];
       let invalidEntryIndexes = [];
 
       if (extension === "txt") {
-        const file = new File(asset.uri);
-        const text = await file.text();
+        const text = await importedFile.text();
         ({ entries, invalidEntryIndexes } = parseImportedPairs(text));
       } else if (extension === "csv") {
-        const file = new File(asset.uri);
-        const text = await file.text();
+        const text = await importedFile.text();
         ({ entries, invalidEntryIndexes } = parseSpreadsheetPairsFromText(text));
       } else if (extension === "xls" || extension === "xlsx") {
         const base64 = await readAsStringAsync(asset.uri, {
@@ -3275,10 +3318,25 @@ function AppContent() {
         ({ entries, invalidEntryIndexes } = parseImportedPairs(extractedText));
       }
 
+      const parsedEntryCount = entries.length;
+      const boundedEntries = entries.slice(0, IMPORT_CARD_MAX_COUNT);
+      const validEntries = boundedEntries.filter(
+        (entry) =>
+          String(entry?.left ?? "").trim().length <= SAVE_INPUT_MAX_LENGTH &&
+          String(entry?.right ?? "").trim().length <= SAVE_INPUT_MAX_LENGTH
+      );
+      const invalidCount =
+        invalidEntryIndexes.length +
+        Math.max(0, parsedEntryCount - IMPORT_CARD_MAX_COUNT) +
+        (boundedEntries.length - validEntries.length);
+      const importLimitApplied = parsedEntryCount > IMPORT_CARD_MAX_COUNT;
+
+      entries = validEntries;
+
       if (!entries.length) {
         Alert.alert(
           t("alerts.importNoCardsTitle"),
-          invalidEntryIndexes.length
+          invalidCount
             ? t("alerts.importNoCardsBody")
             : t("alerts.importEmptyFile")
         );
@@ -3292,7 +3350,8 @@ function AppContent() {
         fileName: asset.name || t("alerts.importPreviewUnknownFile"),
         extension,
         entries,
-        invalidEntryIndexes,
+        invalidCount,
+        importLimitApplied,
         targetFolderId,
         uniqueEntries: preview.uniqueEntries,
         skippedDuplicates: preview.skippedDuplicates,
@@ -3326,7 +3385,7 @@ function AppContent() {
       const saveResult = await saveEntryBatch(importPreview.entries, {
         folderId: importPreview.targetFolderId,
       });
-      const invalidCount = importPreview.invalidEntryIndexes.length;
+      const invalidCount = importPreview.invalidCount;
       const messages = [];
 
       if (saveResult.savedCount) {
@@ -3339,6 +3398,10 @@ function AppContent() {
 
       if (invalidCount) {
         messages.push(t("alerts.importInvalidGroups", { count: invalidCount }));
+      }
+
+      if (importPreview.importLimitApplied) {
+        messages.push(t("alerts.importLimitApplied", { count: IMPORT_CARD_MAX_COUNT }));
       }
 
       setQuizFolderId(importPreview.targetFolderId);
@@ -3542,6 +3605,17 @@ function AppContent() {
       return;
     }
 
+    if (
+      replyEmail.length > SUPPORT_EMAIL_MAX_LENGTH ||
+      message.length > SUPPORT_MESSAGE_MAX_LENGTH
+    ) {
+      Alert.alert(
+        t("about.supportLengthTitle"),
+        t("about.supportLengthBody", { count: SUPPORT_MESSAGE_MAX_LENGTH })
+      );
+      return;
+    }
+
     setSupportSending(true);
     setSupportNotice("");
 
@@ -3582,37 +3656,40 @@ function AppContent() {
     setDataDeleting(true);
 
     try {
-      if (supabase && session?.user?.id) {
-        const deletionResponses = await Promise.all([
-          supabase.from("memory_pairs").delete().eq("user_id", session.user.id),
-          supabase.from("memory_folders").delete().eq("user_id", session.user.id),
-          supabase.from("memory_user_state").delete().eq("user_id", session.user.id),
-          supabase.from("app_usage_events").delete().eq("user_id", session.user.id),
-          supabase.from("support_inquiries").delete().eq("user_id", session.user.id),
-        ]);
-        const blockingError = deletionResponses
-          .map((response) => response.error)
-          .find((error) => error && !isCloudUserStateSchemaError(error));
+      if (!supabase || !session?.user?.id) {
+        throw new Error("Authentication is required to delete the account.");
+      }
 
-        if (blockingError) {
-          throw blockingError;
-        }
+      const deletionResponse = await supabase.rpc("delete_current_user_account");
+
+      if (deletionResponse.error) {
+        throw deletionResponse.error;
       }
 
       await resetLocalAccountCache({ clearSupport: true });
       setDataDeletionModalVisible(false);
+      sessionRef.current = null;
+      setSession(null);
+      setUserRole("user");
+      appOpenTrackedUserRef.current = null;
 
-      if (supabase) {
-        await supabase.auth.signOut();
-      }
+      await supabase.auth.signOut({ scope: "local" });
 
       setNoteState({
         key: isSupabaseConfigured ? "notes.googleSyncAvailable" : "notes.localMode",
         params: {},
       });
       Alert.alert(t("about.dataDeletionDoneTitle"), t("about.dataDeletionDoneBody"));
-    } catch {
-      Alert.alert(t("about.dataDeletionFailTitle"), t("common.retryLater"));
+    } catch (error) {
+      const errorDetails = `${error?.code ?? ""} ${error?.message ?? ""}`.toLowerCase();
+      const backendUpdateNeeded =
+        errorDetails.includes("pgrst202") ||
+        errorDetails.includes("delete_current_user_account");
+
+      Alert.alert(
+        t("about.dataDeletionFailTitle"),
+        backendUpdateNeeded ? t("about.dataDeletionBackendUpdateBody") : t("common.retryLater")
+      );
     } finally {
       setDataDeleting(false);
     }
@@ -4334,6 +4411,7 @@ function AppContent() {
         <TextInput
           value={value}
           onChangeText={onChangeText}
+          maxLength={FOLDER_NAME_MAX_LENGTH}
           placeholder={placeholder}
           placeholderTextColor={theme.textPlaceholder}
           style={[styles.input, styles.folderTileInput]}
@@ -4494,6 +4572,8 @@ function AppContent() {
             <View style={styles.folderHeaderActions}>
               <Pressable
                 accessibilityLabel={collapsed ? t("folders.expand") : t("folders.collapse")}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: !collapsed }}
                 onPress={onToggleCollapse}
                 style={({ pressed }) => [
                   styles.folderActionButton,
@@ -5108,7 +5188,7 @@ function AppContent() {
       return null;
     }
 
-    const invalidCount = importPreview.invalidEntryIndexes.length;
+    const invalidCount = importPreview.invalidCount;
     const duplicateCount = importPreview.skippedDuplicates;
     const createCount = importPreview.uniqueEntries.length;
     const totalCount = importPreview.entries.length + invalidCount;
@@ -5422,6 +5502,7 @@ function AppContent() {
 
   const renderDataDeletionModal = () => {
     const deletionItems = [
+      { icon: "account-remove-outline", label: t("about.dataDeletionAccount") },
       { icon: "cards-outline", label: t("about.dataDeletionStoredCards") },
       { icon: "folder-outline", label: t("about.dataDeletionFolders") },
       { icon: "history", label: t("about.dataDeletionStudyHistory") },
@@ -5686,6 +5767,8 @@ function AppContent() {
             return (
               <Pressable
                 key={option.key}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
                 onPress={() => setQuizMode(option.key)}
                 style={({ pressed }) => [
                   styles.quizDirectionChip,
@@ -5836,7 +5919,15 @@ function AppContent() {
             </Pressable>
           </View>
 
-          <View style={styles.quizProgressTrackLarge}>
+          <View
+            accessibilityRole="progressbar"
+            accessibilityValue={{
+              min: 0,
+              max: deck.length,
+              now: Math.min(quizIndex + 1, deck.length),
+            }}
+            style={styles.quizProgressTrackLarge}
+          >
             <View
               style={[
                 styles.quizProgressFillLarge,
@@ -5878,6 +5969,7 @@ function AppContent() {
                 </View>
                 <View style={styles.flex}>
                   <Text
+                    accessibilityLiveRegion="polite"
                     style={[
                       styles.quizResultTitle,
                       result === "correct" ? styles.quizResultTitleGood : styles.quizResultTitleBad,
@@ -5964,7 +6056,14 @@ function AppContent() {
                 style={[styles.input, styles.quizAnswerInput]}
               />
 
-              {feedback ? <Text style={[styles.feedback, styles.feedbackNeutral]}>{feedback}</Text> : null}
+              {feedback ? (
+                <Text
+                  accessibilityLiveRegion="polite"
+                  style={[styles.feedback, styles.feedbackNeutral]}
+                >
+                  {feedback}
+                </Text>
+              ) : null}
 
               <Pressable
                 onPress={submitAnswer}
@@ -6303,10 +6402,12 @@ function AppContent() {
     const details = scopedDuplicateCardGroups
       .slice(0, 8)
       .map((group) => {
-        const folderNames = [...new Set(group.items.map((pair) => getFolderLabel(pair.folderId)))].join(", ");
+        const folderNames = [
+          ...new Set(group.scopedItems.map((pair) => getFolderLabel(pair.folderId))),
+        ].join(", ");
 
         return `${group.left} ↔ ${group.right}\n${t("manage.duplicateGroupDetail", {
-          count: group.items.length,
+          count: group.scopedItems.length,
           folders: folderNames,
         })}`;
       })
@@ -6353,7 +6454,7 @@ function AppContent() {
                 {group.left} ↔ {group.right}
               </Text>
               <Text style={styles.duplicatePreviewMeta}>
-                {t("manage.duplicateGroupCount", { count: group.items.length })}
+                {t("manage.duplicateGroupCount", { count: group.scopedItems.length })}
               </Text>
             </View>
           ))}
@@ -6402,6 +6503,7 @@ function AppContent() {
           <TextInput
             value={editingLeft}
             onChangeText={setEditingLeft}
+            maxLength={SAVE_INPUT_MAX_LENGTH}
             placeholder={t("common.front")}
             placeholderTextColor={theme.textPlaceholder}
             style={[styles.input, styles.multilineInput]}
@@ -6413,6 +6515,7 @@ function AppContent() {
           <TextInput
             value={editingRight}
             onChangeText={setEditingRight}
+            maxLength={SAVE_INPUT_MAX_LENGTH}
             placeholder={t("common.back")}
             placeholderTextColor={theme.textPlaceholder}
             style={[styles.input, styles.multilineInput]}
@@ -7056,6 +7159,8 @@ function AppContent() {
               return (
                 <Pressable
                   key={option.key}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
                   onPress={() => setThemeMode(option.key)}
                   style={({ pressed }) => [
                     styles.modeChip,
@@ -7089,6 +7194,8 @@ function AppContent() {
               return (
                 <Pressable
                   key={option.key}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
                   onPress={() => setLanguage(option.key)}
                   style={({ pressed }) => [
                     styles.supportCategoryChip,
@@ -7144,6 +7251,8 @@ function AppContent() {
                     return (
                       <Pressable
                         key={option}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
                         onPress={() => setSupportCategory(option)}
                         style={({ pressed }) => [
                           styles.supportCategoryChip,
@@ -7170,6 +7279,7 @@ function AppContent() {
                 <TextInput
                   value={supportReplyEmail}
                   onChangeText={setSupportReplyEmail}
+                  maxLength={SUPPORT_EMAIL_MAX_LENGTH}
                   autoCapitalize="none"
                   keyboardType="email-address"
                   placeholder={t("about.supportEmailPlaceholder")}
@@ -7183,6 +7293,7 @@ function AppContent() {
                 <TextInput
                   value={supportMessage}
                   onChangeText={setSupportMessage}
+                  maxLength={SUPPORT_MESSAGE_MAX_LENGTH}
                   multiline
                   textAlignVertical="top"
                   placeholder={t("about.supportMessagePlaceholder")}
@@ -7441,6 +7552,10 @@ function AppContent() {
       </View>
 
       <KeyboardAvoidingView
+        accessibilityElementsHidden={appContentAccessibilityHidden}
+        importantForAccessibility={
+          appContentAccessibilityHidden ? "no-hide-descendants" : "auto"
+        }
         style={styles.screen}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
@@ -7489,6 +7604,11 @@ function AppContent() {
               <Pressable
                 key={item.key}
                 disabled={guidedTutorialActive}
+                accessibilityRole="button"
+                accessibilityState={{
+                  selected: active,
+                  disabled: guidedTutorialActive,
+                }}
                 onPress={() => handleTabChange(item.key)}
                 style={({ pressed }) => [
                   styles.tab,
@@ -7622,7 +7742,7 @@ function MemoriaLaunchArtwork({ styles, size }) {
 
 function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth, layoutMetrics }) {
   return (
-    <View style={styles.tutorialOverlay}>
+    <View accessibilityViewIsModal style={styles.tutorialOverlay}>
       <View pointerEvents="none" style={styles.launchDecorLayer}>
         <Image
           source={MEMORIA_BACKGROUND_IMAGE}
@@ -7660,6 +7780,7 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth, layoutM
 
         <View style={styles.tutorialWelcomeActions}>
           <Pressable
+            accessibilityRole="button"
             onPress={onStart}
             style={({ pressed }) => [styles.tutorialStartButton, pressed && styles.pressed]}
           >
@@ -7667,6 +7788,7 @@ function TutorialOverlay({ styles, theme, t, onClose, onStart, maxWidth, layoutM
             <MaterialCommunityIcons name="arrow-right" size={18} color={theme.accentText} />
           </Pressable>
           <Pressable
+            accessibilityRole="button"
             onPress={onClose}
             style={({ pressed }) => [styles.tutorialSkipButton, pressed && styles.pressed]}
           >
@@ -8176,7 +8298,7 @@ function LaunchScreen({
   const guestDisabled = authBusy || !authReady;
 
   return (
-    <Animated.View style={[styles.launchScreen, { opacity }]}>
+    <Animated.View accessibilityViewIsModal style={[styles.launchScreen, { opacity }]}>
       <View pointerEvents="none" style={styles.launchDecorLayer}>
         <Image
           source={MEMORIA_BACKGROUND_IMAGE}
@@ -8226,6 +8348,8 @@ function LaunchScreen({
         <View style={[styles.launchActionGroup, { maxWidth: layoutMetrics.actionMaxWidth }]}>
           <Pressable
             disabled={googleDisabled}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: googleDisabled }}
             onPress={onGooglePress}
             style={({ pressed }) => [styles.launchGoogleButtonShell, pressed && styles.pressed]}
           >
@@ -8254,6 +8378,8 @@ function LaunchScreen({
 
           <Pressable
             disabled={guestDisabled}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: guestDisabled }}
             onPress={onGuestPress}
             style={({ pressed }) => [
               styles.launchGuestButton,

@@ -2,7 +2,7 @@
   "expo": {
     "name": "MEMORIA",
     "slug": "memoria",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "orientation": "portrait",
     "scheme": [
       "memoria",
@@ -39,6 +39,7 @@
     ],
     "android": {
       "package": "com.youwon35.memoria",
+      "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#B8AEFF"

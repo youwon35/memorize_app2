@@ -6,6 +6,7 @@ MEMORIA is a mobile memorization app built with Expo React Native. It lets users
 
 - A centered one-card composer for quick save flow
 - File import for `txt`, `csv`, `xls`, `xlsx`, and `docx` card sets
+- Safe file-import limits (5MB and up to 1,000 cards per import)
 - Local persistence with `AsyncStorage`
 - Random quiz mode that can ask `front -> back` or `back -> front`
 - Case-insensitive answer checking
@@ -13,7 +14,8 @@ MEMORIA is a mobile memorization app built with Expo React Native. It lets users
 - Dark, night-mode inspired UI
 - Launch screen with `MEMORIA` branding
 - Google sign-in ready Supabase sync scaffold for cross-device access
-- `EAS` config for future Android release builds
+- In-app Memoria account deletion backed by Supabase
+- `EAS` configuration for Android release builds
 
 ## Project structure
 
@@ -35,7 +37,7 @@ npx expo install --fix
 npm run start
 ```
 
-This starts the app in `dev client + tunnel` mode so you can keep checking Google login on a real phone without reinstalling every time.
+This starts the app in `dev client + LAN` mode so you can keep checking Google login on a real phone without reinstalling every time.
 
 Other useful options:
 
@@ -82,6 +84,7 @@ Rebuild the dev build only when native config changes, for example:
 5. Add a `.env` file using [.env.example](./.env.example).
 6. Add `memoria://auth/callback` to the Supabase redirect allow list.
 7. Add the same redirect URI to your Google / Supabase auth setup before testing a dev build or APK.
+8. Set the Android, iOS, and web OAuth client IDs that apply to the platforms you build.
 
 ## Cloud sync migrations
 
@@ -102,6 +105,15 @@ To sync study history, missed-answer stats, and the daily goal between signed-in
 ```
 
 This creates `public.memory_user_state` and lets each signed-in user read, update, and delete only their own study state.
+
+For app version `1.0.9` or later, also run:
+
+```sql
+-- Copy and run the full contents of:
+-- supabase/migrations/20260727_harden_account_and_data.sql
+```
+
+This migration enables actual Memoria auth-account deletion, hardens `security definer` function permissions, validates user-provided card and inquiry data, and tightens the inquiry insert policy. Apply it before distributing the matching app update; otherwise the app intentionally refuses to claim that an account was deleted.
 
 ## Admin role setup on Supabase
 
@@ -167,4 +179,6 @@ git checkout develop
 
 - The app works locally even without Supabase credentials.
 - When Supabase is configured, Google login is used to sync cards across devices.
+- Android backup is disabled because guest cards and study records are stored locally. Signed-in users can restore supported data through cloud sync.
+- The Google identity itself is never deleted; the in-app deletion flow removes the Memoria authentication account and all rows linked to it.
 - Play Store listing, privacy policy, and data deletion drafts are in [store/google-play-listing.md](./store/google-play-listing.md), [docs/privacy-policy-ko.md](./docs/privacy-policy-ko.md), and [docs/data-deletion-ko.md](./docs/data-deletion-ko.md).

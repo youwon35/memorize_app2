@@ -3,6 +3,8 @@ import * as XLSX from "xlsx";
 
 const SUPPORTED_IMPORT_EXTENSIONS = new Set(["txt", "csv", "xls", "xlsx", "docx"]);
 const DOCX_DOCUMENT_XML_PATH = "word/document.xml";
+const MAX_PARSED_SPREADSHEET_ROWS = 1001;
+const MAX_DOCX_DOCUMENT_XML_BYTES = 10 * 1024 * 1024;
 
 const normalizeCellText = (value) =>
   `${value ?? ""}`
@@ -101,7 +103,7 @@ const readWorksheetRows = (workbook) => {
     raw: false,
     defval: "",
     blankrows: false,
-  });
+  }).slice(0, MAX_PARSED_SPREADSHEET_ROWS);
 };
 
 export const parseSpreadsheetPairsFromText = (text) => {
@@ -109,6 +111,7 @@ export const parseSpreadsheetPairsFromText = (text) => {
     type: "string",
     raw: false,
     codepage: 65001,
+    sheetRows: MAX_PARSED_SPREADSHEET_ROWS,
   });
 
   return parseSpreadsheetRows(readWorksheetRows(workbook));
@@ -119,6 +122,7 @@ export const parseSpreadsheetPairsFromBase64 = (base64) => {
     type: "base64",
     cellDates: false,
     dense: false,
+    sheetRows: MAX_PARSED_SPREADSHEET_ROWS,
   });
 
   return parseSpreadsheetRows(readWorksheetRows(workbook));
@@ -132,7 +136,18 @@ export const extractDocxTextFromBase64 = async (base64) => {
     throw new Error("DOCX document.xml not found.");
   }
 
+  const uncompressedSize = Number(documentFile?._data?.uncompressedSize ?? 0);
+
+  if (Number.isFinite(uncompressedSize) && uncompressedSize > MAX_DOCX_DOCUMENT_XML_BYTES) {
+    throw new Error("DOCX document.xml exceeds the safe import limit.");
+  }
+
   const documentXml = await documentFile.async("string");
+
+  if (documentXml.length > MAX_DOCX_DOCUMENT_XML_BYTES) {
+    throw new Error("DOCX document.xml exceeds the safe import limit.");
+  }
+
   const paragraphs = documentXml.match(/<w:p\b[\s\S]*?<\/w:p>/g) ?? [];
 
   if (!paragraphs.length) {
