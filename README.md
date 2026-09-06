@@ -1,184 +1,92 @@
 # MEMORIA
 
-MEMORIA is a mobile memorization app built with Expo React Native. It lets users save one card at a time, study in both directions, and keep cards synced with Google login when Supabase is configured.
+직접 만든 앞면·뒷면 카드를 저장하고 자주 틀리는 카드를 반복 학습하는 React Native 모바일 암기 앱입니다. 게스트는 기기에 저장하고, Google 로그인 사용자는 Supabase로 카드·폴더·학습 상태를 동기화합니다.
 
-## What is included
+현재 개발 버전은 **1.0.10**입니다. Expo SDK 54를 유지하며 Expo 54.0.37, expo-file-system 19.0.24, React Native 0.81.5를 사용합니다.
 
-- A centered one-card composer for quick save flow
-- File import for `txt`, `csv`, `xls`, `xlsx`, and `docx` card sets
-- Safe file-import limits (5MB and up to 1,000 cards per import)
-- Local persistence with `AsyncStorage`
-- Random quiz mode that can ask `front -> back` or `back -> front`
-- Case-insensitive answer checking
-- Saved card edit and delete screen
-- Dark, night-mode inspired UI
-- Launch screen with `MEMORIA` branding
-- Google sign-in ready Supabase sync scaffold for cross-device access
-- In-app Memoria account deletion backed by Supabase
-- `EAS` configuration for Android release builds
+## 주요 기능
 
-## Project structure
+| 탭 | 기능 |
+| --- | --- |
+| 저장 | 카드 입력, 폴더 지정, TXT·CSV·XLS·XLSX·DOCX 가져오기, 미리보기와 중복 제외 |
+| 암기 | 폴더·문제 수 선택, 앞면·뒷면·양방향 출제, 약한 카드 우선 선정, 힌트·오답 복습 |
+| 기록 | 날짜별 학습, 정오답·연속 학습일·일일 목표, 최근 학습의 오답 다시 풀기 |
+| 보관함 | 폴더 계층·꾸미기, 검색·정렬, 수정·삭제·다중 선택·숨김, 중복 표시, CSV·Excel 내보내기 |
+| 앱 정보 | Google 로그인·로그아웃·지금 동기화·계정 삭제, 언어·테마·알림·튜토리얼, 문의와 관리자 화면 |
 
-- `App.js`: main mobile UI, launch screen, and app flow
-- `src/lib/supabase.js`: Supabase client and session persistence
-- `src/utils/memory.js`: pair, sync, and quiz helpers
-- `supabase/schema.sql`: database table and RLS policies
+한국어·영어·일본어와 라이트·다크 테마를 지원합니다. 일일 목표는 완료한 학습 회차 기준이며 기본값은 5회입니다.
 
-## Install
+## 설치와 실행
 
-```bash
-npm install
-npx expo install --fix
-```
+Node.js와 npm을 준비하고 프로젝트 루트에서 실행합니다. 기본 개발 서버 스크립트는 Windows PowerShell을 사용합니다.
 
-## Run
-
-```bash
-npm run start
-```
-
-This starts the app in `dev client + LAN` mode so you can keep checking Google login on a real phone without reinstalling every time.
-
-Other useful options:
-
-```bash
-npm run start:lan
+~~~powershell
+npm ci
 npm run start:go
+~~~
+
+start:go는 Expo Go를 명시적으로 선택합니다. **Expo Go SDK 54**로 QR을 열어 저장·학습·보관함 등 기본 흐름을 확인합니다. Google 로그인과 네이티브 설정 검증에는 development build를 사용합니다.
+
+~~~powershell
 npm run build:dev
-```
-
-- `npm run start`: recommended default for repeated real-device testing, including Google login
-- `npm run start:lan`: same dev build flow on the local network
-- `npm run start:go`: fallback Expo Go mode for UI-only checks
-- `npm run build:dev`: creates the Android development build you install once on the phone
-
-## Fast Google login testing after each edit
-
-1. Create `.env` from `.env.example` and fill in the real Supabase values.
-2. Build and install the dev build once:
-
-```bash
-npm run build:dev
-```
-
-3. Open the installed dev build on the phone.
-4. Start the Metro server:
-
-```bash
 npm run start
-```
+~~~
 
-5. After that, most UI / logic edits only need a save plus Fast Refresh. You do not need to rebuild the APK each time.
+start와 start:lan은 development client + LAN 모드입니다. 다른 네트워크 경로가 필요하면 start:tunnel을 사용합니다. JS/UI 수정은 Fast Refresh로 확인하고 scheme·권한·네이티브 모듈 설정이 바뀌면 앱을 다시 빌드합니다.
 
-Rebuild the dev build only when native config changes, for example:
-- app scheme or package name changes
-- a new native Expo library is added
-- config plugins or native permissions change
+## 파일 가져오기와 내보내기
 
-## Google account sync setup
+- TXT·DOCX: 앞면 한 줄, 뒷면 한 줄을 한 카드로 읽으며 카드 사이에 빈 줄을 둡니다.
+- 일반 CSV·Excel: 첫 시트의 첫 두 열을 앞면·뒷면으로 읽습니다.
+- MEMORIA 내보내기: No·Folder·Front·Back 헤더로 앞면·뒷면 열을 찾아 열 순서가 바뀌어도 읽습니다.
+- 가져온 카드는 선택한 폴더에 저장합니다. 내보내기의 폴더 구조·학습 통계·숨김 상태는 복원하지 않습니다.
+- 파일 최대 5MB, 한 번에 최대 1,000장, 카드 한 면 최대 300자입니다.
+- 스프레드시트는 처음 1,002행까지 읽습니다. 형식 오류·중복·읽기 상한은 미리보기와 결과 안내에서 확인합니다.
 
-1. Create a Supabase project.
-2. Run the SQL in [supabase/schema.sql](./supabase/schema.sql).
-3. In Supabase Auth, enable the Google provider.
-4. In Google Cloud Console, create a Web OAuth client and connect it to Supabase.
-5. Add a `.env` file using [.env.example](./.env.example).
-6. Add `memoria://auth/callback` to the Supabase redirect allow list.
-7. Add the same redirect URI to your Google / Supabase auth setup before testing a dev build or APK.
-8. Set the Android, iOS, and web OAuth client IDs that apply to the platforms you build.
+CSV·Excel 내보내기는 카드 내용을 보관하고 다시 가져오기 위한 자료입니다. 학습 상태까지 포함하는 전체 백업 기능은 별도로 구현하지 않았습니다.
 
-## Cloud sync migrations
+## Google 로그인과 Supabase
 
-If your Supabase project already has the older `memory_pairs` table, run this migration once in the Supabase SQL editor:
+로컬 학습은 Supabase 없이 사용할 수 있습니다. 계정 기능은 [.env.example](.env.example)을 참고해 .env의 Supabase URL·anon key와 플랫폼별 Google client ID를 설정합니다.
 
-```sql
--- Copy and run the full contents of:
--- supabase/migrations/20260514_add_memory_folders.sql
-```
+| 경로 | 처리와 callback |
+| --- | --- |
+| Google 직접 인증 | Google의 ID token 또는 authorization code 교환 결과로 Supabase signInWithIdToken을 호출합니다. Android callback은 Google client ID에서 만든 역순 scheme의 /oauthredirect 경로입니다. |
+| Supabase OAuth fallback | 직접 인증 설정·요청이 준비되지 않았을 때 signInWithOAuth를 사용합니다. 앱 callback인 memoria://auth/callback을 Supabase Redirect URLs에 등록합니다. |
 
-This creates `public.memory_folders`, adds `memory_pairs.folder_id`, and applies row-level security so each signed-in user can only see and edit their own folders. New Supabase projects can run the full [supabase/schema.sql](./supabase/schema.sql) instead.
+Android package는 com.youwon35.memoria입니다. Google Android OAuth client의 package·서명과 app.json의 scheme을 실제 빌드에 맞춥니다. Supabase OAuth용 Google Web client에는 Supabase 대시보드의 Google callback URL을 등록합니다. 상세한 기존 인증 설정은 [handoff.md](handoff.md)를 참고합니다.
 
-To sync study history, missed-answer stats, and the daily goal between signed-in devices, also run:
+## 데이터와 코드 구조
 
-```sql
--- Copy and run the full contents of:
--- supabase/migrations/20260519_add_memory_user_state.sql
-```
+게스트 데이터는 AsyncStorage, 네이티브 인증 세션은 SecureStore에 저장됩니다. 로그인 후 앱 진입 또는 **지금 동기화** 버튼으로 계정 데이터를 병합합니다. 모든 기기의 변경을 실시간으로 구독하는 방식은 아닙니다.
 
-This creates `public.memory_user_state` and lets each signed-in user read, update, and delete only their own study state.
+로그아웃하면 계정 로컬 캐시를 비웁니다. Android 일반 백업은 비활성화되어 있습니다. 앱의 계정 삭제는 Memoria 인증 계정과 연결 데이터를 삭제하며 Google 계정 자체는 유지됩니다.
 
-For app version `1.0.9` or later, also run:
+| 파일 | 역할 |
+| --- | --- |
+| App.js | 5개 탭, 상태·인증, 저장·동기화 연결, 알림과 관리자 흐름 |
+| src/utils/memory.js | 카드·폴더별 학습 상태, 채점·출제, TXT 카드 블록 파싱 |
+| src/utils/import-files.js | CSV·Excel·DOCX 읽기, 헤더 인식과 읽기 제한 |
+| src/utils/card-export.js | 공통 카드 내보내기 열 구성 |
+| src/utils/cloud-sync.js | 사용자별 전체 페이지 조회와 취소 검사 |
+| src/lib/supabase.js | Supabase client와 인증 세션 저장 |
+| src/i18n.js | 한국어·영어·일본어 문구 |
+| supabase/ | 스키마, RLS·RPC, 마이그레이션 |
+| tests/ | 학습 상태, 파일 왕복, 동기화와 앱 처리 흐름 회귀 검사 |
 
-```sql
--- Copy and run the full contents of:
--- supabase/migrations/20260727_harden_account_and_data.sql
-```
+## 검증과 배포
 
-This migration enables actual Memoria auth-account deletion, hardens `security definer` function permissions, validates user-provided card and inquiry data, and tightens the inquiry insert policy. Apply it before distributing the matching app update; otherwise the app intentionally refuses to claim that an account was deleted.
+~~~powershell
+npm test
+npm run typecheck
+npx expo install --check
+npx expo-doctor
+~~~
 
-## Admin role setup on Supabase
+npm test는 Node test runner로 회귀 검사를 실행합니다. typecheck는 현재 TypeScript 설정 검사이며 checkJs가 꺼져 있어 JavaScript 앱 전체의 타입 검증을 뜻하지 않습니다. 최근 결과와 한계는 [2026-09-06 리뷰 기록](docs/review-2026-09-06.md)에 있습니다.
 
-The app keeps normal user cards private. The admin role opens an inquiry-management panel plus basic usage metrics for signed-in cloud users, including return rate and recent inquiry volume.
+새 Supabase 프로젝트는 [schema.sql](supabase/schema.sql)을 기준으로 구성하고, 기존 프로젝트는 적용 이력을 확인해 필요한 [마이그레이션](supabase/migrations)을 적용합니다. 특히 20260727_harden_account_and_data.sql은 실제 Memoria 계정 삭제와 데이터·문의 권한 제한에 필요합니다. 이전 인수인계에는 운영 DB 미적용으로 기록되어 있으며, 이번 코드 정리에서도 운영 DB 변경과 Google Play 배포는 수행하지 않았습니다.
 
-1. Run the updated [supabase/schema.sql](./supabase/schema.sql) in your Supabase SQL editor.
-2. Sign in to the app at least once so your `user_profiles` row is created.
-3. In Supabase SQL editor, promote your own account:
+실기기에서 인증·동기화·파일 선택·알림을 확인한 뒤 build:preview로 APK 또는 build:production으로 AAB를 만듭니다. EAS production의 원격 versionCode 자동 증가 결과가 Play Console의 현재 최고값보다 큰지 확인합니다.
 
-```sql
-insert into public.user_profiles (id, email, role)
-values ('YOUR_AUTH_USER_UUID', 'your-email@example.com', 'admin')
-on conflict (id) do update
-set role = 'admin',
-    email = excluded.email,
-    updated_at = timezone('utc', now());
-```
-
-4. Reopen the app. The `앱 정보` tab will show the admin inquiry inbox, where you can review all support requests and update their status.
-5. If you pull newer backend changes later, rerun `supabase/schema.sql` so the latest policies, triggers, and metrics tables are applied.
-
-## Android release path
-
-1. Review the full Play Store checklist in [PLAY_STORE_RELEASE.md](./PLAY_STORE_RELEASE.md).
-2. The Android package name is currently `com.youwon35.memoria`. Confirm this before the first Play upload because package names are permanent.
-3. Install EAS CLI if needed: `npm install -g eas-cli`
-4. Log in to Expo: `eas login`
-5. Build an installable APK for device testing: `npm run build:preview`
-6. Build Android App Bundle for Play Store release: `npm run build:production`
-7. Submit the generated `.aab` to Google Play Console. First uploads must be done manually in Play Console; later uploads can use `npm run submit:production`.
-
-## Google login checklist for APK testing
-
-1. Create a local `.env` file from `.env.example` and fill in the real Supabase URL / Anon Key.
-2. In Supabase Auth, enable Google provider.
-3. Add `memoria://auth/callback` to Supabase Redirect URLs.
-4. Add the same redirect URI to the Google OAuth setup used by Supabase.
-5. Build with `eas build --platform android --profile preview` and install the APK from the generated EAS link.
-
-## Recommended daily workflow
-
-1. Keep the dev build installed on your phone.
-2. Run `npm run start`.
-3. Edit code and save.
-4. Confirm the change immediately in the dev build, including Google login flow when needed.
-5. Only make a new build when a native setting changes.
-
-## Git branch strategy
-
-Use `main` for stable releases and `develop` for ongoing feature work.
-
-Example:
-
-```bash
-git init -b main
-git add .
-git commit -m "Initial Memora app"
-git branch develop
-git checkout develop
-```
-
-## Notes
-
-- The app works locally even without Supabase credentials.
-- When Supabase is configured, Google login is used to sync cards across devices.
-- Android backup is disabled because guest cards and study records are stored locally. Signed-in users can restore supported data through cloud sync.
-- The Google identity itself is never deleted; the in-app deletion flow removes the Memoria authentication account and all rows linked to it.
-- Play Store listing, privacy policy, and data deletion drafts are in [store/google-play-listing.md](./store/google-play-listing.md), [docs/privacy-policy-ko.md](./docs/privacy-policy-ko.md), and [docs/data-deletion-ko.md](./docs/data-deletion-ko.md).
+개발 브랜치는 develop, 안정 릴리스 브랜치는 main입니다. 출시 절차는 [PLAY_STORE_RELEASE.md](PLAY_STORE_RELEASE.md), 정책은 [개인정보처리방침](docs/privacy-policy-ko.md)과 [데이터 삭제 안내](docs/data-deletion-ko.md)를 참고합니다.

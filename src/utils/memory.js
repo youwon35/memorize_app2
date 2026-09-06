@@ -1,8 +1,8 @@
 const KOREAN_PARTICLE_PATTERN =
-  /(으로부터|로부터|에게서|한테서|께서|에서|에게|한테|까지|처럼|보다|으로|하고|이랑|랑|이나|나|라도|라도|은|는|이|가|을|를|와|과|도|만|의|야|아|여|로|에)$/;
+  /(으로부터|로부터|에게서|한테서|께서|에서|에게|한테|까지|처럼|보다|으로|하고|이랑|랑|이나|나|라도|은|는|이|가|을|를|와|과|도|만|의|야|아|여|로|에)$/;
 
 const normalizeText = (value = "") =>
-  value
+  String(value ?? "")
     .normalize("NFKC")
     .trim()
     .replace(/\s+/g, " ")
@@ -58,7 +58,49 @@ export const updatePairValues = (pair, left, right) => ({
 export const createSignature = (left, right) =>
   `${normalizeText(left)}::${normalizeText(right)}`;
 
+// Preserve numbers and meaningful symbols before applying natural-language leniency.
+const requiresExactAnswer = (value) =>
+  /[\p{N}\p{S}\/#%&*@\\_^|~`+\-=<>]|\S[.:]\S/u.test(normalizeText(value));
+
+function isStudySignature(signature) {
+  if (typeof signature !== "string" || !signature.startsWith("v2:")) return false;
+  try {
+    const parts = JSON.parse(signature.slice(3));
+    return Array.isArray(parts) && parts.length === 3 && parts.every((part) => typeof part === "string");
+  } catch {
+    return false;
+  }
+}
+
+export const createStudySignature = (pair = {}) =>
+  "v2:" + JSON.stringify([
+    pair.folderId ?? "root",
+    normalizeText(pair.left ?? (pair.direction === "B_TO_A" ? pair.answer : pair.prompt) ?? ""),
+    normalizeText(pair.right ?? (pair.direction === "B_TO_A" ? pair.prompt : pair.answer) ?? ""),
+  ]);
+
+// Legacy history without a folder can only be linked if its content is unique.
+export const resolveStudyPair = (card, pairs = []) => {
+  if (!card) return null;
+  const byId = card.pairId && pairs.find((pair) => pair.id === card.pairId);
+  if (byId) return byId;
+  if (isStudySignature(card.signature)) {
+    return pairs.find((pair) => createStudySignature(pair) === card.signature) ?? null;
+  }
+  const contentSignature = card.signature ?? createSignature(card.left ?? "", card.right ?? "");
+  const matches = pairs.filter((pair) =>
+    createSignature(pair.left, pair.right) === contentSignature &&
+    (card.folderId == null || (pair.folderId ?? "root") === card.folderId)
+  );
+  return matches.length === 1 ? matches[0] : null;
+};
+
 export const compareAnswers = (input, expected) => {
+  if (requiresExactAnswer(input) || requiresExactAnswer(expected)) {
+    const exactInput = normalizeText(input).replace(/[\u200B-\u200D\uFEFF\s]/g, "");
+    const exactExpected = normalizeText(expected).replace(/[\u200B-\u200D\uFEFF\s]/g, "");
+    return Boolean(exactInput && exactExpected && exactInput === exactExpected);
+  }
   const normalizedInput = compactAnswerText(input);
   const normalizedExpected = compactAnswerText(expected);
 
@@ -128,8 +170,8 @@ export const createPersistableStudyStats = (studyStats, pairs = []) => {
 };
 
 export const mergeStudyStats = (localStats, remoteStats, pairs = [], maxSessions = 60) => {
-  const safeLocalStats = ensureStudyStats(localStats);
-  const safeRemoteStats = ensureStudyStats(remoteStats);
+  const safeLocalStats = syncStudyStatsWithPairs(localStats, pairs);
+  const safeRemoteStats = syncStudyStatsWithPairs(remoteStats, pairs);
   const mergedSessions = new Map();
 
   [...safeRemoteStats.sessions, ...safeLocalStats.sessions].forEach((session) => {
@@ -175,79 +217,83 @@ export const mergeStudyStats = (localStats, remoteStats, pairs = [], maxSessions
   );
 };
 
-export const syncStudyStatsWithPairs = (studyStats, pairs) => {
+export const syncStudyStatsWithPairs = (studyStats, pairs = []) => {
   const safeStats = ensureStudyStats(studyStats);
   const nextCards = { ...safeStats.cards };
-
+  const nextHiddenCards = { ...safeStats.hiddenCards };
+  const legacySignatures = new Set();
   pairs.forEach((pair) => {
-    const signature = createSignature(pair.left, pair.right);
-    nextCards[signature] = ensureCardStats(nextCards[signature], pair);
+    const signature = createStudySignature(pair);
+    const legacySignature = createSignature(pair.left, pair.right);
+    // Preserve the formerly shared baseline for existing copies, then keep them separate.
+    nextCards[signature] = ensureCardStats(nextCards[signature] ?? safeStats.cards[legacySignature], pair);
+    if (!nextHiddenCards[signature] && safeStats.hiddenCards[legacySignature]) {
+      nextHiddenCards[signature] = normalizeHiddenCardState(safeStats.hiddenCards[legacySignature]);
+    }
+    legacySignatures.add(legacySignature);
   });
-
+  legacySignatures.forEach((signature) => {
+    delete nextCards[signature];
+    delete nextHiddenCards[signature];
+  });
   return {
     ...safeStats,
     cards: nextCards,
-    hiddenCards: createPersistableHiddenCards(safeStats.hiddenCards, pairs),
+    hiddenCards: createPersistableHiddenCards(nextHiddenCards, pairs),
   };
 };
 
 export const migrateStudyStatsEntry = (studyStats, previousPair, nextPair) => {
   const safeStats = ensureStudyStats(studyStats);
-  const previousSignature = createSignature(previousPair.left, previousPair.right);
-  const nextSignature = createSignature(nextPair.left, nextPair.right);
-
-  if (previousSignature === nextSignature) {
-    return syncStudyStatsWithPairs(safeStats, [nextPair]);
-  }
-
+  const previousSignature = createStudySignature(previousPair);
+  const nextSignature = createStudySignature(nextPair);
+  const legacySignature = createSignature(previousPair.left, previousPair.right);
+  const previousStats = safeStats.cards[previousSignature] ?? safeStats.cards[legacySignature];
   const nextCards = { ...safeStats.cards };
-  const previousStats = nextCards[previousSignature];
-  const nextStats = ensureCardStats(nextCards[nextSignature], nextPair);
-
-  if (previousStats) {
-    nextCards[nextSignature] = mergeCardStats(previousStats, nextStats, nextPair);
-    delete nextCards[previousSignature];
-  } else {
-    nextCards[nextSignature] = nextStats;
-  }
-
   const nextHiddenCards = { ...safeStats.hiddenCards };
-  const previousHiddenState = nextHiddenCards[previousSignature];
-
+  const previousHiddenState = nextHiddenCards[previousSignature] ?? nextHiddenCards[legacySignature];
+  if (previousSignature === nextSignature) {
+    nextCards[nextSignature] = { ...ensureCardStats(previousStats, nextPair), left: nextPair.left, right: nextPair.right };
+  } else {
+    const nextStats = ensureCardStats(nextCards[nextSignature], nextPair);
+    nextCards[nextSignature] = previousStats ? mergeCardStats(previousStats, nextStats, nextPair) : nextStats;
+    delete nextCards[previousSignature];
+  }
   if (previousHiddenState) {
     nextHiddenCards[nextSignature] = mergeHiddenCardState(previousHiddenState, nextHiddenCards[nextSignature]);
-    delete nextHiddenCards[previousSignature];
+    if (previousSignature !== nextSignature) delete nextHiddenCards[previousSignature];
   }
-
   return {
     ...safeStats,
     cards: nextCards,
     hiddenCards: nextHiddenCards,
+    sessions: safeStats.sessions.map((session) => ({
+      ...session,
+      incorrectCards: (session.incorrectCards ?? []).map((card) => {
+        const matchesPrevious = (card.pairId && card.pairId === previousPair.id) ||
+          card.signature === previousSignature ||
+          (card.signature === legacySignature && card.folderId === (previousPair.folderId ?? "root"));
+        return matchesPrevious ? {
+          ...card, pairId: nextPair.id, folderId: nextPair.folderId ?? "root",
+          signature: nextSignature, left: nextPair.left, right: nextPair.right,
+        } : card;
+      }),
+    })),
   };
 };
 
-export const isPairHidden = (studyStats, pair) => {
-  const signature = pair?.signature ?? createSignature(pair?.left ?? "", pair?.right ?? "");
-
-  return Boolean(ensureStudyStats(studyStats).hiddenCards[signature]?.hidden);
-};
+export const isPairHidden = (studyStats, pair) =>
+  Boolean(getPairHiddenState(ensureStudyStats(studyStats), pair)?.hidden);
 
 export const setPairHidden = (studyStats, pair, hidden) => {
   const safeStats = ensureStudyStats(studyStats);
-  const signature = pair?.signature ?? createSignature(pair?.left ?? "", pair?.right ?? "");
-
-  if (!signature || signature === "::") {
-    return safeStats;
-  }
-
+  if (!pair || !(pair.left ?? pair.prompt)?.trim() || !(pair.right ?? pair.answer)?.trim()) return safeStats;
+  const signature = getStudySignature(pair);
   return {
     ...safeStats,
     hiddenCards: {
       ...safeStats.hiddenCards,
-      [signature]: {
-        hidden: Boolean(hidden),
-        updatedAt: new Date().toISOString(),
-      },
+      [signature]: { hidden: Boolean(hidden), updatedAt: new Date().toISOString() },
     },
   };
 };
@@ -303,8 +349,7 @@ export const removeFolderStyles = (studyStats, folderIds = []) => {
 
 export const getPairStudySummary = (studyStats, pair) => {
   const safeStats = ensureStudyStats(studyStats);
-  const signature = pair?.signature ?? createSignature(pair?.left ?? "", pair?.right ?? "");
-  const cardStats = ensureCardStats(safeStats.cards[signature], pair);
+  const cardStats = getPairCardStats(safeStats, pair);
   const attempts = cardStats.attempts ?? 0;
   const correct = cardStats.correct ?? 0;
   const incorrect = cardStats.incorrect ?? 0;
@@ -315,15 +360,15 @@ export const getPairStudySummary = (studyStats, pair) => {
     correct,
     incorrect,
     accuracy,
-    hidden: Boolean(safeStats.hiddenCards[signature]?.hidden),
+    hidden: Boolean(getPairHiddenState(safeStats, pair)?.hidden),
   };
 };
 
 export const recordStudyAttempt = (studyStats, card, isCorrect) => {
   const safeStats = ensureStudyStats(studyStats);
-  const signature = card.signature ?? createSignature(card.left ?? card.prompt, card.right ?? card.answer);
+  const signature = getStudySignature(card);
   const timestamp = new Date().toISOString();
-  const currentCardStats = ensureCardStats(safeStats.cards[signature], card);
+  const currentCardStats = getPairCardStats(safeStats, card);
   const currentDirectionStats = ensureDirectionStats(currentCardStats.directions[card.direction]);
   const nextDirectionStats = {
     ...currentDirectionStats,
@@ -377,7 +422,8 @@ export const buildPracticeDeck = (pairs, limit, mode = "both", studyStats = null
       pairId: pair.id,
       left: pair.left,
       right: pair.right,
-      signature: createSignature(pair.left, pair.right),
+      signature: createStudySignature(pair),
+      folderId: pair.folderId ?? "root",
       createdAt: pair.createdAt ?? new Date().toISOString(),
     };
 
@@ -610,14 +656,28 @@ function ensureStudyStats(studyStats) {
   };
 }
 
+function getStudySignature(pair = {}) {
+  return isStudySignature(pair.signature)
+    ? pair.signature : createStudySignature(pair);
+}
+function getLegacySignature(pair = {}) {
+  return createSignature(pair.left ?? "", pair.right ?? "");
+}
+function getPairCardStats(studyStats, pair = {}) {
+  return ensureCardStats(studyStats.cards[getStudySignature(pair)] ?? studyStats.cards[getLegacySignature(pair)], pair);
+}
+function getPairHiddenState(studyStats, pair = {}) {
+  return studyStats.hiddenCards[getStudySignature(pair)] ?? studyStats.hiddenCards[getLegacySignature(pair)];
+}
+
 function ensureCardStats(currentStats, pair = {}) {
   return {
     left: currentStats?.left ?? pair.left ?? "",
     right: currentStats?.right ?? pair.right ?? "",
     createdAt: currentStats?.createdAt ?? pair.createdAt ?? new Date().toISOString(),
-    attempts: currentStats?.attempts ?? 0,
-    correct: currentStats?.correct ?? 0,
-    incorrect: currentStats?.incorrect ?? 0,
+    attempts: sanitizeCount(currentStats?.attempts),
+    correct: sanitizeCount(currentStats?.correct),
+    incorrect: sanitizeCount(currentStats?.incorrect),
     lastStudiedAt: currentStats?.lastStudiedAt ?? null,
     lastCorrectAt: currentStats?.lastCorrectAt ?? null,
     lastIncorrectAt: currentStats?.lastIncorrectAt ?? null,
@@ -631,9 +691,9 @@ function ensureCardStats(currentStats, pair = {}) {
 
 function ensureDirectionStats(currentStats) {
   return {
-    attempts: currentStats?.attempts ?? 0,
-    correct: currentStats?.correct ?? 0,
-    incorrect: currentStats?.incorrect ?? 0,
+    attempts: sanitizeCount(currentStats?.attempts),
+    correct: sanitizeCount(currentStats?.correct),
+    incorrect: sanitizeCount(currentStats?.incorrect),
     lastStudiedAt: currentStats?.lastStudiedAt ?? null,
     lastCorrectAt: currentStats?.lastCorrectAt ?? null,
     lastIncorrectAt: currentStats?.lastIncorrectAt ?? null,
@@ -690,6 +750,8 @@ function createPersistableStudySession(session) {
             : createSignature(card?.left ?? "", card?.right ?? ""),
         left: card?.left ?? "",
         right: card?.right ?? "",
+        ...(typeof card?.pairId === "string" ? { pairId: card.pairId } : {}),
+        ...(typeof card?.folderId === "string" ? { folderId: card.folderId } : {}),
         direction: card?.direction === "B_TO_A" ? "B_TO_A" : "A_TO_B",
       }))
     : [];
@@ -702,6 +764,7 @@ function createPersistableStudySession(session) {
     totalCards: sanitizeCount(session.totalCards),
     mode: sanitizeQuizMode(session.mode),
     source: sanitizeSessionSource(session.source),
+    ...(typeof session.folderId === "string" ? { folderId: session.folderId } : {}),
     correctCount: sanitizeCount(session.correctCount),
     incorrectCount: sanitizeCount(session.incorrectCount ?? incorrectCards.length),
     incorrectCards,
@@ -719,7 +782,7 @@ function mergeCardStats(previousStats, nextStats, pair) {
     lastStudiedAt: laterTimestamp(previousStats.lastStudiedAt, nextStats.lastStudiedAt),
     lastCorrectAt: laterTimestamp(previousStats.lastCorrectAt, nextStats.lastCorrectAt),
     lastIncorrectAt: laterTimestamp(previousStats.lastIncorrectAt, nextStats.lastIncorrectAt),
-    lastResult: nextStats.lastResult ?? previousStats.lastResult ?? null,
+    lastResult: pickMostActiveCardStats(previousStats, nextStats).lastResult,
     directions: {
       A_TO_B: mergeDirectionStats(previousStats.directions?.A_TO_B, nextStats.directions?.A_TO_B),
       B_TO_A: mergeDirectionStats(previousStats.directions?.B_TO_A, nextStats.directions?.B_TO_A),
@@ -738,7 +801,7 @@ function mergeDirectionStats(previousStats, nextStats) {
     lastStudiedAt: laterTimestamp(safePrevious.lastStudiedAt, safeNext.lastStudiedAt),
     lastCorrectAt: laterTimestamp(safePrevious.lastCorrectAt, safeNext.lastCorrectAt),
     lastIncorrectAt: laterTimestamp(safePrevious.lastIncorrectAt, safeNext.lastIncorrectAt),
-    lastResult: safeNext.lastResult ?? safePrevious.lastResult ?? null,
+    lastResult: pickMostActiveDirectionStats(safePrevious, safeNext).lastResult,
   };
 }
 
@@ -771,7 +834,7 @@ function createPersistableFolderStyles(folderStyles) {
 }
 
 function createPersistableHiddenCards(hiddenCards = {}, pairs = []) {
-  const pairSignatures = new Set(pairs.map((pair) => createSignature(pair.left, pair.right)));
+  const pairSignatures = new Set(pairs.map(createStudySignature));
   const entries = Object.entries(hiddenCards)
     .map(([signature, state]) => {
       if (!state || typeof state !== "object") {
@@ -822,9 +885,9 @@ function mergeCloudCardStats(localStats, remoteStats) {
     left: selectedCard.left || safeLocal.left || safeRemote.left,
     right: selectedCard.right || safeLocal.right || safeRemote.right,
     createdAt: earlierTimestamp(safeLocal.createdAt, safeRemote.createdAt) ?? selectedCard.createdAt,
-    attempts: directionTotals.attempts || selectedCard.attempts,
-    correct: directionTotals.attempts ? directionTotals.correct : selectedCard.correct,
-    incorrect: directionTotals.attempts ? directionTotals.incorrect : selectedCard.incorrect,
+    attempts: Math.max(directionTotals.attempts, selectedCard.attempts),
+    correct: directionTotals.attempts >= selectedCard.attempts ? directionTotals.correct : selectedCard.correct,
+    incorrect: directionTotals.attempts >= selectedCard.attempts ? directionTotals.incorrect : selectedCard.incorrect,
     lastStudiedAt: laterTimestamp(safeLocal.lastStudiedAt, safeRemote.lastStudiedAt),
     lastCorrectAt: laterTimestamp(safeLocal.lastCorrectAt, safeRemote.lastCorrectAt),
     lastIncorrectAt: laterTimestamp(safeLocal.lastIncorrectAt, safeRemote.lastIncorrectAt),
@@ -957,53 +1020,9 @@ function laterTimestamp(first, second) {
   return new Date(first) >= new Date(second) ? first : second;
 }
 
-function weightedSample(items) {
-  const pool = [...items];
-  const ordered = [];
-
-  while (pool.length) {
-    const totalWeight = pool.reduce((sum, item) => sum + Math.max(item.weight ?? 1, 0.35), 0);
-    let cursor = Math.random() * totalWeight;
-    let targetIndex = pool.length - 1;
-
-    for (let index = 0; index < pool.length; index += 1) {
-      cursor -= Math.max(pool[index].weight ?? 1, 0.35);
-
-      if (cursor <= 0) {
-        targetIndex = index;
-        break;
-      }
-    }
-
-    ordered.push(pool.splice(targetIndex, 1)[0]);
-  }
-
-  return ordered;
-}
-
-function getCardPriority(card, studyStats) {
-  const safeStats = ensureStudyStats(studyStats);
-  const cardStats = ensureCardStats(safeStats.cards[card.signature], card);
-  const directionStats = ensureDirectionStats(cardStats.directions[card.direction]);
-  const attempts = directionStats.attempts;
-  const accuracy = attempts ? directionStats.correct / attempts : 0;
-  const errorRate = attempts ? directionStats.incorrect / attempts : 0;
-  const createdHoursAgo = hoursBetween(cardStats.createdAt);
-  const studiedDaysAgo = directionStats.lastStudiedAt ? hoursBetween(directionStats.lastStudiedAt) / 24 : 7;
-  const newnessBoost = attempts === 0 ? (createdHoursAgo <= 24 ? 7.2 : 5.4) : 0;
-  const mistakeBoost =
-    directionStats.incorrect * 1.35 +
-    errorRate * 4.6 +
-    (directionStats.lastResult === "incorrect" ? 2.1 : 0);
-  const staleBoost = Math.min(studiedDaysAgo, 7) * 0.35;
-  const masteryPenalty = attempts >= 3 ? accuracy * 2.6 : accuracy * 0.8;
-
-  return Math.max(0.35, 1 + newnessBoost + mistakeBoost + staleBoost - masteryPenalty);
-}
-
 function getCardWeaknessScore(card, studyStats) {
   const safeStats = ensureStudyStats(studyStats);
-  const cardStats = ensureCardStats(safeStats.cards[card.signature], card);
+  const cardStats = getPairCardStats(safeStats, card);
   const directionStats = ensureDirectionStats(cardStats.directions[card.direction]);
   const attempts = directionStats.attempts;
   const errorRate = attempts ? directionStats.incorrect / attempts : 0;
@@ -1054,5 +1073,3 @@ function sanitizeSessionSource(source) {
 
   return "adaptive";
 }
-
-

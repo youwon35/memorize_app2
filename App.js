@@ -40,6 +40,8 @@ import * as WebBrowser from "expo-web-browser";
 import * as XLSX from "xlsx";
 
 import { isSupabaseConfigured, supabase } from "./src/lib/supabase";
+import { createCardExportRows } from "./src/utils/card-export";
+import { assertSyncActive, fetchAllUserRows } from "./src/utils/cloud-sync";
 import {
   extractDocxTextFromBase64,
   getImportAssetExtension,
@@ -55,6 +57,8 @@ import {
   createLocalPair,
   createPersistableStudyStats,
   createSignature,
+  createStudySignature,
+  resolveStudyPair,
   getPairStudySummary,
   getFolderStyle,
   isPairHidden,
@@ -112,7 +116,7 @@ const STUDY_REMINDER_IDS_KEY = "@memoria/study-reminder-ids";
 const STUDY_REMINDER_LAST_OPENED_KEY = "@memoria/study-reminder-last-opened";
 const LEGACY_STORAGE_KEYS = ["@memora/study-pairs"];
 const APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "memoria";
-const RELEASE_REDIRECT_URI = `${APP_SCHEME}://auth/callback`;
+
 const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
 const GOOGLE_ANDROID_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
 const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
@@ -652,8 +656,7 @@ const LIGHT_THEME = {
   launchBg: "#F7F5FF",
 };
 
-const getQuizModeConfig = (mode) =>
-  QUIZ_MODE_OPTIONS.find((option) => option.key === mode) ?? QUIZ_MODE_OPTIONS[0];
+
 
 const createIntroLayoutMetrics = (
   screenWidth,
@@ -975,6 +978,7 @@ function AppContent() {
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
   const [authBusy, setAuthBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncRequest, setSyncRequest] = useState(0);
   const [noteState, setNoteState] = useState({
     key: isSupabaseConfigured ? "notes.googleSyncAvailable" : "notes.localMode",
     params: {},
@@ -1047,6 +1051,10 @@ function AppContent() {
   const pairsRef = useRef(pairs);
   const foldersRef = useRef(folders);
   const cloudFoldersReadyRef = useRef(false);
+  const cloudSyncReadyRef = useRef(false);
+  const dataRevisionRef = useRef(0);
+  const cardWriteQueueRef = useRef(Promise.resolve());
+  const cloudStateWriteQueueRef = useRef(Promise.resolve());
   const cloudUserStateReadyRef = useRef(true);
   const studyStatsRef = useRef(studyStats);
   const dailyStudyGoalRef = useRef(dailyStudyGoal);
@@ -1733,14 +1741,6 @@ function AppContent() {
           setDailyGoalInput(`${nextGoal}`);
         }
 
-        if (storedStudyStats && active) {
-          try {
-            setStudyStats(createPersistableStudyStats(JSON.parse(storedStudyStats), pairsRef.current));
-          } catch {
-            setStudyStats(createEmptyStudyStats());
-          }
-        }
-
         if (storedSupportRequests && active) {
           try {
             setSupportRequests(JSON.parse(storedSupportRequests).map(normalizeSupportRequest));
@@ -1784,20 +1784,34 @@ function AppContent() {
           break;
         }
 
-        if (!storedValue || !active) {
+        if (!active) {
           return;
         }
 
-        const parsed = JSON.parse(storedValue);
-
-        if (Array.isArray(parsed)) {
-          setPairs(sortPairs(parsed.map(normalizePairFolder)));
+        const parsed = storedValue ? JSON.parse(storedValue) : [];
+        if (!Array.isArray(parsed)) {
+          throw new Error("Invalid stored card data");
         }
-      } finally {
+        const loadedPairs = sortPairs(parsed.map(normalizePairFolder));
+        const loadedStats = createPersistableStudyStats(
+          storedStudyStats ? JSON.parse(storedStudyStats) : createEmptyStudyStats(),
+          loadedPairs
+        );
+        pairsRef.current = loadedPairs;
+        studyStatsRef.current = loadedStats;
+        setPairs(loadedPairs);
+        setStudyStats(loadedStats);
+      } catch {
         if (active) {
-          setPreferencesReady(true);
-          setStorageReady(true);
+          Alert.alert(t("alerts.loadFailedTitle"), t("alerts.loadFailedBody"), [
+            { text: t("common.retry"), onPress: () => void load() },
+          ]);
         }
+        return;
+      }
+      if (active) {
+        setPreferencesReady(true);
+        setStorageReady(true);
       }
     };
 
@@ -1913,8 +1927,14 @@ function AppContent() {
         return;
       }
 
+      sessionRef.current = data.session ?? null;
       setSession(data.session ?? null);
       setAuthReady(true);
+    }).catch(() => {
+      if (active) {
+        setAuthReady(true);
+        setTranslatedNote("notes.cloudLocalOnly");
+      }
     });
 
     const {
@@ -1922,6 +1942,7 @@ function AppContent() {
     } = supabase.auth.onAuthStateChange((event, nextSession) => {
       const signedOutFromAccount = event === "SIGNED_OUT" && Boolean(sessionRef.current?.user);
 
+      sessionRef.current = nextSession ?? null;
       setSession(nextSession ?? null);
       setAuthReady(true);
       setTranslatedNote(nextSession?.user ? "notes.authLinked" : "notes.googleSyncAvailable");
@@ -2054,230 +2075,160 @@ function AppContent() {
     }
 
     let active = true;
+    const userId = session.user.id;
+    const revision = dataRevisionRef.current;
+    const isCurrentAccount = () => active && sessionRef.current?.user?.id === userId;
+    const isActive = () => isCurrentAccount() && revision === dataRevisionRef.current;
 
     const sync = async () => {
       setSyncing(true);
+      clearTimeout(cloudUserStateSyncTimerRef.current);
 
       try {
+        // Finish submitted writes before reading a fresh cloud snapshot.
+        await cloudStateWriteQueueRef.current.catch(() => {});
+        assertSyncActive(isActive);
+        cloudSyncReadyRef.current = false;
         let cloudFoldersReady = false;
         let syncedFolders = foldersRef.current;
 
         try {
-          const folderResponse = await supabase
-            .from("memory_folders")
-            .select("*")
-            .order("updated_at", { ascending: false });
-
-          if (folderResponse.error) {
-            throw folderResponse.error;
-          }
-
-          cloudFoldersReady = true;
-          cloudFoldersReadyRef.current = true;
-
-          const remoteFolders = (folderResponse.data ?? []).map(mapFolderRecord);
+          let remoteFolders = (await fetchAllUserRows(supabase, "memory_folders", userId, { isActive }))
+            .map(mapFolderRecord);
           const remoteFolderIds = new Set(remoteFolders.map((folder) => folder.id));
-          const pendingLocalFolders = foldersRef.current.filter(
-            (folder) => folder.source !== "cloud"
+          const localOnlyFolders = foldersRef.current.filter(
+            (folder) => folder.source !== "cloud" && !remoteFolderIds.has(folder.id)
           );
-          const localOnlyFolders = pendingLocalFolders.filter(
-            (folder) => !remoteFolderIds.has(folder.id)
-          );
-          let insertedFolders = [];
 
           if (localOnlyFolders.length > 0) {
-            const uploadedFolders = await supabase
-              .from("memory_folders")
-              .insert(
-                localOnlyFolders.map((folder) => ({
-                  id: folder.id,
-                  user_id: session.user.id,
-                  parent_id: normalizeFolderId(folder.parentId),
-                  name: folder.name,
-                }))
-              )
-              .select();
-
-            if (uploadedFolders.error) {
-              throw uploadedFolders.error;
-            }
-
-            insertedFolders = (uploadedFolders.data ?? []).map(mapFolderRecord);
+            assertSyncActive(isActive);
+            const uploaded = await supabase.from("memory_folders").insert(
+              localOnlyFolders.map((folder) => ({
+                id: folder.id,
+                user_id: userId,
+                parent_id: normalizeFolderId(folder.parentId),
+                name: folder.name,
+              }))
+            );
+            assertSyncActive(isActive);
+            if (uploaded.error) throw uploaded.error;
+            remoteFolders = (await fetchAllUserRows(supabase, "memory_folders", userId, { isActive }))
+              .map(mapFolderRecord);
           }
 
-          syncedFolders = mergeFoldersById(remoteFolders, insertedFolders, pendingLocalFolders);
-
-          if (active) {
-            setFolders(syncedFolders);
-            await AsyncStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(syncedFolders));
-          }
+          syncedFolders = mergeFoldersById(remoteFolders);
+          cloudFoldersReady = true;
         } catch (error) {
-          cloudFoldersReadyRef.current = false;
-
-          if (!isCloudFolderSchemaError(error)) {
-            throw error;
-          }
+          assertSyncActive(isActive);
+          if (!isCloudFolderSchemaError(error)) throw error;
         }
 
-        const remoteResponse = await supabase
-          .from("memory_pairs")
-          .select("*")
-          .order("updated_at", { ascending: false });
-
-        if (remoteResponse.error) {
-          throw remoteResponse.error;
-        }
-
-        const localFolderBySignature = new Map(
-          pairsRef.current.map((pair) => [
-            createSignature(pair.left, pair.right),
-            normalizeFolderId(pair.folderId),
-          ])
-        );
-        const localFolderById = new Map(
-          pairsRef.current.map((pair) => [pair.id, normalizeFolderId(pair.folderId)])
-        );
-        const remote = (remoteResponse.data ?? []).map((record) => {
+        const originalPairs = pairsRef.current;
+        const localFolderById = new Map(originalPairs.map((pair) => [pair.id, pair.folderId]));
+        const mapRemotePair = (record) => {
           const mapped = mapPairRecord(record);
           return {
             ...mapped,
-            folderId:
-              localFolderById.get(mapped.id) ??
-              (cloudFoldersReady
-                ? normalizeFolderId(mapped.folderId)
-                : localFolderBySignature.get(createSignature(mapped.left, mapped.right))) ??
-              normalizeFolderId(mapped.folderId),
+            folderId: normalizeFolderId(
+              cloudFoldersReady ? mapped.folderId : localFolderById.get(mapped.id) ?? mapped.folderId
+            ),
           };
-        });
-        const createSyncSignature = (pair) =>
-          cloudFoldersReady
-            ? createFolderScopedSignature(pair.left, pair.right, pair.folderId)
-            : createSignature(pair.left, pair.right);
+        };
+        let remote = (await fetchAllUserRows(supabase, "memory_pairs", userId, { isActive }))
+          .map(mapRemotePair);
+        const createSyncSignature = (pair) => cloudFoldersReady
+          ? createFolderScopedSignature(pair.left, pair.right, pair.folderId)
+          : createSignature(pair.left, pair.right);
         const signatures = new Set(remote.map(createSyncSignature));
-        const pendingLocalPairs = pairsRef.current.filter((pair) => pair.source !== "cloud");
-        const localOnly = pendingLocalPairs.filter(
-          (pair) => !signatures.has(createSyncSignature(pair))
+        const localOnly = originalPairs.filter(
+          (pair) => pair.source !== "cloud" && !signatures.has(createSyncSignature(pair))
         );
-        let inserted = [];
 
         if (localOnly.length > 0) {
-          const uploaded = await supabase
-            .from("memory_pairs")
-            .insert(
-              localOnly.map((pair) => {
-                const row = {
-                  user_id: session.user.id,
-                  prompt_a: pair.left,
-                  prompt_b: pair.right,
-                };
-
-                if (cloudFoldersReady) {
-                  row.folder_id = normalizeFolderId(pair.folderId);
-                }
-
-                return row;
-              })
-            )
-            .select();
-
-          if (uploaded.error) {
-            throw uploaded.error;
-          }
-
-          inserted = (uploaded.data ?? []).map((record, index) => ({
-            ...mapPairRecord(record),
-            folderId: normalizeFolderId(localOnly[index]?.folderId),
-          }));
+          assertSyncActive(isActive);
+          const uploaded = await supabase.from("memory_pairs").insert(
+            localOnly.map((pair) => ({
+              user_id: userId,
+              prompt_a: pair.left,
+              prompt_b: pair.right,
+              ...(cloudFoldersReady ? { folder_id: normalizeFolderId(pair.folderId) } : {}),
+            }))
+          );
+          assertSyncActive(isActive);
+          if (uploaded.error) throw uploaded.error;
+          remote = (await fetchAllUserRows(supabase, "memory_pairs", userId, { isActive }))
+            .map(mapRemotePair);
         }
 
-        const merged = mergePairsBySignature(remote, inserted, pendingLocalPairs);
-        let syncedStudyStats = createPersistableStudyStats(studyStatsRef.current, merged);
+        const merged = mergePairsBySignature(remote);
+        let migratedLocalStats = studyStatsRef.current;
+        const mergedById = new Map(merged.map((pair) => [pair.id, pair]));
+        for (const previousPair of originalPairs) {
+          const nextPair = mergedById.get(previousPair.id);
+          if (nextPair && createStudySignature(previousPair) !== createStudySignature(nextPair)) {
+            migratedLocalStats = migrateStudyStatsEntry(migratedLocalStats, previousPair, nextPair);
+          }
+        }
+        let syncedStudyStats = createPersistableStudyStats(migratedLocalStats, merged);
         let syncedDailyGoal = dailyStudyGoalRef.current;
 
-        if (cloudUserStateReadyRef.current) {
-          try {
-            const userStateResponse = await supabase
-              .from("memory_user_state")
-              .select("*")
-              .eq("user_id", session.user.id)
-              .maybeSingle();
+        try {
+          assertSyncActive(isActive);
+          const response = await supabase.from("memory_user_state")
+            .select("*").eq("user_id", userId).maybeSingle();
+          assertSyncActive(isActive);
+          if (response.error) throw response.error;
 
-            if (userStateResponse.error) {
-              throw userStateResponse.error;
-            }
-
-            const remoteState = mapUserStateRecord(userStateResponse.data, merged);
-
-            if (remoteState) {
-              syncedStudyStats = mergeStudyStats(
-                syncedStudyStats,
-                remoteState.studyStats,
-                merged,
-                MAX_SESSION_HISTORY
-              );
-              syncedDailyGoal = remoteState.dailyStudyGoal;
-            }
-
-            const upsertUserStateResponse = await supabase
-              .from("memory_user_state")
-              .upsert(
-                {
-                  user_id: session.user.id,
-                  daily_study_goal: syncedDailyGoal,
-                  study_stats: syncedStudyStats,
-                },
-                { onConflict: "user_id" }
-              );
-
-            if (upsertUserStateResponse.error) {
-              throw upsertUserStateResponse.error;
-            }
-
-            cloudUserStateReadyRef.current = true;
-          } catch (error) {
-            if (!isCloudUserStateSchemaError(error)) {
-              throw error;
-            }
-
-            cloudUserStateReadyRef.current = false;
+          const remoteState = mapUserStateRecord(response.data, merged);
+          if (remoteState) {
+            syncedStudyStats = mergeStudyStats(syncedStudyStats, remoteState.studyStats, merged, MAX_SESSION_HISTORY);
+            syncedDailyGoal = remoteState.dailyStudyGoal;
           }
+          const uploaded = await supabase.from("memory_user_state").upsert({
+            user_id: userId,
+            daily_study_goal: syncedDailyGoal,
+            study_stats: syncedStudyStats,
+          }, { onConflict: "user_id" });
+          assertSyncActive(isActive);
+          if (uploaded.error) throw uploaded.error;
+          cloudUserStateReadyRef.current = true;
+        } catch (error) {
+          assertSyncActive(isActive);
+          if (!isCloudUserStateSchemaError(error)) throw error;
+          cloudUserStateReadyRef.current = false;
         }
 
-        if (active) {
-          foldersRef.current = syncedFolders;
-          pairsRef.current = merged;
-          studyStatsRef.current = syncedStudyStats;
-          dailyStudyGoalRef.current = syncedDailyGoal;
-          setFolders(syncedFolders);
-          setPairs(merged);
-          setStudyStats(syncedStudyStats);
-          setDailyStudyGoal(syncedDailyGoal);
-          setDailyGoalInput(`${syncedDailyGoal}`);
-          await Promise.all([
-            AsyncStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(syncedFolders)),
-            AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged)),
-            AsyncStorage.setItem(STUDY_STATS_KEY, JSON.stringify(syncedStudyStats)),
-            AsyncStorage.setItem(DAILY_STUDY_GOAL_KEY, `${syncedDailyGoal}`),
-          ]);
-          setTranslatedNote("notes.synced");
-        }
+        assertSyncActive(isActive);
+        // Commit the complete pull together; a failed page never replaces local cards.
+        cloudFoldersReadyRef.current = cloudFoldersReady;
+        foldersRef.current = syncedFolders;
+        pairsRef.current = merged;
+        studyStatsRef.current = syncedStudyStats;
+        dailyStudyGoalRef.current = syncedDailyGoal;
+        setFolders(syncedFolders);
+        setPairs(merged);
+        setStudyStats(syncedStudyStats);
+        setDailyStudyGoal(syncedDailyGoal);
+        setDailyGoalInput(`${syncedDailyGoal}`);
+        await AsyncStorage.multiSet([
+          [FOLDERS_STORAGE_KEY, JSON.stringify(syncedFolders)],
+          [STORAGE_KEY, JSON.stringify(merged)],
+          [STUDY_STATS_KEY, JSON.stringify(syncedStudyStats)],
+          [DAILY_STUDY_GOAL_KEY, `${syncedDailyGoal}`],
+        ]);
+        assertSyncActive(isActive);
+        cloudSyncReadyRef.current = true;
+        setTranslatedNote(cloudFoldersReady && cloudUserStateReadyRef.current ? "notes.synced" : "notes.cloudLocalOnly");
       } catch {
-        if (active) {
-          setTranslatedNote("notes.cloudLocalOnly");
-        }
+        if (isCurrentAccount()) setTranslatedNote("notes.cloudLocalOnly");
       } finally {
-        if (active) {
-          setSyncing(false);
-        }
+        if (isCurrentAccount()) setSyncing(false);
       }
     };
 
     void sync();
-
-    return () => {
-      active = false;
-    };
-  }, [launchVisible, storageReady, session?.user?.id]);
+    return () => { active = false; };
+  }, [launchVisible, storageReady, session?.user?.id, syncRequest]);
 
   useEffect(() => {
     if (launchVisible || !storageReady || !session?.user?.id || !supabase) {
@@ -2378,46 +2329,50 @@ function AppContent() {
   }, [pairs.length]);
 
   async function persistCloudUserState(nextStudyStats = studyStatsRef.current, nextDailyGoal = dailyStudyGoalRef.current) {
-    const activeSession = sessionRef.current;
+    const userId = sessionRef.current?.user?.id;
+    const canWrite = () => storageReady && !launchVisible && cloudSyncReadyRef.current
+      && supabase && userId && sessionRef.current?.user?.id === userId
+      && cloudUserStateReadyRef.current;
 
-    if (!storageReady || !supabase || !activeSession?.user?.id || !cloudUserStateReadyRef.current) {
-      return false;
-    }
+    if (!canWrite()) return false;
 
-    const persistableStudyStats = createPersistableStudyStats(nextStudyStats, pairsRef.current);
-    const response = await supabase
-      .from("memory_user_state")
-      .upsert(
-        {
-          user_id: activeSession.user.id,
-          daily_study_goal: normalizeDailyStudyGoal(nextDailyGoal, dailyStudyGoalRef.current),
-          study_stats: persistableStudyStats,
-        },
-        { onConflict: "user_id" }
-      );
+    const payload = {
+      user_id: userId,
+      daily_study_goal: normalizeDailyStudyGoal(nextDailyGoal, dailyStudyGoalRef.current),
+      study_stats: createPersistableStudyStats(nextStudyStats, pairsRef.current),
+    };
+    const write = async () => {
+      if (!canWrite()) return false;
+      const response = await supabase.from("memory_user_state")
+        .upsert(payload, { onConflict: "user_id" });
+      if (!canWrite()) return false;
 
-    if (response.error) {
-      if (isCloudUserStateSchemaError(response.error)) {
-        cloudUserStateReadyRef.current = false;
-        return false;
+      if (response.error) {
+        if (isCloudUserStateSchemaError(response.error)) {
+          cloudUserStateReadyRef.current = false;
+          return false;
+        }
+        throw response.error;
       }
+      return true;
+    };
 
-      throw response.error;
-    }
-
-    cloudUserStateReadyRef.current = true;
-    return true;
+    const pending = cloudStateWriteQueueRef.current.catch(() => {}).then(write);
+    cloudStateWriteQueueRef.current = pending;
+    return pending;
   }
 
   function scheduleCloudUserStateSync(nextStudyStats = studyStatsRef.current, nextDailyGoal = dailyStudyGoalRef.current) {
-    if (!storageReady || !sessionRef.current?.user?.id || !supabase || !cloudUserStateReadyRef.current) {
+    const userId = sessionRef.current?.user?.id;
+    if (!storageReady || launchVisible || !cloudSyncReadyRef.current || !userId || !supabase || !cloudUserStateReadyRef.current) {
       return;
     }
 
     clearTimeout(cloudUserStateSyncTimerRef.current);
     cloudUserStateSyncTimerRef.current = setTimeout(() => {
+      if (sessionRef.current?.user?.id !== userId) return;
       void persistCloudUserState(nextStudyStats, nextDailyGoal).catch((error) => {
-        if (!isCloudUserStateSchemaError(error)) {
+        if (sessionRef.current?.user?.id === userId && !isCloudUserStateSchemaError(error)) {
           setTranslatedNote("notes.cloudLocalOnly");
         }
       });
@@ -2427,6 +2382,7 @@ function AppContent() {
   const savePairs = async (nextPairs) => {
     const sorted = sortPairs(nextPairs.map(normalizePairFolder));
 
+    dataRevisionRef.current += 1;
     pairsRef.current = sorted;
     setPairs(sorted);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
@@ -2435,12 +2391,14 @@ function AppContent() {
   const saveFolders = async (nextFolders) => {
     const normalized = normalizeFolders(nextFolders);
 
+    dataRevisionRef.current += 1;
     foldersRef.current = normalized;
     setFolders(normalized);
     await AsyncStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(normalized));
   };
 
   const updateStudyStats = (nextStudyStats) => {
+    dataRevisionRef.current += 1;
     const syncedStudyStats = createPersistableStudyStats(nextStudyStats, pairsRef.current);
     studyStatsRef.current = syncedStudyStats;
     setStudyStats(syncedStudyStats);
@@ -2452,6 +2410,9 @@ function AppContent() {
     const emptyStudyStats = createEmptyStudyStats();
 
     clearTimeout(cloudUserStateSyncTimerRef.current);
+    dataRevisionRef.current += 1;
+    cloudSyncReadyRef.current = false;
+    setSyncing(false);
     cloudUserStateReadyRef.current = false;
     cloudFoldersReadyRef.current = false;
     pairsRef.current = [];
@@ -2656,25 +2617,6 @@ function AppContent() {
     closeFolderStyleEditor();
   };
 
-  const createCardExportRows = () =>
-    pairsRef.current.map((pair, index) => {
-      const summary = getPairStudySummary(studyStatsRef.current, pair);
-
-      return {
-        No: index + 1,
-        Folder: getFolderLabel(pair.folderId),
-        Front: pair.left,
-        Back: pair.right,
-        Attempts: summary.attempts,
-        Correct: summary.correct,
-        Incorrect: summary.incorrect,
-        AccuracyPercent: summary.accuracy ?? "",
-        Hidden: summary.hidden ? "Y" : "N",
-        CreatedAt: pair.createdAt ?? "",
-        UpdatedAt: pair.updatedAt ?? "",
-      };
-    });
-
   const saveExportFile = async ({ fileName, mimeType, contents, encoding }) => {
     if (Platform.OS === "android" && StorageAccessFramework?.requestDirectoryPermissionsAsync) {
       const permission = await StorageAccessFramework.requestDirectoryPermissionsAsync();
@@ -2714,7 +2656,11 @@ function AppContent() {
     setExportingCards(true);
 
     try {
-      const rows = createCardExportRows();
+      const rows = createCardExportRows(
+        pairsRef.current,
+        getFolderLabel,
+        (pair) => getPairStudySummary(studyStatsRef.current, pair)
+      );
       const worksheet = XLSX.utils.json_to_sheet(rows);
       const timestamp = createExportTimestamp();
       const isExcel = format === "xlsx";
@@ -2751,6 +2697,8 @@ function AppContent() {
   };
 
   const createFolderInCurrentLocation = async (parentId) => {
+    const userId = sessionRef.current?.user?.id ?? null;
+    const isCurrentAccount = () => (sessionRef.current?.user?.id ?? null) === userId;
     const name = folderNameDraft.trim();
     const normalizedParentId = normalizeFolderId(parentId);
 
@@ -2759,7 +2707,7 @@ function AppContent() {
       return;
     }
 
-    const duplicateExists = folders.some(
+    const duplicateExists = foldersRef.current.some(
       (folder) =>
         normalizeFolderId(folder.parentId) === normalizedParentId &&
         folder.name.localeCompare(name, language, { sensitivity: "base" }) === 0
@@ -2770,27 +2718,30 @@ function AppContent() {
       return;
     }
 
+    dataRevisionRef.current += 1;
     let nextFolder = createLocalFolder(name, normalizedParentId);
 
-    if (session?.user?.id && supabase && cloudFoldersReadyRef.current) {
+    if (userId && supabase && cloudFoldersReadyRef.current) {
       try {
         const response = await supabase
           .from("memory_folders")
           .insert({
             id: nextFolder.id,
-            user_id: session.user.id,
+            user_id: userId,
             parent_id: normalizedParentId,
             name,
           })
           .select()
           .single();
 
+        if (!isCurrentAccount()) return;
         if (response.error) {
           throw response.error;
         }
 
         nextFolder = mapFolderRecord(response.data);
       } catch (error) {
+        if (!isCurrentAccount()) return;
         if (!isCloudFolderSchemaError(error)) {
           Alert.alert(t("folders.createFailTitle"), t("common.retryLater"));
           return;
@@ -2801,7 +2752,9 @@ function AppContent() {
       }
     }
 
+    if (!isCurrentAccount()) return;
     await saveFolders([...foldersRef.current, nextFolder]);
+    if (!isCurrentAccount()) return;
     setFolderNameDraft("");
     setCreatingFolderKey(null);
     setFolderActionMenuKey(null);
@@ -2878,6 +2831,8 @@ function AppContent() {
   };
 
   const saveFolderRename = async (folderId) => {
+    const userId = sessionRef.current?.user?.id ?? null;
+    const isCurrentAccount = () => (sessionRef.current?.user?.id ?? null) === userId;
     const targetFolder = foldersRef.current.find((folder) => folder.id === folderId);
     const name = folderRenameDraft.trim();
 
@@ -2902,28 +2857,31 @@ function AppContent() {
       return;
     }
 
+    dataRevisionRef.current += 1;
     let renamedFolder = {
       ...targetFolder,
       name,
       updatedAt: new Date().toISOString(),
     };
 
-    if (session?.user?.id && supabase && cloudFoldersReadyRef.current) {
+    if (userId && supabase && cloudFoldersReadyRef.current) {
       try {
         const response = await supabase
           .from("memory_folders")
           .update({ name })
           .eq("id", targetFolder.id)
-          .eq("user_id", session.user.id)
+          .eq("user_id", userId)
           .select()
           .single();
 
+        if (!isCurrentAccount()) return;
         if (response.error) {
           throw response.error;
         }
 
         renamedFolder = mapFolderRecord(response.data);
       } catch (error) {
+        if (!isCurrentAccount()) return;
         if (!isCloudFolderSchemaError(error)) {
           Alert.alert(t("folders.renameFailTitle"), t("common.retryLater"));
           return;
@@ -2934,14 +2892,18 @@ function AppContent() {
       }
     }
 
+    if (!isCurrentAccount()) return;
     await saveFolders(
       foldersRef.current.map((folder) => (folder.id === targetFolder.id ? renamedFolder : folder))
     );
+    if (!isCurrentAccount()) return;
     setFolderActionMenuKey(null);
     cancelFolderRename();
   };
 
   const deleteFolder = async (folderId) => {
+    const userId = sessionRef.current?.user?.id ?? null;
+    const isCurrentAccount = () => (sessionRef.current?.user?.id ?? null) === userId;
     const targetFolder = foldersRef.current.find((folder) => folder.id === folderId);
 
     if (!targetFolder || targetFolder.id === ROOT_FOLDER_ID) {
@@ -2956,15 +2918,10 @@ function AppContent() {
     ).length;
 
     const commitDelete = async () => {
-      const now = new Date().toISOString();
-      const nextPairs = pairsRef.current.map((pair) =>
-        subtreeIds.has(normalizeFolderId(pair.folderId))
-          ? { ...pair, folderId: parentFolderId, updatedAt: now }
-          : pair
-      );
-      const nextFolders = foldersRef.current.filter((folder) => !subtreeIds.has(folder.id));
+      if (!isCurrentAccount()) return;
+      dataRevisionRef.current += 1;
 
-      if (session?.user?.id && supabase && cloudFoldersReadyRef.current) {
+      if (userId && supabase && cloudFoldersReadyRef.current) {
         try {
           const movedCloudPairIds = pairsRef.current
             .filter((pair) => pair.source === "cloud" && subtreeIds.has(normalizeFolderId(pair.folderId)))
@@ -2975,8 +2932,9 @@ function AppContent() {
               .from("memory_pairs")
               .update({ folder_id: parentFolderId })
               .in("id", movedCloudPairIds)
-              .eq("user_id", session.user.id);
+              .eq("user_id", userId);
 
+            if (!isCurrentAccount()) return;
             if (movedResponse.error) {
               throw movedResponse.error;
             }
@@ -2986,12 +2944,14 @@ function AppContent() {
             .from("memory_folders")
             .delete()
             .in("id", idsToDelete)
-            .eq("user_id", session.user.id);
+            .eq("user_id", userId);
 
+          if (!isCurrentAccount()) return;
           if (deleteResponse.error) {
             throw deleteResponse.error;
           }
         } catch (error) {
+          if (!isCurrentAccount()) return;
           if (!isCloudFolderSchemaError(error)) {
             Alert.alert(t("folders.deleteFailTitle"), t("common.retryLater"));
             return;
@@ -3002,9 +2962,28 @@ function AppContent() {
         }
       }
 
-      await savePairs(nextPairs);
-      await saveFolders(nextFolders);
-      await updateStudyStats(removeFolderStyles(studyStatsRef.current, idsToDelete));
+      if (!isCurrentAccount()) return;
+      const now = new Date().toISOString();
+      const nextPairs = pairsRef.current.map((pair) =>
+        subtreeIds.has(normalizeFolderId(pair.folderId))
+          ? { ...pair, folderId: parentFolderId, updatedAt: now }
+          : pair
+      );
+      const nextFolders = foldersRef.current.filter((folder) => !subtreeIds.has(folder.id));
+
+      let migratedStats = studyStatsRef.current;
+      for (const previousPair of pairsRef.current) {
+        const nextPair = nextPairs.find((pair) => pair.id === previousPair.id);
+        if (nextPair && previousPair.folderId !== nextPair.folderId) {
+          migratedStats = migrateStudyStatsEntry(migratedStats, previousPair, nextPair);
+        }
+      }
+      await Promise.all([
+        savePairs(nextPairs),
+        saveFolders(nextFolders),
+        updateStudyStats(removeFolderStyles(migratedStats, idsToDelete)),
+      ]);
+      if (!isCurrentAccount()) return;
       setSaveFolderId((currentFolderId) =>
         subtreeIds.has(normalizeFolderId(currentFolderId)) ? parentFolderId : currentFolderId
       );
@@ -3122,58 +3101,70 @@ function AppContent() {
     return true;
   };
 
-  const saveEntryBatch = async (entries, options = {}) => {
-    const { uniqueEntries, skippedDuplicates, existingPairs } = prepareEntryBatch(entries, options);
+  const saveEntryBatch = (entries, options = {}) => {
+    const userId = sessionRef.current?.user?.id ?? null;
+    const save = async () => {
+      if ((sessionRef.current?.user?.id ?? null) !== userId) {
+        throw new Error("Account changed before saving cards");
+      }
+      dataRevisionRef.current += 1;
+      const { uniqueEntries, skippedDuplicates } = prepareEntryBatch(entries, options);
 
-    if (!uniqueEntries.length) {
-      return { savedCount: 0, skippedDuplicates, cloudSaved: false, savedPairs: [] };
-    }
+      if (!uniqueEntries.length) {
+        return { savedCount: 0, skippedDuplicates, cloudSaved: false, savedPairs: [] };
+      }
 
-    let savedPairs = uniqueEntries.map((entry) => createLocalPair(entry.left, entry.right, { folderId: entry.folderId }));
-    let cloudSaved = false;
+      let savedPairs = uniqueEntries.map((entry) => createLocalPair(entry.left, entry.right, { folderId: entry.folderId }));
+      let cloudSaved = false;
 
-    if (session?.user?.id && supabase) {
-      try {
-        const rows = uniqueEntries.map((entry) => {
-          const row = {
-            user_id: session.user.id,
-            prompt_a: entry.left,
-            prompt_b: entry.right,
-          };
+      if (userId && supabase && cloudSyncReadyRef.current) {
+        try {
+          const rows = uniqueEntries.map((entry) => {
+            const row = {
+              user_id: userId,
+              prompt_a: entry.left,
+              prompt_b: entry.right,
+            };
 
-          if (cloudFoldersReadyRef.current) {
-            row.folder_id = normalizeFolderId(entry.folderId);
+            if (cloudFoldersReadyRef.current) {
+              row.folder_id = normalizeFolderId(entry.folderId);
+            }
+
+            return row;
+          });
+          const inserted = await supabase
+            .from("memory_pairs")
+            .insert(rows)
+            .select();
+
+          if (inserted.error) {
+            throw inserted.error;
           }
 
-          return row;
-        });
-        const inserted = await supabase
-          .from("memory_pairs")
-          .insert(rows)
-          .select();
-
-        if (inserted.error) {
-          throw inserted.error;
+          const cloudPairs = (inserted.data ?? []).map(mapPairRecord);
+          // Preserve pending cards if the server caps returned insert rows.
+          savedPairs = mergePairsBySignature(savedPairs, cloudPairs);
+          cloudSaved = cloudPairs.length === uniqueEntries.length;
+        } catch {
+          setTranslatedNote("notes.cloudLocalOnly");
         }
-
-        savedPairs = (inserted.data ?? []).map((record, index) => ({
-          ...mapPairRecord(record),
-          folderId: normalizeFolderId(uniqueEntries[index]?.folderId),
-        }));
-        cloudSaved = true;
-      } catch {
-        setTranslatedNote("notes.cloudLocalOnly");
       }
-    }
 
-    await savePairs([...savedPairs, ...existingPairs]);
+      if ((sessionRef.current?.user?.id ?? null) !== userId) {
+        throw new Error("Account changed while saving cards");
+      }
+      await savePairs(mergePairsBySignature(pairsRef.current, savedPairs));
 
-    return {
-      savedCount: savedPairs.length,
-      skippedDuplicates,
-      cloudSaved,
-      savedPairs,
+      return {
+        savedCount: savedPairs.length,
+        skippedDuplicates,
+        cloudSaved,
+        savedPairs,
+      };
     };
+    const pending = cardWriteQueueRef.current.catch(() => {}).then(save);
+    cardWriteQueueRef.current = pending;
+    return pending;
   };
 
   const prepareEntryBatch = (entries, options = {}) => {
@@ -3298,18 +3289,20 @@ function AppContent() {
 
       let entries = [];
       let invalidEntryIndexes = [];
+      let truncated = false;
+      let isMemoriaExport = false;
 
       if (extension === "txt") {
         const text = await importedFile.text();
         ({ entries, invalidEntryIndexes } = parseImportedPairs(text));
       } else if (extension === "csv") {
         const text = await importedFile.text();
-        ({ entries, invalidEntryIndexes } = parseSpreadsheetPairsFromText(text));
+        ({ entries, invalidEntryIndexes, truncated, isMemoriaExport } = parseSpreadsheetPairsFromText(text));
       } else if (extension === "xls" || extension === "xlsx") {
         const base64 = await readAsStringAsync(asset.uri, {
           encoding: EncodingType.Base64,
         });
-        ({ entries, invalidEntryIndexes } = parseSpreadsheetPairsFromBase64(base64));
+        ({ entries, invalidEntryIndexes, truncated, isMemoriaExport } = parseSpreadsheetPairsFromBase64(base64));
       } else if (extension === "docx") {
         const base64 = await readAsStringAsync(asset.uri, {
           encoding: EncodingType.Base64,
@@ -3329,16 +3322,17 @@ function AppContent() {
         invalidEntryIndexes.length +
         Math.max(0, parsedEntryCount - IMPORT_CARD_MAX_COUNT) +
         (boundedEntries.length - validEntries.length);
-      const importLimitApplied = parsedEntryCount > IMPORT_CARD_MAX_COUNT;
+      const importLimitApplied = truncated || parsedEntryCount > IMPORT_CARD_MAX_COUNT;
 
       entries = validEntries;
 
       if (!entries.length) {
         Alert.alert(
           t("alerts.importNoCardsTitle"),
-          invalidCount
-            ? t("alerts.importNoCardsBody")
-            : t("alerts.importEmptyFile")
+          [
+            invalidCount ? t("alerts.importNoCardsBody") : t("alerts.importEmptyFile"),
+            importLimitApplied ? t("alerts.importLimitApplied", { count: IMPORT_CARD_MAX_COUNT }) : "",
+          ].filter(Boolean).join(" ")
         );
         return;
       }
@@ -3352,6 +3346,7 @@ function AppContent() {
         entries,
         invalidCount,
         importLimitApplied,
+        isMemoriaExport,
         targetFolderId,
         uniqueEntries: preview.uniqueEntries,
         skippedDuplicates: preview.skippedDuplicates,
@@ -3428,13 +3423,7 @@ function AppContent() {
     }
   };
 
-  const normalizeQuizCountInput = () => {
-    if (!maxQuizCount) {
-      return;
-    }
 
-    setQuizCountInput(`${resolvedQuizCount}`);
-  };
 
   const beginQuizRound = (nextDeck, options = {}) => {
     clearTimeout(timerRef.current);
@@ -3476,6 +3465,8 @@ function AppContent() {
         correctCount: deck.length - incorrectCards.length,
         incorrectCount: incorrectCards.length,
         incorrectCards: incorrectCards.map((card) => ({
+          pairId: card.pairId,
+          folderId: card.folderId,
           signature: card.signature,
           left: card.left,
           right: card.right,
@@ -3486,6 +3477,7 @@ function AppContent() {
     );
 
     updateStudyStats(nextStudyStats);
+    roundSnapshotRef.current = null;
     roundMetaRef.current = null;
     setRoundComplete(true);
   };
@@ -3823,16 +3815,18 @@ function AppContent() {
 
     sessions.forEach((sessionItem) => {
       (sessionItem?.incorrectCards ?? []).forEach((card, index) => {
-        const currentPair = pairsRef.current.find((pair) => createSignature(pair.left, pair.right) === card.signature);
-        const left = currentPair?.left ?? card.left;
-        const right = currentPair?.right ?? card.right;
+        const currentPair = resolveStudyPair(card, pairsRef.current);
+        if (!currentPair || isPairHidden(studyStatsRef.current, currentPair)) {
+          return;
+        }
+        const { left, right } = currentPair;
         const direction = card.direction === "B_TO_A" ? "B_TO_A" : "A_TO_B";
 
         if (!left || !right || (currentPair && isPairHidden(studyStatsRef.current, currentPair))) {
           return;
         }
 
-        const signature = createSignature(left, right);
+        const signature = createStudySignature(currentPair);
         const retryKey = `${signature}:${direction}`;
 
         if (retryDeckMap.has(retryKey)) {
@@ -3841,7 +3835,8 @@ function AppContent() {
 
         retryDeckMap.set(retryKey, {
           id: `${deckIdPrefix}-${sessionItem.id}-${index}-${direction}`,
-          pairId: currentPair?.id ?? `${deckIdPrefix}-${sessionItem.id}-${index}`,
+          pairId: currentPair.id,
+          folderId: currentPair.folderId,
           left,
           right,
           signature,
@@ -3964,7 +3959,7 @@ function AppContent() {
   };
 
   const submitAnswer = () => {
-    if (!current) {
+    if (!current || result === "correct" || result === "incorrect") {
       return;
     }
 
@@ -3992,7 +3987,9 @@ function AppContent() {
   };
 
   const saveEdit = async () => {
-    const target = pairs.find((pair) => pair.id === editingId);
+    const userId = sessionRef.current?.user?.id ?? null;
+    const isCurrentAccount = () => (sessionRef.current?.user?.id ?? null) === userId;
+    const target = pairsRef.current.find((pair) => pair.id === editingId);
 
     if (!target || !editingLeft.trim() || !editingRight.trim()) {
       return;
@@ -4000,7 +3997,7 @@ function AppContent() {
 
     const nextFolderId = normalizeFolderId(editingFolderId);
     const nextSignature = createFolderScopedSignature(editingLeft.trim(), editingRight.trim(), nextFolderId);
-    const duplicateExists = pairs.some(
+    const duplicateExists = pairsRef.current.some(
       (pair) =>
         pair.id !== target.id &&
         createFolderScopedSignature(pair.left, pair.right, pair.folderId) === nextSignature
@@ -4011,12 +4008,13 @@ function AppContent() {
       return;
     }
 
+    dataRevisionRef.current += 1;
     let updated = {
       ...updatePairValues(target, editingLeft, editingRight),
       folderId: nextFolderId,
     };
 
-    if (session?.user?.id && supabase && target.source === "cloud") {
+    if (userId && supabase && target.source === "cloud") {
       const changes = {
         prompt_a: editingLeft.trim(),
         prompt_b: editingRight.trim(),
@@ -4030,10 +4028,11 @@ function AppContent() {
         .from("memory_pairs")
         .update(changes)
         .eq("id", target.id)
-        .eq("user_id", session.user.id)
+        .eq("user_id", userId)
         .select()
         .single();
 
+      if (!isCurrentAccount()) return;
       if (response.error) {
         if (!isCloudFolderSchemaError(response.error)) {
           Alert.alert(t("manage.editFail"), t("common.retryLater"));
@@ -4050,8 +4049,13 @@ function AppContent() {
       }
     }
 
-    await savePairs(pairs.map((pair) => (pair.id === target.id ? updated : pair)));
-    updateStudyStats(migrateStudyStatsEntry(studyStatsRef.current, target, updated));
+    if (!isCurrentAccount()) return;
+    const migratedStats = migrateStudyStatsEntry(studyStatsRef.current, target, updated);
+    await Promise.all([
+      savePairs(pairsRef.current.map((pair) => (pair.id === target.id ? updated : pair))),
+      updateStudyStats(migratedStats),
+    ]);
+    if (!isCurrentAccount()) return;
     setEditingId(null);
     setEditingLeft("");
     setEditingRight("");
@@ -4059,20 +4063,26 @@ function AppContent() {
   };
 
   const removePair = async (pair) => {
-    if (session?.user?.id && supabase && pair.source === "cloud") {
+    const userId = sessionRef.current?.user?.id ?? null;
+    const isCurrentAccount = () => (sessionRef.current?.user?.id ?? null) === userId;
+    dataRevisionRef.current += 1;
+    if (userId && supabase && pair.source === "cloud") {
       const response = await supabase
         .from("memory_pairs")
         .delete()
         .eq("id", pair.id)
-        .eq("user_id", session.user.id);
+        .eq("user_id", userId);
 
+      if (!isCurrentAccount()) return;
       if (response.error) {
         Alert.alert(t("manage.deleteFail"), t("common.retryLater"));
         return;
       }
     }
 
-    await savePairs(pairs.filter((item) => item.id !== pair.id));
+    if (!isCurrentAccount()) return;
+    await savePairs(pairsRef.current.filter((item) => item.id !== pair.id));
+    if (!isCurrentAccount()) return;
     setSelectedManagePairIds((currentIds) => currentIds.filter((id) => id !== pair.id));
   };
 
@@ -4084,6 +4094,8 @@ function AppContent() {
   };
 
   const deleteSelectedManagePairs = async () => {
+    const userId = sessionRef.current?.user?.id ?? null;
+    const isCurrentAccount = () => (sessionRef.current?.user?.id ?? null) === userId;
     const selectedIds = new Set(selectedManagePairIds);
     const selectedPairs = pairsRef.current.filter((pair) => selectedIds.has(pair.id));
 
@@ -4092,24 +4104,28 @@ function AppContent() {
       return;
     }
 
+    dataRevisionRef.current += 1;
     const cloudPairIds = selectedPairs
       .filter((pair) => pair.source === "cloud")
       .map((pair) => pair.id);
 
-    if (session?.user?.id && supabase && cloudPairIds.length) {
+    if (userId && supabase && cloudPairIds.length) {
       const response = await supabase
         .from("memory_pairs")
         .delete()
         .in("id", cloudPairIds)
-        .eq("user_id", session.user.id);
+        .eq("user_id", userId);
 
+      if (!isCurrentAccount()) return;
       if (response.error) {
         Alert.alert(t("manage.deleteFail"), t("common.retryLater"));
         return;
       }
     }
 
+    if (!isCurrentAccount()) return;
     await savePairs(pairsRef.current.filter((pair) => !selectedIds.has(pair.id)));
+    if (!isCurrentAccount()) return;
     setSelectedManagePairIds([]);
     setManageSelectionMode(false);
     setOpenManageSwipeId(null);
@@ -4816,7 +4832,7 @@ function AppContent() {
           </View>
 
           <Pressable
-            onPress={() => void saveCard()}
+            onPress={() => void saveCard().catch(() => Alert.alert(t("alerts.saveFailedTitle"), t("common.retryLater")))}
             style={({ pressed }) => [styles.primaryButton, styles.savePrimaryButton, pressed && styles.pressed]}
           >
             <Text style={styles.primaryButtonText}>{t("save.saveButton")}</Text>
@@ -5177,6 +5193,7 @@ function AppContent() {
       dailyStudyGoal
     );
 
+    dataRevisionRef.current += 1;
     dailyStudyGoalRef.current = nextGoal;
     setDailyStudyGoal(nextGoal);
     setDailyGoalInput(`${nextGoal}`);
@@ -5248,6 +5265,14 @@ function AppContent() {
               {t("alerts.importPreviewBody", { fileName: importPreview.fileName })}
             </Text>
 
+            {importPreview.isMemoriaExport ? (
+              <Text style={styles.focusModalBody}>{t("alerts.importExportContentsOnly")}</Text>
+            ) : null}
+            {importPreview.importLimitApplied ? (
+              <Text style={styles.focusModalBody}>
+                {t("alerts.importLimitApplied", { count: IMPORT_CARD_MAX_COUNT })}
+              </Text>
+            ) : null}
             <ScrollView
               style={styles.importConfirmScroll}
               contentContainerStyle={styles.importConfirmScrollContent}
@@ -7091,7 +7116,29 @@ function AppContent() {
               ) : null}
             </View>
           </View>
+          <View style={styles.syncActions}>
+          {session?.user ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("about.syncNow")}
+              accessibilityState={{ disabled: syncing || authBusy, busy: syncing }}
+              disabled={syncing || authBusy}
+              onPress={() => {
+                setSyncing(true);
+                setSyncRequest((value) => value + 1);
+              }}
+              style={({ pressed }) => [
+                styles.syncButton,
+                (syncing || authBusy) && styles.syncButtonMuted,
+                pressed && styles.pressed,
+              ]}
+            >
+              <MaterialCommunityIcons name="sync" size={20} color={theme.accentText} />
+              <Text style={styles.syncButtonText}>{t("about.syncNow")}</Text>
+            </Pressable>
+          ) : null}
           <Pressable
+            accessibilityRole="button"
             disabled={authBusy || !authReady}
             onPress={session?.user ? signOut : login}
             style={({ pressed }) => [
@@ -7117,6 +7164,7 @@ function AppContent() {
                     : t("about.authGoogle")}
             </Text>
           </Pressable>
+          </View>
         </View>
 
         {session?.user ? (
@@ -7686,7 +7734,6 @@ function AppContent() {
           targetRect={tutorialTargetRect}
           tabBarWidth={tabBarWidth}
           tabBarLeft={tabBarLeft}
-          onClose={() => closeTutorial()}
           onNext={advanceTutorial}
           onSaveDemo={saveTutorialCard}
         />
@@ -7805,10 +7852,8 @@ function TutorialCoach({
   styles,
   theme,
   t,
-  onClose,
   onNext,
   onSaveDemo,
-  onTargetTabPress,
   maxWidth,
   screenWidth,
   screenHeight,
@@ -8762,11 +8807,7 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
-  folderActionWrap: {
-    position: "relative",
-    zIndex: 40,
-    alignItems: "flex-end",
-  },
+
   folderActionButton: {
     width: 38,
     minHeight: 34,
@@ -8784,23 +8825,7 @@ const createStyles = (theme) => StyleSheet.create({
   folderCollapseButton: {
     backgroundColor: theme.surface,
   },
-  folderActionMenu: {
-    position: "absolute",
-    top: 42,
-    right: 0,
-    width: 184,
-    zIndex: 60,
-    elevation: 10,
-    overflow: "hidden",
-    borderRadius: 16,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-    shadowColor: theme.textPrimary,
-    shadowOpacity: theme.mode === "dark" ? 0.2 : 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-  },
+
   folderActionMenuItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -8829,22 +8854,8 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "800",
     color: theme.textPrimary,
   },
-  folderUpButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    minHeight: 34,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    backgroundColor: theme.accentSoft,
-    borderWidth: 1,
-    borderColor: theme.accent,
-  },
-  folderUpButtonText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: theme.accent,
-  },
+
+
   folderBreadcrumbRow: {
     alignItems: "center",
     gap: 6,
@@ -9018,10 +9029,7 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  folderChildCopy: {
-    flex: 1,
-    gap: 2,
-  },
+
   folderChildName: {
     width: "100%",
     minHeight: 20,
@@ -9083,89 +9091,18 @@ const createStyles = (theme) => StyleSheet.create({
     textAlign: "center",
     color: theme.textSecondary,
   },
-  folderCreateRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  folderCreateInput: {
-    flex: 1,
-    minHeight: 46,
-    paddingVertical: 11,
-  },
-  folderCreateButton: {
-    width: 48,
-    minHeight: 46,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.accent,
-  },
-  folderManageBox: {
-    gap: 8,
-    padding: 10,
-    borderRadius: 18,
-    backgroundColor: theme.surfaceSoft,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
-  folderRenameInput: {
-    minHeight: 44,
-    paddingVertical: 10,
-  },
-  folderManageActionRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  folderSmallPrimaryButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 5,
-    minHeight: 36,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    backgroundColor: theme.accent,
-  },
-  folderSmallPrimaryText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: theme.accentText,
-  },
-  folderSmallSecondaryButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 5,
-    minHeight: 36,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
-  folderSmallSecondaryText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: theme.textPrimary,
-  },
-  folderSmallDangerButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 5,
-    minHeight: 36,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    backgroundColor: theme.dangerBgSoft,
-    borderWidth: 1,
-    borderColor: theme.dangerBgSoft,
-  },
-  folderSmallDangerText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: theme.danger,
-  },
+
+
+
+
+
+
+
+
+
+
+
+
   folderPickerRow: {
     gap: 8,
     paddingRight: 8,
@@ -9287,25 +9224,12 @@ const createStyles = (theme) => StyleSheet.create({
     flexDirection: "row",
     gap: 10,
   },
-  heroStrip: {
-    paddingTop: 8,
-    gap: 4,
-  },
-  heroEyebrow: {
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    color: theme.accent,
-  },
-  heroMeta: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: theme.textMuted,
-  },
+
+
+
   syncStrip: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: "column",
+    alignItems: "stretch",
     gap: 12,
     padding: 14,
     borderRadius: 22,
@@ -9313,8 +9237,11 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
+  syncActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
   syncLead: {
-    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
@@ -9341,6 +9268,11 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textSecondary,
   },
   syncButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -9650,17 +9582,8 @@ const createStyles = (theme) => StyleSheet.create({
   importPreviewLineBlank: {
     color: "transparent",
   },
-  importPreviewFooter: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  importPreviewHint: {
-    flex: 1,
-    fontSize: 12,
-    lineHeight: 18,
-    color: theme.textSecondary,
-  },
+
+
   importButton: {
     alignItems: "center",
     justifyContent: "center",
@@ -9677,21 +9600,8 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "800",
     color: theme.accentText,
   },
-  dangerButton: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 18,
-    paddingVertical: 15,
-    backgroundColor: theme.dangerBg,
-    borderWidth: 1,
-    borderColor: theme.dangerBgSoft,
-  },
-  dangerButtonText: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: theme.danger,
-  },
+
+
   pressed: {
     opacity: 0.88,
   },
@@ -9712,22 +9622,21 @@ const createStyles = (theme) => StyleSheet.create({
   manageListHeader: {
     position: "relative",
     zIndex: 30,
-    flexDirection: "row",
-    alignItems: "flex-start",
+    flexDirection: "column",
+    alignItems: "stretch",
     justifyContent: "space-between",
     gap: 12,
     paddingHorizontal: 4,
     paddingBottom: 12,
   },
   manageListHeaderText: {
-    flex: 1,
     minWidth: 0,
     gap: 4,
   },
   manageListHeaderActions: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "flex-end",
+    justifyContent: "flex-start",
     gap: 8,
   },
   manageSortControl: {
@@ -9883,15 +9792,14 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.textSecondary,
   },
   manageBulkBar: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: "column",
+    alignItems: "stretch",
     justifyContent: "space-between",
     gap: 10,
     paddingHorizontal: 4,
     paddingVertical: 10,
   },
   manageBulkCopy: {
-    flex: 1,
     minWidth: 0,
     gap: 2,
   },
@@ -9909,7 +9817,7 @@ const createStyles = (theme) => StyleSheet.create({
   manageBulkActions: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "flex-end",
+    justifyContent: "flex-start",
     gap: 6,
   },
   manageBulkButton: {
@@ -9964,53 +9872,15 @@ const createStyles = (theme) => StyleSheet.create({
     lineHeight: 20,
     color: theme.textSecondary,
   },
-  inlineLink: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: theme.surfaceMuted,
-  },
-  inlineLinkText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: theme.textSoft,
-  },
-  libraryList: {
-    gap: 10,
-  },
-  previewRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 18,
-    backgroundColor: theme.surface,
-  },
-  previewRowLarge: {
-    paddingVertical: 10,
-  },
-  previewColumn: {
-    flex: 1,
-    gap: 4,
-  },
-  previewLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.7,
-    textTransform: "uppercase",
-    color: theme.textSecondary,
-  },
-  previewText: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: theme.textPrimary,
-  },
-  previewDivider: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: theme.accent,
-  },
+
+
+
+
+
+
+
+
+
   emptyPanel: {
     alignItems: "flex-start",
     gap: 12,
@@ -10043,131 +9913,32 @@ const createStyles = (theme) => StyleSheet.create({
     alignSelf: "stretch",
     marginTop: 4,
   },
-  quizPanel: {
-    gap: 14,
-    padding: 18,
-    borderRadius: 28,
-    backgroundColor: theme.surfaceStrong,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-  },
-  quizHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  quizHeaderContent: {
-    flex: 1,
-    minWidth: 0,
-  },
-  quizModeCard: {
-    gap: 12,
-    padding: 16,
-    borderRadius: 20,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
-  quizModeCardEmbedded: {
-    backgroundColor: theme.surfaceCard,
-  },
-  quizModeRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  quizModeChip: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 42,
-    borderRadius: 16,
-    backgroundColor: theme.surfaceMuted,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-  },
-  quizModeChipActive: {
-    backgroundColor: theme.accent,
-    borderColor: theme.accent,
-  },
-  quizModeChipText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: theme.textStrong,
-  },
-  quizModeChipTextActive: {
-    color: theme.accentText,
-  },
+
+
+
+
+
+
+
+
+
+
   quizSetupLabel: {
     fontSize: 13,
     fontWeight: "800",
     color: theme.textStrong,
   },
-  quizSetupHint: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: theme.textSecondary,
-  },
-  quizCountCard: {
-    gap: 12,
-    padding: 16,
-    borderRadius: 20,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
-  quizCountCardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  quizCountCompactRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  quizCountCompactInput: {
-    width: 78,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-    backgroundColor: theme.surfaceMuted,
-    fontSize: 22,
-    fontWeight: "800",
-    textAlign: "center",
-    color: theme.textPrimary,
-  },
-  quizCountInputDisabled: {
-    color: theme.textMuted,
-  },
-  quizCountCompactCaption: {
-    fontSize: 12,
-    color: theme.textSecondary,
-  },
-  quizCountCompactHint: {
-    flex: 1,
-    fontSize: 13,
-    lineHeight: 20,
-    color: theme.textSecondary,
-  },
-  quizResetRow: {
-    alignItems: "flex-end",
-  },
-  quizStartButton: {
-    alignSelf: "flex-start",
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: theme.accent,
-  },
-  quizStartButtonText: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: theme.accentText,
-  },
+
+
+
+
+
+
+
+
+
+
+
   quizCard: {
     gap: 16,
     padding: 22,
@@ -10269,12 +10040,7 @@ const createStyles = (theme) => StyleSheet.create({
   quizResultTitleBad: {
     color: theme.danger,
   },
-  quizResultBody: {
-    marginTop: 2,
-    fontSize: 12,
-    lineHeight: 17,
-    color: theme.textSecondary,
-  },
+
   quizAnswerReviewCard: {
     gap: 10,
     padding: 14,
@@ -10344,36 +10110,11 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
-  quizReadyCard: {
-    gap: 16,
-    padding: 20,
-    borderRadius: 24,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-  },
-  quizReadyCardOffset: {
-    marginTop: 54,
-  },
-  quizReadyIconWrap: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.accentSoft,
-  },
-  quizReadyTitle: {
-    fontSize: 22,
-    lineHeight: 30,
-    fontWeight: "800",
-    color: theme.textPrimary,
-  },
-  quizReadyBody: {
-    fontSize: 14,
-    lineHeight: 22,
-    color: theme.textSecondary,
-  },
+
+
+
+
+
   quizReadyHero: {
     gap: 4,
     paddingHorizontal: 2,
@@ -10385,71 +10126,17 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "900",
     color: theme.textPrimary,
   },
-  quizScopeCard: {
-    gap: 12,
-    padding: 16,
-    borderRadius: 20,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-  },
-  quizScopeHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  quizScopeTitle: {
-    flex: 1,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "900",
-    color: theme.textPrimary,
-  },
-  quizScopeBody: {
-    fontSize: 12,
-    lineHeight: 18,
-    color: theme.textSecondary,
-  },
-  quizScopePathRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  quizScopePathText: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "800",
-    color: theme.textPrimary,
-  },
-  quizScopeStatsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    minHeight: 58,
-  },
-  quizScopeStat: {
-    flex: 1,
-    alignItems: "center",
-    gap: 4,
-  },
-  quizScopeDivider: {
-    width: 1,
-    height: 42,
-    backgroundColor: theme.surfaceBorderSoft,
-  },
-  quizScopeStatLabel: {
-    fontSize: 11,
-    lineHeight: 15,
-    color: theme.textSecondary,
-  },
-  quizScopeStatValue: {
-    fontSize: 20,
-    lineHeight: 26,
-    fontWeight: "900",
-    color: theme.textSecondary,
-  },
+
+
+
+
+
+
+
+
+
+
+
   quizCountPickerCard: {
     gap: 13,
     padding: 16,
@@ -10608,54 +10295,15 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "900",
     color: theme.textPrimary,
   },
-  quizReadyStats: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  quizReadyStat: {
-    flex: 1,
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 14,
-    borderRadius: 18,
-    backgroundColor: theme.surfaceCard,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
-  quizReadyStatEditable: {
-    backgroundColor: theme.accentSoft,
-    borderColor: theme.accent,
-  },
-  quizReadyStatValue: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: theme.textPrimary,
-  },
-  quizReadyStatInput: {
-    width: "100%",
-    paddingVertical: 0,
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "800",
-    textAlign: "center",
-    color: theme.textPrimary,
-  },
-  quizReadyStatInputEditable: {
-    color: theme.accent,
-  },
-  quizReadyStatLabel: {
-    fontSize: 12,
-    textAlign: "center",
-    color: theme.textSecondary,
-  },
-  quizReadyStatLabelEditable: {
-    color: theme.accent,
-    fontWeight: "800",
-  },
-  quizSummaryHeader: {
-    gap: 6,
-  },
+
+
+
+
+
+
+
+
+
   quizSummaryHero: {
     alignItems: "center",
     gap: 8,
@@ -10889,47 +10537,13 @@ const createStyles = (theme) => StyleSheet.create({
     textAlign: "center",
     color: theme.accentText,
   },
-  bulkMovePanel: {
-    gap: 12,
-    padding: 14,
-    borderRadius: 22,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-  },
-  bulkMoveHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  bulkMoveHeaderCopy: {
-    flex: 1,
-    gap: 4,
-  },
-  bulkMoveHeaderActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "flex-end",
-    gap: 8,
-  },
-  bulkMoveTitle: {
-    fontSize: 15,
-    lineHeight: 20,
-    fontWeight: "800",
-    color: theme.textPrimary,
-  },
-  bulkMoveBody: {
-    fontSize: 12,
-    lineHeight: 18,
-    color: theme.textSecondary,
-  },
-  manageCardMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-  },
+
+
+
+
+
+
+
   manageSelectButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -10945,30 +10559,10 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.accent,
     borderColor: theme.accent,
   },
-  manageSelectText: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: theme.textSecondary,
-  },
-  manageSelectTextActive: {
-    color: theme.accentText,
-  },
-  manageFolderBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "flex-start",
-    gap: 5,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: theme.accentSoft,
-  },
-  manageFolderBadgeText: {
-    maxWidth: 220,
-    fontSize: 11,
-    fontWeight: "800",
-    color: theme.accent,
-  },
+
+
+
+
   managePairInlineRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -11084,15 +10678,7 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "900",
     color: theme.accent,
   },
-  manageSideButton: {
-    flex: 0,
-    width: 80,
-    height: 44,
-    minHeight: 44,
-    paddingVertical: 0,
-    borderRadius: 13,
-    alignSelf: "stretch",
-  },
+
   aboutStack: {
     gap: 12,
   },
@@ -11125,10 +10711,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
-  manageSearchCard: {
-    zIndex: 20,
-    elevation: 4,
-  },
+
   settingsHeader: {
     gap: 6,
   },
@@ -11148,18 +10731,7 @@ const createStyles = (theme) => StyleSheet.create({
     flex: 1,
     gap: 6,
   },
-  settingsToggleStatus: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    overflow: "hidden",
-    backgroundColor: theme.accentSoft,
-    color: theme.accent,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "900",
-  },
+
   settingsTitle: {
     flexShrink: 1,
     fontSize: 15,
@@ -11188,75 +10760,16 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "900",
     color: theme.danger,
   },
-  compactSelectRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 12,
-    zIndex: 20,
-  },
-  compactSelectLabel: {
-    flex: 1,
-    paddingTop: 12,
-    fontSize: 15,
-    fontWeight: "800",
-    color: theme.textPrimary,
-  },
-  compactSelectWrap: {
-    width: 184,
-    position: "relative",
-    zIndex: 30,
-  },
-  compactSelectTrigger: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-    minHeight: 48,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    backgroundColor: theme.surfaceMuted,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-  },
-  compactSelectValue: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "700",
-    color: theme.textPrimary,
-  },
-  compactSelectMenu: {
-    position: "absolute",
-    top: 56,
-    left: 0,
-    right: 0,
-    zIndex: 40,
-    elevation: 10,
-    overflow: "hidden",
-    borderRadius: 18,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-  },
-  compactSelectOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-  },
-  compactSelectOptionActive: {
-    backgroundColor: theme.surfaceCard,
-  },
-  compactSelectOptionText: {
-    flex: 1,
-    fontSize: 14,
-    color: theme.textPrimary,
-  },
-  compactSelectOptionTextActive: {
-    fontWeight: "800",
-  },
+
+
+
+
+
+
+
+
+
+
   modeSwitchRow: {
     flexDirection: "row",
     gap: 0,
@@ -11323,14 +10836,7 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "800",
     color: theme.textSecondary,
   },
-  appSummaryCard: {
-    gap: 8,
-    padding: 18,
-    borderRadius: 24,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorder,
-  },
+
   inlineActionButton: {
     alignSelf: "flex-start",
     marginTop: 4,
@@ -11341,11 +10847,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorder,
   },
-  contactActionButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
+
   adminRoleBadge: {
     alignSelf: "flex-start",
     marginTop: 8,
@@ -11458,11 +10960,7 @@ const createStyles = (theme) => StyleSheet.create({
     gap: 10,
     paddingTop: 4,
   },
-  supportHistoryTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: theme.textPrimary,
-  },
+
   supportHistoryItem: {
     gap: 6,
     padding: 14,
@@ -12053,16 +11551,7 @@ const createStyles = (theme) => StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
   },
-  historyHelpButton: {
-    width: 28,
-    height: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 14,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
+
   historySummaryGrid: {
     flexDirection: "row",
     gap: 8,
@@ -12077,13 +11566,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.surfaceBorderSoft,
   },
-  historyMetricIcon: {
-    width: 24,
-    height: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 8,
-  },
+
   historyMetricValue: {
     fontSize: 24,
     fontWeight: "800",
@@ -12161,9 +11644,7 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "800",
     color: theme.accent,
   },
-  historyList: {
-    gap: 12,
-  },
+
   historyRecentTutorialTarget: {
     gap: 12,
     borderRadius: 26,
@@ -12324,23 +11805,10 @@ const createStyles = (theme) => StyleSheet.create({
     lineHeight: 18,
     color: theme.textSecondary,
   },
-  historyBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 999,
-    backgroundColor: theme.accentSoft,
-  },
-  historyBadgeBad: {
-    backgroundColor: theme.dangerBgSoft,
-  },
-  historyBadgeText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: theme.accent,
-  },
-  historyBadgeTextBad: {
-    color: theme.danger,
-  },
+
+
+
+
   historyRetryButton: {
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -12371,35 +11839,10 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "800",
     color: theme.textSecondary,
   },
-  historyMissedCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    padding: 12,
-    borderRadius: 18,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.surfaceBorderSoft,
-  },
-  historyMissedIcon: {
-    width: 28,
-    height: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 10,
-    backgroundColor: theme.accentSoft,
-  },
-  historyMissedPath: {
-    fontSize: 10,
-    lineHeight: 14,
-    fontWeight: "700",
-    color: theme.textSecondary,
-  },
-  historyChipText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: theme.textSecondary,
-  },
+
+
+
+
   historyEmptyText: {
     fontSize: 13,
     lineHeight: 20,
@@ -12653,143 +12096,26 @@ const createStyles = (theme) => StyleSheet.create({
     fontWeight: "800",
     color: theme.textMuted,
   },
-  tutorialTapArea: {
-    flex: 1,
-  },
-  tutorialScrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) + 34 : 54,
-    paddingBottom: 148,
-  },
-  tutorialHeader: {
-    gap: 10,
-    marginBottom: 30,
-  },
-  tutorialTitle: {
-    fontSize: 30,
-    fontWeight: "900",
-    color: theme.textPrimary,
-  },
-  tutorialCaption: {
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: "800",
-    color: theme.accent,
-  },
-  tutorialChat: {
-    gap: 16,
-  },
-  tutorialMessageRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    maxWidth: "92%",
-    paddingLeft: 18,
-  },
-  tutorialMessageRowUser: {
-    alignSelf: "flex-end",
-    justifyContent: "flex-end",
-  },
-  tutorialAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.accent,
-    borderWidth: 6,
-    borderColor: theme.surfaceStrong,
-  },
-  tutorialBubble: {
-    position: "relative",
-    maxWidth: "100%",
-    gap: 4,
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 22,
-    borderBottomRightRadius: 22,
-    borderBottomLeftRadius: 22,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.accentSoftStrong,
-    shadowColor: theme.textPrimary,
-    shadowOpacity: theme.mode === "dark" ? 0.22 : 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 2,
-  },
-  tutorialBubbleTail: {
-    position: "absolute",
-    left: -7,
-    top: 22,
-    width: 18,
-    height: 18,
-    borderBottomLeftRadius: 4,
-    backgroundColor: theme.surface,
-    borderLeftWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: theme.surfaceBorder,
-    transform: [{ rotate: "45deg" }],
-  },
-  tutorialBubbleUser: {
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 8,
-    backgroundColor: theme.accent,
-  },
-  tutorialBubbleTitle: {
-    fontSize: 15,
-    lineHeight: 21,
-    fontWeight: "800",
-    color: theme.textPrimary,
-  },
-  tutorialBubbleText: {
-    fontSize: 16,
-    lineHeight: 25,
-    fontWeight: "600",
-    color: theme.textStrong,
-  },
-  tutorialBubbleTextUser: {
-    color: theme.accentText,
-  },
-  tutorialTapHint: {
-    alignSelf: "flex-start",
-    marginLeft: 28,
-    marginTop: 2,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "800",
-    color: theme.textMuted,
-  },
-  tutorialBottomSheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: Platform.OS === "android" ? 42 : 0,
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: Platform.OS === "android" ? 20 : 28,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: Platform.OS === "android" ? 28 : 0,
-    borderBottomRightRadius: Platform.OS === "android" ? 28 : 0,
-    backgroundColor: theme.surface,
-    borderTopWidth: 1,
-    borderColor: theme.surfaceBorder,
-  },
-  tutorialActionRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  tutorialActionButton: {
-    minHeight: 64,
-    borderRadius: 18,
-    paddingHorizontal: 10,
-  },
-  tutorialChoiceText: {
-    textAlign: "center",
-    lineHeight: 20,
-  },
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   tutorialCoachLayer: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "flex-end",

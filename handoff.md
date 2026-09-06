@@ -1,6 +1,6 @@
 # MEMORIA / 메모리아 Handoff
 
-Last updated: 2026-07-27 KST
+Last updated: 2026-09-06 KST
 
 이 문서는 다음 채팅방에서 `D:\github\APP\memorize_app2` 프로젝트를 바로 이어받기 위한 최신 인수인계 문서다. 이전 `handoff.md`는 이 문서로 덮어썼다.
 
@@ -16,9 +16,9 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
 - GitHub 저장소: `https://github.com/youwon35/memorize_app2`
 - 기본 작업 브랜치: `develop`
 - 현재 출시 상태: 사용자가 Google Play 출시 완료를 확인함
-- 다음 유지보수 앱 표시 버전: `1.0.9`
-- `1.0.9`는 아직 production DB 마이그레이션과 새 AAB 배포 전인 로컬/`develop` 업데이트다.
-- 이 문서 작성 직전 최신 기능 커밋: `4ed8b75 feat: add card management tools`
+- 다음 유지보수 앱 표시 버전: `1.0.10`
+- 1.0.10은 로컬/develop 유지보수 업데이트다. 이번 작업에서 production DB 변경 및 AAB 배포는 하지 않았다.
+- 이번 리뷰 기준 커밋: fd3cd2f fix: harden post-release data handling. 최신 커밋은 develop 로그를 확인한다.
 - 현재 추적되지 않은 파일: `want.png`
   - 사용자가 둔 참고 이미지로 보인다.
   - 별도 요청 전에는 삭제, 이동, 스테이징, 커밋하지 말 것.
@@ -31,9 +31,24 @@ MEMORIA는 Expo SDK 54 / React Native 기반의 실제 모바일 암기 앱이�
   - 게스트 시작과 Google 계정 세션/로컬 캐시 분리
   - 로그아웃 시 Google 계정 로컬 카드 캐시 초기화
 
+## 2026-09-06 유지보수 1.0.10
+
+[전체 리뷰와 검증 기록](docs/review-2026-09-06.md)을 먼저 읽는다. 아래 이전 날짜별 내역은 당시 기록으로 보존한다.
+
+- 가져오기/내보내기 열 계약 수정, CSV 문자열과 DOCX 줄바꿈 보존, 읽기 상한 안내.
+- 폴더별 학습 통계·숨김 분리와 기존 기록 이전, 편집·이동 시 기록 보존.
+- 숫자·기호 채점, 완료 회차 보존, 중복 제출 및 초기 로드 실패 처리 보완.
+- cloud 전체 페이지 조회, 계정 전환·동시 저장·삭제 경합 보호, 학습 저장 직렬화.
+- 지금 동기화 버튼 추가. 모바일 보관함 제목과 버튼 줄바꿈 개선.
+- 미사용 스타일 138개와 보조 코드 정리. 내보내기와 cloud 조회 helper 분리.
+- 테스트 58개, Expo Doctor 18개, 번역/스타일 검사와 Android 번들 검증 완료. 브라우저에서 모바일·태블릿 화면과 숨김 재시작 복원 확인.
+- Expo Go SDK 54 실기기, 실제 Google 계정·다중 기기 sync·알림·계정 삭제 검증은 별도 수행한다.
+- Expo 54.0.37, expo-file-system 19.0.24로 SDK 54 권장 패치 반영. npm 감사 경고 22개는 리뷰 기록에 정리했다.
+- 운영 DB 적용, 새 APK/AAB 배포는 이번에 하지 않았다. want.png 보존.
+
 ## 3. 기술 스택
 
-- Expo: `~54.0.36`
+- Expo: `~54.0.37`
 - React Native: `0.81.5`
 - React: `19.1.0`
 - TypeScript: `~5.9.2`
@@ -75,11 +90,12 @@ npm run start:go
 검증:
 
 ```powershell
-npx tsc --noEmit
+npm test
+npm run typecheck
 git diff --check
 npx expo install --check
 npx expo-doctor
-npx expo export --platform android --output-dir .expo-export --clear
+npx expo export --platform android --output-dir .expo/review-android --max-workers 2
 ```
 
 빌드:
@@ -90,7 +106,7 @@ npm run build:preview
 npm run build:production
 ```
 
-주의: `.expo-export`는 검증 산출물이므로 커밋하지 말고 삭제한다.
+검증 산출물은 Git에서 제외된 .expo 아래에 둔다.
 
 ## 5. 주요 파일 구조
 
